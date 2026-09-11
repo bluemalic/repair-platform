@@ -19,6 +19,12 @@
 
     <properties>
         <java.version>17</java.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <sa-token.version>1.46.0</sa-token.version>
+        <knife4j.version>4.5.0</knife4j.version>
+        <!-- OpenAPI 描述生成器。Knife4j 的 starter 需配 2.3.0（Spring Boot 3.2 时代），
+             而 Spring Boot 3.5 必须用 2.8.x —— 所以这里走「springdoc 生成 + Knife4j 静态 UI」。 -->
+        <springdoc.version>2.8.17</springdoc.version>
     </properties>
 
     <dependencies>
@@ -41,6 +47,57 @@
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- ===== ORM ===== -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+        <!-- MyBatis-Plus 从 3.5.9 起把 JSqlParser 拆成可选依赖。
+             分页插件与数据权限拦截器都依赖它，不显式引入会在启动时报类找不到。 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+
+        <!-- ===== 鉴权 ===== -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- 登录态落 Redis，服务重启不掉线。用默认 opaque token 模式，不是 JWT，所以不需要密钥 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-jackson</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+
+        <!-- ===== 接口文档 ===== -->
+        <!-- 只引 Knife4j 的静态 UI（doc.html + webjars），不引它的 starter：
+             starter 4.5.0 的 Java 代码是按 springdoc 2.3.0 编译的，与下面的 2.8.x 组合会在
+             运行时抛 NoSuchMethodError（SpringDocConfigProperties.getGroupConfigs）。
+             UI 包是纯静态资源、零 Java 类，不存在这个耦合；页面由 Spring Boot 自动提供。 -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-openapi3-ui</artifactId>
+            <version>${knife4j.version}</version>
+        </dependency>
+        <!-- OpenAPI 3 描述由 springdoc 生成，UI 从 /v3/api-docs/swagger-config 读取接口清单 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <!-- ===== 运维 ===== -->
+        <!-- 部署脚本的健康检查与 nginx 都依赖 /actuator/health -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
         <!-- ===== 工具 ===== -->
