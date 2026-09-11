@@ -87,10 +87,10 @@ com.bluemalic.repair
 
 - 表名、字段名一律 `snake_case`；表名不加前缀。
 - 主键：`bigint`，**雪花 ID**，不用自增。
-- 每张表必需的审计字段：`create_time`、`update_time`、`deleted`（逻辑删除 0/1）。
+- 审计字段：`create_time`、`update_time`；业务主表带 `deleted`（逻辑删除 0/1），关联表与追加型表是否带见 `docs/02-数据库设计.md`。
 - **不使用物理外键**，由应用层保证。
 - 状态字段用 `tinyint` + 枚举类；状态值从 10 开始按 10 递增（留插入空间）。
-- 索引命名：普通索引 `idx_表_字段`，唯一索引 `uk_表_字段`。
+- 索引命名：普通索引 `idx_字段`、唯一索引 `uk_字段`（MySQL 索引名在表内唯一，不强制加表名前缀；多字段按顺序拼接，如 `idx_tenant_status`）。
 - **改表结构必须同步改两处**：`docs/02-数据库设计.md` 和 `docs/schema.sql`。
 
 ---

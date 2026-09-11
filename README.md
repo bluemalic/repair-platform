@@ -71,20 +71,19 @@
 
 ---
 
-## 快速开始（三条命令）
+## 快速开始（两条命令）
 
 ```bash
 # 1. 准备环境变量
 cp .env.example .env    # 然后填入数据库密码、DeepSeek API Key
 
-# 2. 启动依赖与应用
+# 2. 启动（docs/schema.sql 会在 MySQL 首次启动时自动执行）
 docker compose up -d
-
-# 3. 初始化数据库
-docker compose exec mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" < docs/schema.sql
 ```
 
-访问：接口文档 http://localhost:8080/doc.html 　|　管理端 http://localhost
+访问：接口文档 http://localhost:8080/doc.html 　|　管理端 http://localhost:8080
+
+> 数据库已存在时不会重复执行初始化脚本；要重建库见 [部署文档](docs/05-部署文档.md)。
 
 ---
 
@@ -92,12 +91,14 @@ docker compose exec mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" < docs/schema.sq
 
 ```
 ├── docs/                    设计文档（需求 / 数据库 / 接口 / ADR）
-├── src/main/java/com/xxx/repair/
-│   ├── common/              统一返回体、异常、常量
-│   ├── config/              配置类
+├── src/main/java/com/bluemalic/repair/
+│   ├── common/              统一返回体、异常、常量、工具
+│   ├── config/              配置类（MyBatis-Plus、Sa-Token、Redis、Knife4j、线程池）
 │   ├── controller/          按端分包：student / worker / admin
 │   ├── service/             业务逻辑
 │   ├── mapper/              数据访问
+│   ├── entity/ dto/ vo/     实体 / 入参 / 出参
+│   ├── converter/           Entity / DTO / VO 转换
 │   ├── interceptor/         数据权限、鉴权
 │   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关
 │   └── job/                 定时任务
@@ -148,10 +149,12 @@ docker compose exec mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" < docs/schema.sq
 
 ## 开发约定
 
-- 分支：`main`（稳定）/ `develop`（开发）/ `feature/*` / `hotfix/*`
+- 分支：`main`（始终可部署）+ 短生命周期的 `feature/*`（修改用 `fix/*`）
+- 每个功能走分支 + PR 合入 `main`，不直接推 `main`
+- 不设长期 `develop`：单人项目里它只会带来"哪个分支才是可部署版本"的歧义和多余的合并开销
 - 提交：[Conventional Commits](https://www.conventionalcommits.org/)，如 `feat(order): 新增工单状态机`
 - 所有改动走 PR，`main` 开启分支保护
-- 代码格式由 Spotless 约束，CI 不通过不允许合并
+- 代码格式计划在阶段 5 接入 Spotless（CI 已预留检查步骤，当前尚未启用）
 
 ---
 
