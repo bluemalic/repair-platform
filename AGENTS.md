@@ -35,7 +35,7 @@
 | 对象存储 | MinIO（S3 协议） | 不要直接依赖 OSS SDK，只依赖 S3 API |
 | 鉴权 | Sa-Token | 不要引入 Spring Security |
 | 接口文档 | Knife4j（OpenAPI 3） | 每个接口都要有注解 |
-| AI | Spring AI + DeepSeek API | Key 只从环境变量读 |
+| AI | LangChain4j + DeepSeek API | Key 只从环境变量读 |
 | 测试 | JUnit 5 + Mockito | |
 | 部署 | Docker + Docker Compose + Nginx | |
 | CI | GitHub Actions | |

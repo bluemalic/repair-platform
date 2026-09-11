@@ -63,7 +63,7 @@
 | 数据库 | MySQL 8 |
 | 缓存 / 队列 | Redis 7（缓存 + Token + 延迟队列 + 向量检索） |
 | 对象存储 | MinIO |
-| AI | Spring AI + DeepSeek API |
+| AI | LangChain4j + DeepSeek API |
 | 接口文档 | Knife4j (OpenAPI 3) |
 | 前端 | 管理端 Vue 3 + Element Plus；学生 / 维修工端 **uni-app**（先编译 H5，备案后可编译小程序） |
 | 部署 | Docker + Docker Compose + Nginx |
