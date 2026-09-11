@@ -1,3 +1,124 @@
 spring:
   application:
     name: repair-platform
+
+  # ============================================================
+  # 数据源 / Redis
+  #
+  # 变量名与 docker-compose.yml 的 app.environment 逐一对齐，不要改名。
+  # 默认值统一取「宿主机映射端口」，这样在 IDEA 里直接运行就能连上本地中间件；
+  # 容器内运行时由 compose 注入同名变量，覆盖成容器网络里的地址。
+  #
+  # 关键不对称点：MySQL 本地是 13306（宿主机映射），容器内是 3306 —— 所以这里必须
+  # 写成占位符，不能写死。
+  #
+  # 本地（IDEA / 命令行）运行前需要提供：MYSQL_PASSWORD、REDIS_PASSWORD
+  # 两个口令都从环境变量读、默认空值：缺失时表现为"认证失败"而不是静默连错库。
+  # CI 里的 Redis 是临时容器、不开密码，所以那边不需要设 REDIS_PASSWORD。
+  # ============================================================
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:13306}/${MYSQL_DATABASE:repair}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      pool-name: RepairHikariPool
+      # 2C4G 单机：连接池不是越大越好，池越大 MySQL 侧的并发线程与内存压力越高
+      maximum-pool-size: 12
+      minimum-idle: 4
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3000ms
+
+  jackson:
+    time-zone: Asia/Shanghai
+
+server:
+  port: 8080
+  # 线上跑在 nginx 后面，读 X-Forwarded-* 才能拿到真实协议与客户端 IP
+  forward-headers-strategy: framework
+
+# ============================================================
+# MyBatis-Plus
+# ============================================================
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.bluemalic.repair.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      # 雪花 ID，与 AGENTS「主键不用自增」的约定一致
+      id-type: assign_id
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# ============================================================
+# 鉴权（Sa-Token）
+# 用默认的 opaque token 存 Redis，不是 JWT，所以没有密钥需要管理
+# ============================================================
+sa-token:
+  # 前端按 Authorization: Bearer <token> 提交
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 604800        # 7 天
+  active-timeout: -1     # 不因闲置提前失效，统一由 timeout 控制
+  # 同一账号允许多端登录（H5 与将来的小程序各自持有一个 token）
+  is-concurrent: true
+  is-share: false
+  # 跨端只用请求头，不读 Cookie 和请求体
+  is-read-cookie: false
+  is-read-body: false
+  is-read-header: true
+  token-style: uuid
+  is-log: false
+  is-print: false
+
+# ============================================================
+# 接口文档
+# 页面：http://localhost:8080/doc.html （Knife4j 静态 UI）
+# 描述：/v3/api-docs （springdoc 生成）
+#
+# 这里没有 knife4j.* 配置项：项目只引了 Knife4j 的静态 UI 包（没有自动装配），
+# 那些配置项没有东西去读它，写了只会让人以为生效了。
+# ============================================================
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  packages-to-scan: com.bluemalic.repair.controller
+  default-produces-media-type: application/json
+
+# ============================================================
+# 运维端点：只暴露 health（部署脚本与 nginx 依赖它），其余不对外
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# ============================================================
+# 日志
+# traceId 由 TraceIdFilter 注入 MDC，贯穿单次请求的全部日志
+# 本地需要看 SQL / 调试日志时设置 LOG_LEVEL_APP=debug
+# ============================================================
+logging:
+  level:
+    root: info
+    com.bluemalic.repair: ${LOG_LEVEL_APP:info}
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
