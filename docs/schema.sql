@@ -144,7 +144,7 @@ CREATE TABLE `building` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='楼栋';
 
 -- ⭐ 维修工负责的楼栋 —— 这就是「数据权限」的物理落点
--- 面试会问：维修工的数据隔离怎么实现？答案：靠这张表确定可见楼栋，
+-- 常见疑问：维修工的数据隔离怎么实现？答案：靠这张表确定可见楼栋，
 --           再由 MyBatis 拦截器自动把 building_id 条件注入到 SQL 里。
 DROP TABLE IF EXISTS `worker_building`;
 CREATE TABLE `worker_building` (
