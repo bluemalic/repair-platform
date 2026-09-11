@@ -10,6 +10,8 @@
 --       删不掉它（-v 只删 Docker 管理的命名卷），必须手动删目录：
 --
 --   docker compose down && rm -rf data/mysql && docker compose up -d mysql
+--   本地 Windows（PowerShell）等价写法：
+--   docker compose down; Remove-Item -Recurse -Force data\mysql; docker compose up -d mysql
 --
 -- ⚠️ 初始化脚本报错【不会】让容器退出，只会在日志里打一行 ERROR，容器照样显示 healthy。
 --    执行后必须确认表真的建出来了（show tables），不要只看健康状态。
@@ -17,7 +19,7 @@
 --
 -- 设计说明与索引理由见 docs/02-数据库设计.md —— 本文件与那份文档必须保持一致。
 --
--- 注意：本脚本末尾有初始化数据（租户/角色/权限/类别/楼栋），
+-- 注意：本脚本末尾有初始化数据（租户/角色/权限/类别/楼栋/报修码），
 --       修改这里的表结构时，记得同步更新 docs/02-数据库设计.md。
 -- ============================================================
 
@@ -171,6 +173,30 @@ CREATE TABLE `ticket_category` (
     KEY `idx_tenant` (`tenant_id`, `status`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='报修类别';
 
+-- ⭐ 报修码：贴在房间门口的「位置码」，标识楼栋 + 房间（**不是工单码**，工单号才是某次维修的标识）。
+-- 学生扫码 / 手输 → 自动带出楼栋房间去提交报修；维修工到场扫同一个码 → 校验位置后打卡。
+-- 两端共用 GET /api/tickets/by-code/{code} —— 这是「跨端抽象」的关键。
+-- 码由管理端按需生成（生产环境随机生成，避免顺序码被枚举出全部房间）；二维码内容就是 code 本身，
+-- 前端用 qrcode 库渲染后打印张贴。打印是学校的一次性运维动作，不影响应用开发。
+DROP TABLE IF EXISTS `repair_code`;
+CREATE TABLE `repair_code` (
+    `id`          bigint      NOT NULL COMMENT '主键',
+    `tenant_id`   bigint      NOT NULL COMMENT '租户ID',
+    `code`        varchar(16) NOT NULL COMMENT '报修码，租户内唯一，扫码/手输用',
+    `building_id` bigint      NOT NULL COMMENT '楼栋ID',
+    `room`        varchar(32) NOT NULL COMMENT '房间号，如 3-412',
+    `status`      tinyint     NOT NULL DEFAULT 1 COMMENT '状态 1启用 0停用',
+    `deleted`     tinyint     NOT NULL DEFAULT 0 COMMENT '逻辑删除 0否 1是',
+    `create_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_code` (`tenant_id`, `code`),
+    -- 「一房一码」由应用层保证：不给 (building_id, room) 建唯一索引，
+    -- 是因为逻辑删除后同一房间需要能重新生成码，唯一索引会和 deleted 冲突。
+    KEY `idx_room` (`tenant_id`, `building_id`, `room`),
+    KEY `idx_building` (`building_id`, `status`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='报修码（房间位置码）';
+
 -- ============================================================
 -- 三、工单（项目核心）
 -- ============================================================
@@ -300,7 +326,8 @@ INSERT INTO `sys_permission` (`id`, `code`, `name`, `type`) VALUES
     (16, 'worker:manage',       '维修工管理',   2),
     (17, 'statistics:view',     '查看统计看板', 2),
     (18, 'ai:query',            'AI 数据问数',  2),
-    (19, 'notification:read',   '查看通知',     2);
+    (19, 'notification:read',   '查看通知',     2),
+    (20, 'repaircode:manage',   '报修码管理',   2);
 
 -- 角色-权限
 INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
@@ -311,7 +338,8 @@ INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
     -- 后勤管理：全部权限
     (12, 3, 1), (13, 3, 2), (14, 3, 3), (15, 3, 4), (16, 3, 5), (17, 3, 6),
     (18, 3, 7), (19, 3, 8), (20, 3, 9), (21, 3, 10), (22, 3, 11), (23, 3, 12),
-    (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18), (30, 3, 19);
+    (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18), (30, 3, 19),
+    (31, 3, 20);
 
 -- 楼栋
 INSERT INTO `building` (`id`, `tenant_id`, `name`, `area`, `sort`) VALUES
@@ -329,5 +357,13 @@ INSERT INTO `ticket_category` (`id`, `tenant_id`, `name`, `default_urgency`, `so
     (4, 1, '门锁',   2, 4),
     (5, 1, '空调',   1, 5),
     (6, 1, '其他',   1, 6);
+
+-- 报修码（演示用固定码，方便本地把扫码流程跑通；生产由管理端随机生成，避免被枚举出全部房间）
+INSERT INTO `repair_code` (`id`, `tenant_id`, `code`, `building_id`, `room`) VALUES
+    (1, 1, '482913', 1, '1-101'),
+    (2, 1, '751204', 2, '2-201'),
+    (3, 1, '306718', 3, '3-412'),
+    (4, 1, '925146', 4, '4-305'),
+    (5, 1, '640372', 5, '301');
 
 SET FOREIGN_KEY_CHECKS = 1;
