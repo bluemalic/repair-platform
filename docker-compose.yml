@@ -1,5 +1,10 @@
 # 高校后勤报修平台 —— 单机部署编排
-# 用法：cp .env.example .env && 填好变量 && docker compose up -d
+#
+# 本地开发：  docker compose up -d mysql redis minio    （只起中间件，应用在 IDEA 里跑）
+# 服务器部署：docker compose up -d                       （全部服务，含 app 和 nginx）
+#
+# 用法：cp .env.example .env && 填好变量
+# 中间件端口只绑 127.0.0.1（仅本机可达）：MySQL 13306、Redis 6379、MinIO 9000/9001
 
 services:
   mysql:
@@ -22,7 +27,10 @@ services:
       - ./logs/mysql:/var/log/mysql
       - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     networks: [backend]
-    # 注意：不映射端口到宿主机 —— 数据库只在内网可达
+    # 绑定 127.0.0.1：既能让你本机 IDEA 连上，又不会暴露到局域网/公网（服务器上同样安全）
+    # 宿主端口用 13306 而非 3306：本机已装原生 MySQL80 服务占着 3306
+    ports:
+      - "127.0.0.1:13306:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -34,9 +42,10 @@ services:
           memory: 768M
 
   redis:
-    # 用 redis-stack 一次拿到 缓存 + 向量检索(RediSearch)
-    # 内存紧张时换成 redis:7-alpine，但向量检索需要另想办法
+    # redis-stack 比官方镜像多出 RediSearch，为 M4 的 AI 向量检索准备
+    # 若拉取困难或服务器内存紧张，改用下面注释掉的官方镜像即可（缓存/Token/延迟队列不受影响）
     image: redis/redis-stack-server:7.2.0-v10
+    # image: redis:7-alpine
     container_name: repair-redis
     restart: unless-stopped
     command: >
@@ -48,6 +57,8 @@ services:
     volumes:
       - ./data/redis:/data
     networks: [backend]
+    ports:
+      - "127.0.0.1:6379:6379"
     deploy:
       resources:
         limits:
@@ -64,8 +75,9 @@ services:
     volumes:
       - ./data/minio:/data
     networks: [backend]
-    # 管理台只给本机访问，避免公网暴露
+    # 只给本机访问：9000 是 S3 API（应用/调试用），9001 是管理台
     ports:
+      - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     deploy:
       resources:
