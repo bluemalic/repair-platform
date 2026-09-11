@@ -2,7 +2,7 @@
 
 > 一句话：学生扫码报修、系统派单、师傅接单、后勤调度，数据自动汇总，并支持用自然语言直接问数
 
-[![CI](https://github.com/你的用户名/仓库名/actions/workflows/ci.yml/badge.svg)](https://github.com/你的用户名/仓库名/actions/workflows/ci.yml)
+[![CI](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml)
 
 **在线演示**：http://你的服务器IP:8080 　|　**接口文档**：http://你的服务器IP:8080/doc.html
 
