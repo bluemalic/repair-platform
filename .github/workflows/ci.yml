@@ -15,6 +15,35 @@ jobs:
   build:
     name: 测试与打包
     runs-on: ubuntu-latest
+
+    # 测试要连真实的 MySQL / Redis：Hikari 是懒连接的，没有它们启动期不会报错，
+    # CI 就成了"假绿"；而配了 URL 却连不上时又会直接失败。这两个是一次性的临时
+    # 测试环境，凭据写死在这里，不依赖任何 Secret。
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: repair
+          TZ: Asia/Shanghai
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -30,9 +59,24 @@ jobs:
       # - name: 代码格式检查
       #   run: mvn -B spotless:check
 
+      # 建表脚本自带 CREATE DATABASE / USE，直接用客户端管道执行即可
+      - name: 初始化测试库
+        env:
+          MYSQL_PWD: ci-root-password
+        run: mysql -h 127.0.0.1 -P 3306 -uroot --default-character-set=utf8mb4 < docs/schema.sql
+
       # 一条命令同时跑测试和打包。测试报告会留在 target/surefire-reports/，
       # 而单独的 mvn clean package 会把上一步的测试报告一起清掉 —— 所以合成一步。
+      # 变量名与 docker-compose.yml 的 app.environment 对齐，配置读取方式见 application.yml。
       - name: 运行单元测试并打包
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: '3306'
+          MYSQL_DATABASE: repair
+          MYSQL_USERNAME: root
+          MYSQL_PASSWORD: ci-root-password
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
         run: mvn -B clean package
 
       - name: 上传测试报告
