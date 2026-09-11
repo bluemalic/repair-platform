@@ -21,7 +21,8 @@ jobs:
     name: 构建并推送镜像
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v7
 
       - name: 登录镜像仓库
         uses: docker/login-action@v3
