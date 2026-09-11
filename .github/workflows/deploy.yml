@@ -1,0 +1,79 @@
+# 持续部署（CD）：构建镜像 → 推送镜像仓库 → SSH 部署到服务器
+#
+# 现在是**手动触发**（GitHub 仓库的 Actions 页面 → 左侧选本工作流 → Run workflow）。
+# 因为 docker 和 deploy 两个 job 依赖下面注释里列出的一批 Secrets，
+# 那些 Secret 是「阶段 7 部署」时才配置的 —— 没配之前本工作流不会自动运行，也不会报红。
+#
+# 配好 Secrets 之后，把下面的 push 触发打开，就能改成"推 main 自动部署"。
+
+name: CD
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+
+env:
+  IMAGE: repair-app
+
+jobs:
+  docker:
+    name: 构建并推送镜像
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 登录镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:latest
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    name: 部署到服务器
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH 部署
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/app/repair
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
+              ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+            docker compose pull app
+            docker compose up -d --no-deps app
+            docker image prune -f
+            echo "部署完成：${{ github.sha }}"
+
+      - name: 健康检查
+        run: |
+          sleep 15
+          curl -fsS http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
+
+# ============================================================
+# 阶段 7 部署时，在仓库 Settings → Secrets and variables → Actions 配置：
+#   REGISTRY_URL         镜像仓库地址（如 registry.cn-shenzhen.aliyuncs.com）
+#   REGISTRY_NAMESPACE   命名空间
+#   REGISTRY_USERNAME    镜像仓库用户名
+#   REGISTRY_PASSWORD    镜像仓库密码
+#   SERVER_HOST          服务器 IP
+#   SERVER_USER          SSH 用户（非 root）
+#   SERVER_SSH_KEY       SSH 私钥
+#
+# 服务器上需提前放好：.env、docker-compose.yml、nginx/
+# ============================================================

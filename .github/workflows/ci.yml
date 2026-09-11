@@ -1,8 +1,11 @@
-# 拷贝到项目 .github/workflows/ci.yml
-# 效果：push / PR 触发测试与构建；推 main 时自动构建镜像并部署
-# 简历写法：GitHub Actions 自动化构建与部署，提交即触发单元测试与镜像构建
+# 持续集成（CI）：push / PR 时跑测试与打包
+#
+# 这个工作流**不依赖任何 Secret**，任何时候都应该保持绿色。
+# 把它和部署分开，是为了避免"没配部署密钥就满屏红叉"——那会让你对红色麻木。
+#
+# 简历写法：GitHub Actions 持续集成，提交即触发单元测试与构建
 
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -10,26 +13,23 @@ on:
   pull_request:
     branches: [main, develop]
 
-env:
-  IMAGE: ${{ secrets.REGISTRY_USERNAME }}/repair-app
-
 jobs:
-  # ========== 1. 测试与构建 ==========
   build:
+    name: 测试与打包
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: 配置 JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
 
-      - name: 代码格式检查
-        run: mvn -B -q spotless:check
-        continue-on-error: true   # 首次接入可先不阻断，稳定后改成 false
+      # 阶段 5 在 pom.xml 里接入 Spotless 后，把下面两步打开
+      # - name: 代码格式检查
+      #   run: mvn -B spotless:check
 
       - name: 运行单元测试
         run: mvn -B test
@@ -44,74 +44,3 @@ jobs:
           name: surefire-reports
           path: target/surefire-reports/
           retention-days: 7
-
-      # 缓存 Maven 构建产物，供 deploy 阶段复用
-      - name: 保存构建产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-jar
-          path: target/*.jar
-          retention-days: 1
-
-  # ========== 2. 构建镜像并推送（仅 main 分支）==========
-  docker:
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 登录镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.REGISTRY_URL }}          # 如 registry.cn-shenzhen.aliyuncs.com
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      - name: 构建并推送镜像
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.REGISTRY_URL }}/${{ env.IMAGE }}:latest
-            ${{ secrets.REGISTRY_URL }}/${{ env.IMAGE }}:${{ github.sha }}
-
-  # ========== 3. 部署到服务器（仅 main 分支）==========
-  deploy:
-    needs: docker
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH 部署
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            set -e
-            cd /opt/app/repair
-            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
-              ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-            docker compose pull app
-            docker compose up -d --no-deps app
-            docker image prune -f
-            echo "部署完成：${{ github.sha }}"
-
-      - name: 健康检查
-        run: |
-          sleep 15
-          curl -fsS http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
-
-# ============================================================
-# 需要在 GitHub 仓库 Settings → Secrets and variables → Actions 配置：
-#   REGISTRY_URL         镜像仓库地址（如 registry.cn-shenzhen.aliyuncs.com）
-#   REGISTRY_USERNAME    镜像仓库用户名
-#   REGISTRY_PASSWORD    镜像仓库密码
-#   SERVER_HOST          服务器 IP
-#   SERVER_USER          SSH 用户（非 root）
-#   SERVER_SSH_KEY       SSH 私钥
-#
-# 服务器上需要先放好：.env（含数据库密码、AI Key）、docker-compose.yml、nginx/
-# ============================================================
