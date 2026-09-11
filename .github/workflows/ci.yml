@@ -2,16 +2,14 @@
 #
 # 这个工作流**不依赖任何 Secret**，任何时候都应该保持绿色。
 # 把它和部署分开，是为了避免"没配部署密钥就满屏红叉"——那会让你对红色麻木。
-#
-# 简历写法：GitHub Actions 持续集成，提交即触发单元测试与构建
 
 name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 jobs:
   build:
