@@ -40,6 +40,10 @@
 | 部署 | Docker + Docker Compose + Nginx | |
 | CI | GitHub Actions | |
 
+> **"不要引入 Spring Security"指的是一整套安全框架**（过滤器链 + 认证授权 + 自动装配），不是指它的加密工具包。
+> 需要 BCrypt 时可以用 `org.springframework.security:spring-security-crypto`——它只含 BCrypt / Argon2 / PBKDF2，
+> 没有过滤器链、没有自动装配，版本由 Spring Boot 统一管理；鉴权仍然走 Sa-Token，两者不冲突。
+
 **要新增任何依赖，先说明理由并得到确认。**
 
 ---
