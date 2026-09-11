@@ -1,0 +1,66 @@
+# ===== 拷贝到项目根目录后，把文件名改成 .gitignore =====
+
+### Java / Maven ###
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+### IDE ###
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+### 日志 ###
+logs/
+*.log
+log/
+
+### 环境变量与密钥（**最重要，绝不能提交**）###
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+application-local.yml
+application-prod.yml
+
+### 前端 ###
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.eslintcache
+unpackage/
+miniprogram_npm/
+
+### 微信小程序 ###
+project.private.config.json
+project.private.config.*.json
+
+### 操作系统 ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### 构建与部署产物 ###
+*.tar
+*.tar.gz
+/data/
+/mysql-data/
+/redis-data/
+/minio-data/

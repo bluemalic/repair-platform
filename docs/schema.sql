@@ -1,0 +1,29 @@
+-- 高校后勤报修平台 · 数据库初始化脚本
+--
+-- ⚠️ 这是占位文件（阶段 1.2 先建好，保证 docker compose 的挂载路径存在）。
+--    真正的内容在「阶段 3」写：把 docs/02-数据库设计.md 里的表结构落到这里。
+--
+-- 为什么必须提前存在：
+--   docker-compose.yml 把这个文件挂到 MySQL 容器的 /docker-entrypoint-initdb.d/。
+--   如果文件不存在，Docker 会在宿主机上建一个**同名目录**，导致 MySQL 初始化静默失败。
+--
+-- 执行时机：MySQL 容器**首次**启动时自动执行（数据卷已存在则跳过）。
+--   改完本文件后要重新初始化，执行：docker compose down -v && docker compose up -d mysql
+--
+-- ────────────────────────────────────────────────
+-- 待建表（P0，按依赖顺序）
+-- ────────────────────────────────────────────────
+--   tenant              租户（学校 / 校区）
+--   sys_user            用户（学生 / 维修工 / 后勤管理共用）
+--   sys_role            角色
+--   sys_user_role       用户-角色关联
+--   building            楼栋
+--   worker_building     维修工负责的楼栋  ← 数据权限的物理落点
+--   ticket_category     报修类别
+--   ticket              工单主表（建表语句见 docs/02-数据库设计.md 第 3.1 节）
+--   ticket_log          工单流转日志
+--   notification        站内通知
+--
+-- 索引设计与理由见 docs/02-数据库设计.md 第 4 节，不要直接照抄网上模板。
+
+SET NAMES utf8mb4;
