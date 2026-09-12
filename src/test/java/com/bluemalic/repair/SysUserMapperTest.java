@@ -28,7 +28,9 @@ class SysUserMapperTest {
     void insertThenSelectBack() {
         SysUser user = new SysUser();
         user.setTenantId(1L);
-        user.setUsername("20260001");
+        // 测试数据统一用 test- 前缀：本地执行过 docs/dev-seed.sql（演示账号 admin / worker01 /
+        // 20260001）之后，若测试也用真实风格的用户名就会撞 sys_user 的租户内唯一键
+        user.setUsername("test-sysuser");
         user.setPassword("$2a$10$placeholder-not-a-real-hash");
         user.setRealName("张三");
         user.setPhone("13800000000");
@@ -42,7 +44,7 @@ class SysUserMapperTest {
 
         SysUser loaded = sysUserMapper.selectById(user.getId());
         assertThat(loaded).isNotNull();
-        assertThat(loaded.getUsername()).isEqualTo("20260001");
+        assertThat(loaded.getUsername()).isEqualTo("test-sysuser");
         assertThat(loaded.getRealName()).isEqualTo("张三");
         assertThat(loaded.getPhone()).isEqualTo("13800000000");
         assertThat(loaded.getUserType()).isEqualTo(1);

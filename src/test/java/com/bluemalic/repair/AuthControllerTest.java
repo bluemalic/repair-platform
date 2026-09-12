@@ -52,6 +52,10 @@ class AuthControllerTest {
     private static final long ROLE_STUDENT = 1L;
     private static final long ROLE_ADMIN = 3L;
 
+    // 测试用的登录名统一带 test- 前缀，与 docs/dev-seed.sql 的演示账号（admin / worker01 /
+    // 20260001）隔开。否则本地执行过 dev-seed 后，测试插入同名用户会撞 sys_user 的
+    // 租户内唯一键 uk_tenant_username，测试就会莫名其妙变红。
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -69,14 +73,14 @@ class AuthControllerTest {
 
     @Test
     void loginThenCurrentUserCarriesRolesAndPermissions() throws Exception {
-        givenUser("20260001", 3, ROLE_ADMIN);
+        givenUser("test-admin", 3, ROLE_ADMIN);
 
-        String token = login("20260001", PASSWORD);
+        String token = login("test-admin", PASSWORD);
 
         mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.username").value("20260001"))
+                .andExpect(jsonPath("$.data.username").value("test-admin"))
                 .andExpect(jsonPath("$.data.roles[0]").value("ADMIN"))
                 // 权限码来自 sys_role_permission 种子数据，能拿到说明 StpInterfaceImpl 生效了
                 .andExpect(jsonPath("$.data.permissions").isNotEmpty());
@@ -84,9 +88,9 @@ class AuthControllerTest {
 
     @Test
     void wrongPasswordIsRejectedWithLoginFailed() throws Exception {
-        givenUser("20260002", 3, ROLE_STUDENT);
+        givenUser("test-wrong-pwd", 3, ROLE_STUDENT);
 
-        mockMvc.perform(loginRequest("20260002", "wrong-password"))
+        mockMvc.perform(loginRequest("test-wrong-pwd", "wrong-password"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(30001));
     }
@@ -104,11 +108,11 @@ class AuthControllerTest {
 
     @Test
     void disabledAccountIsRejected() throws Exception {
-        SysUser user = givenUser("20260003", 3, ROLE_STUDENT);
+        SysUser user = givenUser("test-disabled", 3, ROLE_STUDENT);
         user.setStatus(0);
         sysUserMapper.updateById(user);
 
-        mockMvc.perform(loginRequest("20260003", PASSWORD))
+        mockMvc.perform(loginRequest("test-disabled", PASSWORD))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(30002));
     }
@@ -122,11 +126,11 @@ class AuthControllerTest {
 
     @Test
     void permissionAnnotationBlocksStudentButAllowsAdmin() throws Exception {
-        givenUser("20260004", 1, ROLE_STUDENT);
-        givenUser("20260005", 3, ROLE_ADMIN);
+        givenUser("test-student-probe", 1, ROLE_STUDENT);
+        givenUser("test-admin-probe", 3, ROLE_ADMIN);
 
-        String studentToken = login("20260004", PASSWORD);
-        String adminToken = login("20260005", PASSWORD);
+        String studentToken = login("test-student-probe", PASSWORD);
+        String adminToken = login("test-admin-probe", PASSWORD);
 
         // 学生没有 ticket:dispatch，注解校验应拦下 → 403
         mockMvc.perform(get("/api/admin/probe/dispatch").header("Authorization", "Bearer " + studentToken))
