@@ -75,6 +75,14 @@
             <artifactId>sa-token-redis-jackson</artifactId>
             <version>${sa-token.version}</version>
         </dependency>
+        <!-- BCrypt 密码加密。注意：这是从 Spring Security 项目拆出来的**纯加密工具包**
+             （BCrypt / Argon2 / PBKDF2），不含过滤器链、没有自动装配，不违反 AGENTS 里
+             「不要引入 Spring Security」那条约定；鉴权仍然走 Sa-Token。
+             版本由 Spring Boot 统一管理，不写版本号。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
 
         <!-- ===== 接口文档 ===== -->
         <!-- 只引 Knife4j 的静态 UI（doc.html + webjars），不引它的 starter：
