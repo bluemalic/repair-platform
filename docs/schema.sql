@@ -21,6 +21,9 @@
 --
 -- 注意：本脚本末尾有初始化数据（租户/角色/权限/类别/楼栋/报修码），
 --       修改这里的表结构时，记得同步更新 docs/02-数据库设计.md。
+--
+-- 与 docs/dev-seed.sql 的分工：本脚本只放**生产也需要**的基础数据；演示账号放在
+-- dev-seed.sql 里，它不挂在 initdb 上、需要时手动执行一次，所以生产库不会多出这些账号。
 -- ============================================================
 
 SET NAMES utf8mb4;
@@ -29,6 +32,15 @@ CREATE DATABASE IF NOT EXISTS `repair`
     DEFAULT CHARACTER SET utf8mb4
     DEFAULT COLLATE utf8mb4_unicode_ci;
 USE `repair`;
+
+-- ⚠️ 排序规则要写两处，这两个坑都属于"看着对、实际没生效"：
+--   1) 库：compose 给 mysql 服务设了 MYSQL_DATABASE，容器初始化时会先按服务器默认排序规则
+--      （MySQL 8 是 utf8mb4_0900_ai_ci）把库建好，于是上面那句 CREATE DATABASE IF NOT EXISTS
+--      成了空操作。用下面这句 ALTER 纠正库的默认值（它决定以后新建表用什么）。
+--   2) 表：建表时若只写 DEFAULT CHARSET = utf8mb4 而不写 COLLATE，MySQL 用的是
+--      **该字符集的默认排序规则** utf8mb4_0900_ai_ci，而不是库的排序规则。
+--      所以下面 14 张表都显式写了 COLLATE = utf8mb4_unicode_ci。
+ALTER DATABASE `repair` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -50,7 +62,7 @@ CREATE TABLE `tenant` (
     `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_code` (`code`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='租户（学校/校区）';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='租户（学校/校区）';
 
 -- 用户表：三种角色共用一张表，靠 user_type 区分
 -- ⚠️ 为什么不用三张表：登录逻辑、密码校验、token 管理完全一致，拆表会导致重复代码
@@ -70,7 +82,7 @@ CREATE TABLE `sys_user` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tenant_username` (`tenant_id`, `username`),
     KEY `idx_tenant_type` (`tenant_id`, `user_type`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='用户（学生/维修工/后勤管理）';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='用户（学生/维修工/后勤管理）';
 
 -- 角色。tenant_id = 0 表示平台内置角色（所有租户共用）
 DROP TABLE IF EXISTS `sys_role`;
@@ -86,7 +98,7 @@ CREATE TABLE `sys_role` (
     `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tenant_code` (`tenant_id`, `code`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='角色';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='角色';
 
 -- 权限点。权限是全局的（不区分租户），分菜单/按钮两级
 DROP TABLE IF EXISTS `sys_permission`;
@@ -102,7 +114,7 @@ CREATE TABLE `sys_permission` (
     `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_code` (`code`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='权限点';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='权限点';
 
 DROP TABLE IF EXISTS `sys_user_role`;
 CREATE TABLE `sys_user_role` (
@@ -112,7 +124,7 @@ CREATE TABLE `sys_user_role` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_role` (`user_id`, `role_id`),
     KEY `idx_role` (`role_id`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='用户-角色关联';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='用户-角色关联';
 
 DROP TABLE IF EXISTS `sys_role_permission`;
 CREATE TABLE `sys_role_permission` (
@@ -122,7 +134,7 @@ CREATE TABLE `sys_role_permission` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_role_permission` (`role_id`, `permission_id`),
     KEY `idx_permission` (`permission_id`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='角色-权限关联';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='角色-权限关联';
 
 -- ============================================================
 -- 二、基础数据（楼栋、维修工负责范围、报修类别）
@@ -141,7 +153,7 @@ CREATE TABLE `building` (
     `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_tenant` (`tenant_id`, `status`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='楼栋';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='楼栋';
 
 -- ⭐ 维修工负责的楼栋 —— 这就是「数据权限」的物理落点
 -- 常见疑问：维修工的数据隔离怎么实现？答案：靠这张表确定可见楼栋，
@@ -156,7 +168,7 @@ CREATE TABLE `worker_building` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_worker_building` (`worker_id`, `building_id`),
     KEY `idx_building` (`building_id`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='维修工负责的楼栋（数据权限依据）';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='维修工负责的楼栋（数据权限依据）';
 
 DROP TABLE IF EXISTS `ticket_category`;
 CREATE TABLE `ticket_category` (
@@ -171,7 +183,7 @@ CREATE TABLE `ticket_category` (
     `update_time`     datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_tenant` (`tenant_id`, `status`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='报修类别';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='报修类别';
 
 -- ⭐ 报修码：贴在房间门口的「位置码」，标识楼栋 + 房间（**不是工单码**，工单号才是某次维修的标识）。
 -- 学生扫码 / 手输 → 自动带出楼栋房间去提交报修；维修工到场扫同一个码 → 校验位置后打卡。
@@ -195,7 +207,7 @@ CREATE TABLE `repair_code` (
     -- 是因为逻辑删除后同一房间需要能重新生成码，唯一索引会和 deleted 冲突。
     KEY `idx_room` (`tenant_id`, `building_id`, `room`),
     KEY `idx_building` (`building_id`, `status`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='报修码（房间位置码）';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='报修码（房间位置码）';
 
 -- ============================================================
 -- 三、工单（项目核心）
@@ -236,7 +248,7 @@ CREATE TABLE `ticket` (
     KEY `idx_student` (`student_id`, `submit_time`),
     KEY `idx_worker_status` (`worker_id`, `status`, `submit_time`),
     KEY `idx_building_time` (`building_id`, `submit_time`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='维修工单主表';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='维修工单主表';
 
 -- 工单流转日志：每次状态变更写一条，用于「流转可追溯」
 DROP TABLE IF EXISTS `ticket_log`;
@@ -252,7 +264,7 @@ CREATE TABLE `ticket_log` (
     `create_time` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_ticket` (`ticket_id`, `create_time`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='工单流转日志';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='工单流转日志';
 
 DROP TABLE IF EXISTS `ticket_evaluation`;
 CREATE TABLE `ticket_evaluation` (
@@ -267,7 +279,7 @@ CREATE TABLE `ticket_evaluation` (
     -- ⭐ 唯一索引：一个工单只能评价一次，这是「评价幂等」的兜底
     UNIQUE KEY `uk_ticket` (`ticket_id`),
     KEY `idx_student` (`student_id`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='工单验收评价';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='工单验收评价';
 
 -- ============================================================
 -- 四、站内通知（跨端通用的通知方案，不用短信/邮件/订阅消息）
@@ -287,7 +299,7 @@ CREATE TABLE `notification` (
     PRIMARY KEY (`id`),
     -- 前端最高频的查询是「我的未读数」，这个索引专门服务它
     KEY `idx_receiver_read` (`receiver_id`, `is_read`, `create_time`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='站内通知';
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='站内通知';
 
 -- ============================================================
 -- 五、初始化数据
