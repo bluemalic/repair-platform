@@ -11,6 +11,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -56,6 +58,21 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleNotLogin(NotLoginException e) {
         log.warn("未登录或登录已过期: {}", e.getType());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Result.fail(ErrorCode.NOT_LOGIN));
+    }
+
+    /**
+     * 访问了不存在的路径。
+     *
+     * <p>必须单独处理：否则会被下面的兜底处理器接住，变成 500 + 一整段堆栈。
+     * 最典型的触发是浏览器自动请求 {@code /favicon.ico} —— 打开一次文档页面就会刷出一段
+     * ERROR 日志，真正的问题反而被淹没。这里按 404 返回，并且只在 DEBUG 级别记一行路径。
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<Result<Void>> handleNoResourceFound(Exception e) {
+        if (log.isDebugEnabled()) {
+            log.debug("请求的路径不存在: {}", e.getMessage());
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Result.fail(ErrorCode.RESOURCE_NOT_FOUND));
     }
 
     @ExceptionHandler({NotPermissionException.class, NotRoleException.class})

@@ -18,6 +18,7 @@ public enum ErrorCode {
     NO_PERMISSION(10003, "无权限访问该资源"),
     TOO_MANY_REQUESTS(10004, "请求过于频繁"),
     SYSTEM_ERROR(10005, "系统繁忙，请稍后重试"),
+    RESOURCE_NOT_FOUND(10006, "请求的资源不存在"),
 
     // ---------- 2xxxx 工单 ----------
     TICKET_NOT_FOUND(20001, "工单不存在"),
