@@ -85,6 +85,21 @@ docker compose up -d
 
 > 数据库已存在时不会重复执行初始化脚本；要重建库见 [部署文档](docs/05-部署文档.md)。
 
+**演示账号**（可选，本地开发/演示用）：`docs/schema.sql` 只建表与基础数据，不含任何账号。
+需要能登录试接口时，手动执行一次 `docs/dev-seed.sql`，会得到三个账号，口令都是 `Repair@2026`：
+
+| 登录名 | 角色 | 用途 |
+|---|---|---|
+| `admin` | 后勤管理 | 派单、统计、AI 问数 |
+| `worker01` | 维修工 | 接单、到场、完工（负责 1、2 号楼） |
+| `20260001` | 学生 | 提交报修、查看进度、评价 |
+
+```bash
+docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 < docs/dev-seed.sql
+```
+
+> 这个脚本**不挂在** MySQL 的初始化目录上，所以生产库永远不会自动获得这些账号——也不需要"上线时记得删"。
+
 ---
 
 ## 目录结构
