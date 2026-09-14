@@ -40,7 +40,6 @@ public class StpInterfaceImpl implements StpInterface {
     private final SysRoleMapper sysRoleMapper;
     private final SysRolePermissionMapper sysRolePermissionMapper;
     private final SysPermissionMapper sysPermissionMapper;
-    private final javax.sql.DataSource dataSource;
 
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
@@ -88,22 +87,13 @@ public class StpInterfaceImpl implements StpInterface {
 
     private List<Long> roleIdsOf(Object loginId) {
         Long userId = Long.valueOf(String.valueOf(loginId));
-        try (java.sql.Connection conn = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
-             java.sql.PreparedStatement ps = conn.prepareStatement(
-                     "SELECT COUNT(*) FROM sys_user_role WHERE user_id = ?")) {
-            ps.setLong(1, userId);
-            try (java.sql.ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                log.info("[diag] rawCount={} userId={}", rs.getInt(1), userId);
-            }
+        try {
+            List<SysUserRole> rows = sysUserRoleMapper
+                    .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId));
+            return rows.stream().map(SysUserRole::getRoleId).distinct().toList();
         } catch (Exception e) {
-            log.info("[diag] rawCountFailed {} {}", e.getClass().getSimpleName(), e.getMessage());
+            log.info("[diag] selectListEx {} {}", e.getClass().getSimpleName(), e.getMessage());
+            return List.of();
         }
-        return sysUserRoleMapper
-                .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId))
-                .stream()
-                .map(SysUserRole::getRoleId)
-                .distinct()
-                .toList();
     }
 }
