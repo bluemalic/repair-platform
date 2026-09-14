@@ -55,4 +55,7 @@ public interface TicketService {
 
     /** 后勤关闭（50 → 60），超时自动关闭是 M3 的事，这里是人工兜底。 */
     void close(long id);
+
+    /** 超时自动关闭（50 → 60）。仅超时调度器调用（系统上下文，操作者=0），不对外暴露接口。 */
+    void autoClose(long id);
 }
