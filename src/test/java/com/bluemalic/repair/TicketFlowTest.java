@@ -250,7 +250,10 @@ class TicketFlowTest {
         long allRows = sysUserRoleMapper.selectCount(null);
         System.out.println("[diag-test] username=" + username + " userId=" + user.getId()
                 + " roleId=" + roleId + " linkRows=" + linkRows
-                + " linkRowsBackRead=" + backRows + " totalLinkRows=" + allRows);
+                + " linkRowsBackRead=" + backRows + " totalLinkRows=" + allRows
+                + " thread=" + Thread.currentThread().getName()
+                + " txActive=" + org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                + " txName=" + org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionName());
 
         if (buildingIds != null) {
             for (Long buildingId : buildingIds) {

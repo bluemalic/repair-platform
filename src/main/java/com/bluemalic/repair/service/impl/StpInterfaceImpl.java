@@ -45,7 +45,11 @@ public class StpInterfaceImpl implements StpInterface {
     public List<String> getPermissionList(Object loginId, String loginType) {
         List<Long> roleIds = roleIdsOf(loginId);
         if (roleIds.isEmpty()) {
-            log.info("[diag] loginId={} roleIds=EMPTY", loginId);
+            log.info("[diag] thread={} txActive={} txName={} loginId={} roleIds=EMPTY",
+                    Thread.currentThread().getName(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
+                    org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionName(),
+                    loginId);
             return List.of();
         }
         List<Long> permissionIds = sysRolePermissionMapper
