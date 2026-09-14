@@ -243,7 +243,14 @@ class TicketFlowTest {
         SysUserRole link = new SysUserRole();
         link.setUserId(user.getId());
         link.setRoleId(roleId);
-        sysUserRoleMapper.insert(link);
+        int linkRows = sysUserRoleMapper.insert(link);
+        long backRows = sysUserRoleMapper.selectCount(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers.<SysUserRole>lambdaQuery()
+                        .eq(SysUserRole::getUserId, user.getId()));
+        long allRows = sysUserRoleMapper.selectCount(null);
+        System.out.println("[diag-test] username=" + username + " userId=" + user.getId()
+                + " roleId=" + roleId + " linkRows=" + linkRows
+                + " linkRowsBackRead=" + backRows + " totalLinkRows=" + allRows);
 
         if (buildingIds != null) {
             for (Long buildingId : buildingIds) {
