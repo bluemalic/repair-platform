@@ -40,6 +40,7 @@ public class StpInterfaceImpl implements StpInterface {
     private final SysRoleMapper sysRoleMapper;
     private final SysRolePermissionMapper sysRolePermissionMapper;
     private final SysPermissionMapper sysPermissionMapper;
+    private final javax.sql.DataSource dataSource;
 
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
@@ -88,6 +89,14 @@ public class StpInterfaceImpl implements StpInterface {
     private List<Long> roleIdsOf(Object loginId) {
         Long userId = Long.valueOf(String.valueOf(loginId));
         try {
+            java.sql.Connection c = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+            try (java.sql.Statement st = c.createStatement();
+                 java.sql.ResultSet rs = st.executeQuery(
+                         "SELECT CONNECTION_ID(), (SELECT COUNT(*) FROM sys_user_role), @@autocommit")) {
+                rs.next();
+                log.info("[diag] reqConnId={} totalLinkRowsSeen={} autoCommit={}",
+                        rs.getInt(1), rs.getInt(2), rs.getInt(3));
+            }
             List<SysUserRole> rows = sysUserRoleMapper
                     .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId));
             return rows.stream().map(SysUserRole::getRoleId).distinct().toList();

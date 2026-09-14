@@ -59,6 +59,9 @@ class TicketFlowTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     @Test
     void fullLifecycleFromSubmitToClose() throws Exception {
         String student = givenToken("test-flow-student", 1, 1L, null);
@@ -248,9 +251,22 @@ class TicketFlowTest {
                 com.baomidou.mybatisplus.core.toolkit.Wrappers.<SysUserRole>lambdaQuery()
                         .eq(SysUserRole::getUserId, user.getId()));
         long allRows = sysUserRoleMapper.selectCount(null);
+        String connInfo = "n/a";
+        try {
+            java.sql.Connection c = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+            try (java.sql.Statement st = c.createStatement();
+                 java.sql.ResultSet rs = st.executeQuery(
+                         "SELECT CONNECTION_ID(), (SELECT COUNT(*) FROM sys_user_role), @@autocommit")) {
+                rs.next();
+                connInfo = "connId=" + rs.getInt(1) + " totalSeen=" + rs.getInt(2) + " autoCommit=" + rs.getInt(3);
+            }
+        } catch (Exception e) {
+            connInfo = "connInfoFailed " + e.getMessage();
+        }
         System.out.println("[diag-test] username=" + username + " userId=" + user.getId()
                 + " roleId=" + roleId + " linkRows=" + linkRows
                 + " linkRowsBackRead=" + backRows + " totalLinkRows=" + allRows
+                + " " + connInfo
                 + " thread=" + Thread.currentThread().getName()
                 + " txActive=" + org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
                 + " txName=" + org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionName());
