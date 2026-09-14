@@ -55,20 +55,21 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
     @Override
     public Expression getSqlSegment(Table table, Expression where, String mappedStatementId) {
         String tableName = table.getName().replace("`", "").toLowerCase();
+
+        // 通知：归属不随角色变化——任何人（含 ADMIN）都只能操作 receiver_id = 自己的。
+        // 必须放在角色逻辑之前：ADMIN 在 ticket 上豁免（不影响 ticket 那套），在 notification 上不豁免。
+        if ("notification".equals(tableName)) {
+            Long userId = currentUserIdOrNull();
+            return userId == null ? null : equalsColumn("receiver_id", userId);
+        }
+
         if (!"ticket".equals(tableName)) {
             return null;
         }
-        Object loginId;
-        try {
-            loginId = StpUtil.getLoginIdDefaultNull();
-        } catch (Exception e) {
-            // SaTokenContext 尚未初始化（纯 Mapper 调用 / 定时任务的"系统上下文"）→ 视为无登录态，不注入
+        Long userId = currentUserIdOrNull();
+        if (userId == null) {
             return null;
         }
-        if (loginId == null) {
-            return null;
-        }
-        long userId = Long.parseLong(String.valueOf(loginId));
         List<String> roles = stpInterface.getObject().getRoleList(userId, StpUtil.getLoginType());
 
         // 注意契约：只返回"要追加的范围条件"，拦截器自己会把它 AND 到原 WHERE 上——
@@ -92,9 +93,25 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
             return in;
         }
         // 学生（以及任何未配置特殊范围的角色）
+        return equalsColumn("student_id", userId);
+    }
+
+    /** 拿当前登录用户 ID；无登录态（含定时任务的"系统上下文"）返回 null。 */
+    private Long currentUserIdOrNull() {
+        Object loginId;
+        try {
+            loginId = StpUtil.getLoginIdDefaultNull();
+        } catch (Exception e) {
+            // SaTokenContext 尚未初始化（纯 Mapper 调用 / 定时任务的"系统上下文"）→ 视为无登录态，不注入
+            return null;
+        }
+        return loginId == null ? null : Long.parseLong(String.valueOf(loginId));
+    }
+
+    private Expression equalsColumn(String column, long value) {
         EqualsTo eq = new EqualsTo();
-        eq.setLeftExpression(new Column("student_id"));
-        eq.setRightExpression(new LongValue(userId));
+        eq.setLeftExpression(new Column(column));
+        eq.setRightExpression(new LongValue(value));
         return eq;
     }
 
