@@ -30,6 +30,9 @@ import java.util.List;
  *   <li>学生（默认）→ student_id = 当前用户</li>
  * </ul>
  *
+ * <p>条件列一律限定到表名/别名（{@link #qualified}）：单表查询时是 {@code ticket.student_id}，
+ * 带别名的多表 JOIN（统计看板等）时为 {@code t.student_id}，避免列歧义。
+ *
  * <p>依赖用 {@link ObjectProvider} 惰性获取：handler 被 MybatisPlusInterceptor 构造期引用，
  * 若直接注入 Mapper 会形成 sqlSessionFactory ↔ 拦截器的循环依赖，启动直接失败。
  *
@@ -37,7 +40,8 @@ import java.util.List;
  * <ul>
  *   <li>loginId 为 null 时不注入——那是无登录态的"系统上下文"（定时任务、初始化）；
  *       HTTP 路径上的匿名访问已由 SaInterceptor 挡在 Controller 之前，到不了这里</li>
- *   <li>条件对单表查询验证过；带别名的多表 JOIN 需要把 Column 限定为别名列，引入 JOIN 时再补</li>
+ *   <li>条件构建抽成 {@link #buildScopeExpression} 纯函数，方便按角色/楼栋单测；本类只在
+ *       {@link #getSqlSegment} 里负责"取当前登录态"这一件有副作用的事</li>
  * </ul>
  */
 @Component
@@ -60,7 +64,7 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
         // 必须放在角色逻辑之前：ADMIN 在 ticket 上豁免（不影响 ticket 那套），在 notification 上不豁免。
         if ("notification".equals(tableName)) {
             Long userId = currentUserIdOrNull();
-            return userId == null ? null : equalsColumn("receiver_id", userId);
+            return userId == null ? null : equalsColumn(table, "receiver_id", userId);
         }
 
         if (!"ticket".equals(tableName)) {
@@ -71,29 +75,36 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
             return null;
         }
         List<String> roles = stpInterface.getObject().getRoleList(userId, StpUtil.getLoginType());
+        List<Long> buildingIds = roles.contains("WORKER")
+                ? workerBuildingMapper.getObject().selectList(
+                        Wrappers.<WorkerBuilding>lambdaQuery().eq(WorkerBuilding::getWorkerId, userId))
+                        .stream().map(WorkerBuilding::getBuildingId).distinct().toList()
+                : List.of();
+        return buildScopeExpression(table, userId, roles, buildingIds);
+    }
 
-        // 注意契约：只返回"要追加的范围条件"，拦截器自己会把它 AND 到原 WHERE 上——
-        // 不要把传入的 where 拼进返回值，否则条件会重复两遍
+    /**
+     * 按角色构造"追加的范围条件"（纯函数，便于单测）。注意契约：只返回要追加的条件，
+     * 拦截器自己会把它 AND 到原 WHERE 上——不要把传入的 where 拼进返回值。
+     */
+    Expression buildScopeExpression(Table table, long userId, List<String> roles, List<Long> buildingIds) {
         if (roles.contains("ADMIN")) {
             return null;
         }
         if (roles.contains("WORKER")) {
-            List<Long> buildingIds = workerBuildingMapper.getObject().selectList(
-                            Wrappers.<WorkerBuilding>lambdaQuery().eq(WorkerBuilding::getWorkerId, userId))
-                    .stream().map(WorkerBuilding::getBuildingId).distinct().toList();
             if (buildingIds.isEmpty()) {
                 // 不负责任何楼栋的维修工：一条也看不到（1=0 恒假条件）
                 return parse("1 = 0");
             }
             InExpression in = new InExpression();
-            in.setLeftExpression(new Column("building_id"));
+            in.setLeftExpression(new Column(qualified(table, "building_id")));
             // jsqlparser 5.x：IN 的右侧必须用带括号的列表，裸 ExpressionList 会渲染成 "IN 1"
             in.setRightExpression(new ParenthesedExpressionList<>(
                     buildingIds.stream().map(LongValue::new).toList()));
             return in;
         }
         // 学生（以及任何未配置特殊范围的角色）
-        return equalsColumn("student_id", userId);
+        return equalsColumn(table, "student_id", userId);
     }
 
     /** 拿当前登录用户 ID；无登录态（含定时任务的"系统上下文"）返回 null。 */
@@ -108,11 +119,17 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
         return loginId == null ? null : Long.parseLong(String.valueOf(loginId));
     }
 
-    private Expression equalsColumn(String column, long value) {
+    private Expression equalsColumn(Table table, String column, long value) {
         EqualsTo eq = new EqualsTo();
-        eq.setLeftExpression(new Column(column));
+        eq.setLeftExpression(new Column(qualified(table, column)));
         eq.setRightExpression(new LongValue(value));
         return eq;
+    }
+
+    /** 条件列限定到表名或别名：JOIN 场景别名优先，避免与其他表同名列歧义。 */
+    private String qualified(Table table, String column) {
+        String prefix = table.getAlias() != null ? table.getAlias().getName() : table.getName();
+        return prefix + "." + column;
     }
 
     private Expression parse(String sql) {
