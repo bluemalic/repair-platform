@@ -8,8 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -23,8 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>序列化规则没生效 → 计数字段变成字符串，前端分页组件直接不工作</li>
  * </ul>
  */
-@SpringBootTest
-@Transactional
+@IntegrationTest
 class PageResultTest {
 
     @Autowired

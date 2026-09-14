@@ -1,7 +1,5 @@
 package com.bluemalic.repair;
 
-import cn.dev33.satoken.annotation.SaCheckPermission;
-import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
 import com.bluemalic.repair.mapper.SysUserMapper;
@@ -9,17 +7,11 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.RequestBuilder;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -38,13 +30,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 若用 {@code webEnvironment = RANDOM_PORT}，请求在另一个线程，未提交的数据看不到，
  * 测试就只能靠预置数据，写不干净。
  *
+ * <p>鉴权探针接口见顶层类 {@link ProbeController}——**不要再把它 @Import 进来**，
+ * 那会改变本类的上下文缓存键、多起一个 Spring 上下文，触发 {@link IntegrationTest} 里说明的问题。
+ *
  * <p>角色 / 权限点用建表脚本里的种子数据（角色 1 学生、3 后勤管理），
  * 只由测试自己造"用户"和"用户-角色关联"。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional
-@Import(AuthControllerTest.DispatchProbeController.class)
+@IntegrationTest
 class AuthControllerTest {
 
     private static final String TENANT_CODE = "gdou";
@@ -174,22 +166,5 @@ class AuthControllerTest {
         link.setRoleId(roleId);
         sysUserRoleMapper.insert(link);
         return user;
-    }
-
-    /**
-     * 测试专用的探针接口：用来验证 {@code @SaCheckPermission} 真的生效。
-     * 真实的后勤端接口还没写，但权限注解的行为现在就该钉住。
-     *
-     * <p>这里**只靠组件扫描注册，不要再加 {@code @Bean}**：本包在扫描范围内，重复注册会撞成
-     * "Ambiguous mapping"（第一次就是这么失败的）。
-     */
-    @RestController
-    static class DispatchProbeController {
-
-        @SaCheckPermission("ticket:dispatch")
-        @GetMapping("/api/admin/probe/dispatch")
-        public Result<String> dispatch() {
-            return Result.ok("ok");
-        }
     }
 }

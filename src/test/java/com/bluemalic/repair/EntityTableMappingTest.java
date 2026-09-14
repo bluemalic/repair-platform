@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -33,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>覆盖范围是自动的：从所有 {@code BaseMapper} 反推出实体类型，因此新增实体
  * （只要配了 Mapper）会自动进入校验，不需要维护一份清单。
  */
-@SpringBootTest
+@IntegrationTest
 class EntityTableMappingTest {
 
     @Autowired

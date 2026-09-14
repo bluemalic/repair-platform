@@ -9,13 +9,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -31,9 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 每个角色只能看到、只能操作自己的通知（handler 的 notification 分支注入 receiver_id）。
  * 通知与权限种子：三个角色都带 notification:read（schema.sql 角色-权限第 5/11/30 条）。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional
+@IntegrationTest
 class NotificationTest {
 
     private static final String PASSWORD = "Test@123456";

@@ -2,7 +2,6 @@ package com.bluemalic.repair;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import javax.sql.DataSource;
@@ -19,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>为什么必须有它：Hikari 是懒连接的，{@code contextLoads} 即使连不上数据库也会通过。
  * 只靠上下文测试，CI 就是"假绿"——配了 service container 也证明不了接线是对的。
  */
-@SpringBootTest
+@IntegrationTest
 class InfrastructureSmokeTest {
 
     @Autowired

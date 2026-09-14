@@ -10,13 +10,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -34,9 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>种子数据依赖 schema.sql：租户 gdou、角色 1学生/2维修工/3后勤、楼栋 1~5、
  * 类别 1~6、报修码 482913→1号楼1-101。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional
+@IntegrationTest
 class TicketFlowTest {
 
     private static final String PASSWORD = "Test@123456";
