@@ -4,8 +4,6 @@ import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,8 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>{@code @Transactional} 让测试结束后自动回滚，不会往库里留脏数据。
  */
-@SpringBootTest
-@Transactional
+@IntegrationTest
 class SysUserMapperTest {
 
     @Autowired

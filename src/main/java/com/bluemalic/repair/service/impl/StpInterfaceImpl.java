@@ -11,7 +11,6 @@ import com.bluemalic.repair.mapper.SysRoleMapper;
 import com.bluemalic.repair.mapper.SysRolePermissionMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -31,7 +30,6 @@ import java.util.List;
  * <p>代价说明：每次权限校验都会查库（Sa-Token 默认不缓存权限列表）。当前量级够用；
  * 若将来校验频率显著上升，在这里加缓存即可，不必改调用方。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StpInterfaceImpl implements StpInterface {
@@ -40,17 +38,11 @@ public class StpInterfaceImpl implements StpInterface {
     private final SysRoleMapper sysRoleMapper;
     private final SysRolePermissionMapper sysRolePermissionMapper;
     private final SysPermissionMapper sysPermissionMapper;
-    private final javax.sql.DataSource dataSource;
 
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
         List<Long> roleIds = roleIdsOf(loginId);
         if (roleIds.isEmpty()) {
-            log.info("[diag] thread={} txActive={} txName={} loginId={} roleIds=EMPTY",
-                    Thread.currentThread().getName(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive(),
-                    org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionName(),
-                    loginId);
             return List.of();
         }
         List<Long> permissionIds = sysRolePermissionMapper
@@ -61,16 +53,13 @@ public class StpInterfaceImpl implements StpInterface {
                 .distinct()
                 .toList();
         if (permissionIds.isEmpty()) {
-            log.info("[diag] loginId={} roleIds={} permissionIds=EMPTY", loginId, roleIds);
             return List.of();
         }
-        List<String> codes = sysPermissionMapper.selectByIds(permissionIds).stream()
+        return sysPermissionMapper.selectByIds(permissionIds).stream()
                 .filter(permission -> Integer.valueOf(1).equals(permission.getStatus()))
                 .map(SysPermission::getCode)
                 .distinct()
                 .toList();
-        log.info("[diag] loginId={} roleIds={} permissionIds={} codes={}", loginId, roleIds, permissionIds, codes);
-        return codes;
     }
 
     @Override
@@ -88,21 +77,11 @@ public class StpInterfaceImpl implements StpInterface {
 
     private List<Long> roleIdsOf(Object loginId) {
         Long userId = Long.valueOf(String.valueOf(loginId));
-        try {
-            java.sql.Connection c = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
-            try (java.sql.Statement st = c.createStatement();
-                 java.sql.ResultSet rs = st.executeQuery(
-                         "SELECT CONNECTION_ID(), (SELECT COUNT(*) FROM sys_user_role), @@autocommit")) {
-                rs.next();
-                log.info("[diag] reqConnId={} totalLinkRowsSeen={} autoCommit={}",
-                        rs.getInt(1), rs.getInt(2), rs.getInt(3));
-            }
-            List<SysUserRole> rows = sysUserRoleMapper
-                    .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId));
-            return rows.stream().map(SysUserRole::getRoleId).distinct().toList();
-        } catch (Exception e) {
-            log.info("[diag] selectListEx {} {}", e.getClass().getSimpleName(), e.getMessage());
-            return List.of();
-        }
+        return sysUserRoleMapper
+                .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId))
+                .stream()
+                .map(SysUserRole::getRoleId)
+                .distinct()
+                .toList();
     }
 }

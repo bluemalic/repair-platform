@@ -4,8 +4,6 @@ import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.mapper.TicketMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -18,8 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>为什么要专门测 json：它的 TypeHandler 只在**查询**时依赖 {@code autoResultMap = true}，
  * 插入时不依赖。也就是说"能存进去"证明不了配置是对的，必须查回来比对。
  */
-@SpringBootTest
-@Transactional
+@IntegrationTest
 class TicketMapperTest {
 
     @Autowired

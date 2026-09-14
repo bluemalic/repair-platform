@@ -10,13 +10,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -34,9 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>种子数据依赖 schema.sql：租户 gdou、角色 1学生/2维修工/3后勤、楼栋 1~5、
  * 类别 1~6、报修码 482913→1号楼1-101。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Transactional
+@IntegrationTest
 class TicketFlowTest {
 
     private static final String PASSWORD = "Test@123456";
@@ -58,9 +53,6 @@ class TicketFlowTest {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private javax.sql.DataSource dataSource;
 
     @Test
     void fullLifecycleFromSubmitToClose() throws Exception {
@@ -246,30 +238,7 @@ class TicketFlowTest {
         SysUserRole link = new SysUserRole();
         link.setUserId(user.getId());
         link.setRoleId(roleId);
-        int linkRows = sysUserRoleMapper.insert(link);
-        long backRows = sysUserRoleMapper.selectCount(
-                com.baomidou.mybatisplus.core.toolkit.Wrappers.<SysUserRole>lambdaQuery()
-                        .eq(SysUserRole::getUserId, user.getId()));
-        long allRows = sysUserRoleMapper.selectCount(null);
-        String connInfo = "n/a";
-        try {
-            java.sql.Connection c = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
-            try (java.sql.Statement st = c.createStatement();
-                 java.sql.ResultSet rs = st.executeQuery(
-                         "SELECT CONNECTION_ID(), (SELECT COUNT(*) FROM sys_user_role), @@autocommit")) {
-                rs.next();
-                connInfo = "connId=" + rs.getInt(1) + " totalSeen=" + rs.getInt(2) + " autoCommit=" + rs.getInt(3);
-            }
-        } catch (Exception e) {
-            connInfo = "connInfoFailed " + e.getMessage();
-        }
-        System.out.println("[diag-test] username=" + username + " userId=" + user.getId()
-                + " roleId=" + roleId + " linkRows=" + linkRows
-                + " linkRowsBackRead=" + backRows + " totalLinkRows=" + allRows
-                + " " + connInfo
-                + " thread=" + Thread.currentThread().getName()
-                + " txActive=" + org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
-                + " txName=" + org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionName());
+        sysUserRoleMapper.insert(link);
 
         if (buildingIds != null) {
             for (Long buildingId : buildingIds) {
