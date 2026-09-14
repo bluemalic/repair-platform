@@ -227,8 +227,7 @@ public class TicketServiceImpl implements TicketService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { });
-        notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_EVALUATED",
-                "工单已验收", "工单 " + ticket.getTicketNo() + " 已被评价 " + dto.getScore() + " 分", id);
+        notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
     }
 
     // ==================== 维修工端 ====================
@@ -250,8 +249,7 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         .eq(Ticket::getWorkerId, workerId),
                 entity -> entity.setAcceptTime(LocalDateTime.now()));
-        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), "TICKET_ACCEPTED",
-                "维修工已接单", "工单 " + ticket.getTicketNo() + " 已被接单，维修工会尽快到场", id);
+        notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
 
     @Override
@@ -289,8 +287,7 @@ public class TicketServiceImpl implements TicketService {
                     entity.setArriveTime(now);
                     entity.setArriveMinutes(arriveMinutes);
                 });
-        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), "TICKET_ARRIVED",
-                "维修工已到场", "工单 " + ticket.getTicketNo() + " 维修工已到场处理", id);
+        notifyTransition(ticket, TicketAction.ARRIVE, null, null);
     }
 
     @Override
@@ -316,8 +313,7 @@ public class TicketServiceImpl implements TicketService {
                     entity.setResultImages(dto.getResultImages());
                     entity.setHandleMinutes(handleMinutes);
                 });
-        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), "TICKET_FINISHED",
-                "维修完成待验收", "工单 " + ticket.getTicketNo() + " 已完成维修，请验收评价", id);
+        notifyTransition(ticket, TicketAction.FINISH, null, null);
     }
 
     @Override
@@ -330,8 +326,7 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         doReject(ticket, workerId, dto.getReason());
-        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), "TICKET_REJECTED",
-                "工单被驳回", "工单 " + ticket.getTicketNo() + " 被驳回：" + dto.getReason(), id);
+        notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
     }
 
     @Override
@@ -341,10 +336,8 @@ public class TicketServiceImpl implements TicketService {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
         doReject(ticket, adminId, dto.getReason());
-        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), "TICKET_REJECTED",
-                "工单被驳回", "工单 " + ticket.getTicketNo() + " 被驳回：" + dto.getReason(), id);
-        notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_REJECTED",
-                "工单被驳回", "工单 " + ticket.getTicketNo() + " 被驳回：" + dto.getReason(), id);
+        notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
+        notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
     }
 
     private void doReject(Ticket ticket, long operatorId, String reason) {
@@ -382,8 +375,7 @@ public class TicketServiceImpl implements TicketService {
                     entity.setDispatchType(1);
                     entity.setDispatchTime(LocalDateTime.now());
                 });
-        notificationService.send(ticket.getTenantId(), dto.getWorkerId(), "TICKET_DISPATCHED",
-                "新工单待接单", "工单 " + ticket.getTicketNo() + " 已派给你，请及时接单", id);
+        notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         log.info("派单 ticketId={} workerId={} operator={}", id, dto.getWorkerId(), adminId);
     }
 
@@ -401,6 +393,38 @@ public class TicketServiceImpl implements TicketService {
     }
 
     // ==================== 私有工具 ====================
+
+    /** 状态变更通知的规格：类型、标题、正文后缀、默认接收方。满载等新动作加一行即可。 */
+    private record NoticeSpec(String type, String title, String suffix, boolean toStudent) {
+    }
+
+    /** 动作 → 通知规格。通知的文案与接收方收敛在这里，调用方只负责"触发"与必要的补充参数。 */
+    private static final Map<TicketAction, NoticeSpec> TRANSITION_NOTICE = Map.of(
+            TicketAction.ACCEPT,   new NoticeSpec("TICKET_ACCEPTED",  "维修工已接单",     "已被接单，维修工会尽快到场", true),
+            TicketAction.ARRIVE,   new NoticeSpec("TICKET_ARRIVED",   "维修工已到场",     "维修工已到场处理",           true),
+            TicketAction.FINISH,   new NoticeSpec("TICKET_FINISHED",  "维修完成待验收",   "已完成维修，请验收评价",     true),
+            TicketAction.REJECT,   new NoticeSpec("TICKET_REJECTED",  "工单被驳回",       null,                          true),
+            TicketAction.DISPATCH, new NoticeSpec("TICKET_DISPATCHED","新工单待接单",     "已派给你，请及时接单",       false),
+            TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false));
+
+    /**
+     * 按动作给相关方发站内通知。默认接收方取自工单上的学生/维修工；
+     * explicitReceiver 非空时优先——派单时工单还没写维修工、管理员驳回时维修工已被清空，
+     * 这两种场景由调用方把"该收通知的人"传进来，而不是事后回查。
+     */
+    private void notifyTransition(Ticket ticket, TicketAction action, Long explicitReceiver, String suffix) {
+        NoticeSpec spec = TRANSITION_NOTICE.get(action);
+        if (spec == null) {
+            return;
+        }
+        long receiver = explicitReceiver != null ? explicitReceiver
+                : (spec.toStudent() ? ticket.getStudentId() : ticket.getWorkerId());
+        if (receiver <= 0) {
+            return;
+        }
+        notificationService.send(ticket.getTenantId(), receiver, spec.type(), spec.title(),
+                "工单 " + ticket.getTicketNo() + (suffix == null ? spec.suffix() : suffix), ticket.getId());
+    }
 
     /**
      * 条件更新：SET 来自 entitySetter 对实体的赋值（null 字段被 MP 跳过），
