@@ -77,6 +77,8 @@ jobs:
           MYSQL_PASSWORD: ci-root-password
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: '6379'
+          # 临时诊断：打印 SQL，定位 TicketFlowTest 在 CI 中 10003 的根因
+          SPRING_APPLICATION_JSON: '{"logging":{"level":{"com.bluemalic.repair.mapper":"DEBUG"}}}'
         run: mvn -B clean package
 
       - name: 上传测试报告
