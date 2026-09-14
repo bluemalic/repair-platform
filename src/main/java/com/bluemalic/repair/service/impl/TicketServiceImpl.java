@@ -31,6 +31,7 @@ import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.NotificationService;
 import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.RepairCodeVO;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -79,6 +80,7 @@ public class TicketServiceImpl implements TicketService {
     private final RepairCodeMapper repairCodeMapper;
     private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
+    private final TimeoutService timeoutService;
     private final StringRedisTemplate stringRedisTemplate;
 
     // ==================== 学生端 ====================
@@ -228,6 +230,8 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { });
         notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
+        // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
+        timeoutService.registerEval(ticket.getId());
     }
 
     // ==================== 维修工端 ====================
@@ -390,6 +394,22 @@ public class TicketServiceImpl implements TicketService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
+        // 人工关闭后取消已登记的验收超时任务，避免调度器重复处理
+        timeoutService.cancel(id);
+    }
+
+    @Override
+    @Transactional
+    public void autoClose(long id) {
+        Ticket ticket = requireTicket(id);
+        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
+        // 操作者 0 = 系统定时任务（超时调度），与人工 close 在 ticket_log 上可区分
+        conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, 0L,
+                ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
+                entity -> entity.setCloseTime(LocalDateTime.now()));
+        notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
+        timeoutService.cancel(id);
     }
 
     // ==================== 私有工具 ====================
@@ -405,7 +425,8 @@ public class TicketServiceImpl implements TicketService {
             TicketAction.FINISH,   new NoticeSpec("TICKET_FINISHED",  "维修完成待验收",   "已完成维修，请验收评价",     true),
             TicketAction.REJECT,   new NoticeSpec("TICKET_REJECTED",  "工单被驳回",       null,                          true),
             TicketAction.DISPATCH, new NoticeSpec("TICKET_DISPATCHED","新工单待接单",     "已派给你，请及时接单",       false),
-            TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false));
+            TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false),
+            TicketAction.AUTO_CLOSE, new NoticeSpec("TICKET_AUTO_CLOSED", "工单已自动关闭", "验收后超时未关闭，工单已自动关闭", true));
 
     /**
      * 按动作给相关方发站内通知。默认接收方取自工单上的学生/维修工；

@@ -13,7 +13,8 @@ public enum TicketAction {
     EVALUATE("验收评价"),
     CANCEL("撤销工单"),
     CLOSE("关闭工单"),
-    REJECT("驳回");
+    REJECT("驳回"),
+    AUTO_CLOSE("超时自动关闭");
 
     private final String desc;
 
