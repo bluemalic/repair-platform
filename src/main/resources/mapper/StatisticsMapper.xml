@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  统计看板 SQL。三条约定：
+  1. 时间区间左闭右开 [start, end)，Service 已把日期补成时间点
+  2. ticket 表手写 deleted = 0（自定义 SQL 不吃 MyBatis-Plus 的逻辑删除）
+  3. 一律按 tenant_id 过滤——统计跨租户泄漏比单条数据泄漏更严重
+  超时相关指标不在 SQL 里重算阈值，而是看 ticket_log 里有没有超时动作记录：
+  阈值是可配置的，把阈值抄进 SQL 会与超时规则悄悄漂移（同一口径两处实现在这个项目里踩过）。
+-->
+<mapper namespace="com.bluemalic.repair.mapper.StatisticsMapper">
+
+    <!-- 核心指标卡。满意度 LEFT JOIN 评价表；uk_ticket 保证一个工单一条评价，不会放大行数 -->
+    <select id="selectOverview" resultType="com.bluemalic.repair.vo.StatisticsOverviewVO">
+        SELECT COUNT(*)                              AS total,
+               AVG(t.arrive_minutes)                 AS avgResponseMinutes,
+               AVG(t.handle_minutes)                 AS avgHandleMinutes,
+               AVG(e.score)                          AS avgScore,
+               COALESCE(SUM(CASE WHEN EXISTS (
+                   SELECT 1 FROM ticket_log l
+                   WHERE l.ticket_id = t.id
+                     AND l.action IN ('ACCEPT_TIMEOUT', 'PROCESS_TIMEOUT', 'AUTO_CLOSE')
+               ) THEN 1 ELSE 0 END), 0)              AS timeoutCount
+        FROM ticket t
+                 LEFT JOIN ticket_evaluation e ON e.ticket_id = t.id
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+    </select>
+
+    <select id="selectTrendByDay" resultType="com.bluemalic.repair.vo.StatisticsTrendVO">
+        SELECT DATE_FORMAT(t.submit_time, '%Y-%m-%d') AS date,
+               COUNT(*)                               AS count
+        FROM ticket t
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY DATE_FORMAT(t.submit_time, '%Y-%m-%d')
+        ORDER BY date
+    </select>
+
+    <!-- 按周：把日期归到那一周的周一 -->
+    <select id="selectTrendByWeek" resultType="com.bluemalic.repair.vo.StatisticsTrendVO">
+        SELECT DATE_FORMAT(DATE_SUB(t.submit_time, INTERVAL WEEKDAY(t.submit_time) DAY), '%Y-%m-%d') AS date,
+               COUNT(*)                                                                             AS count
+        FROM ticket t
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY DATE_FORMAT(DATE_SUB(t.submit_time, INTERVAL WEEKDAY(t.submit_time) DAY), '%Y-%m-%d')
+        ORDER BY date
+    </select>
+
+    <select id="selectDistributionByCategory" resultType="com.bluemalic.repair.vo.StatisticsDistributionVO">
+        SELECT c.name     AS name,
+               COUNT(*)   AS count
+        FROM ticket t
+                 JOIN ticket_category c ON c.id = t.category_id
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY c.id, c.name
+        ORDER BY count DESC
+    </select>
+
+    <select id="selectDistributionByBuilding" resultType="com.bluemalic.repair.vo.StatisticsDistributionVO">
+        SELECT b.name     AS name,
+               COUNT(*)   AS count
+        FROM ticket t
+                 JOIN building b ON b.id = t.building_id
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY b.id, b.name
+        ORDER BY count DESC
+    </select>
+
+    <!-- 紧急度没有码表，先取数字，由 Service 换成"普通/紧急/特急"文案 -->
+    <select id="selectDistributionByUrgency" resultType="com.bluemalic.repair.vo.StatisticsDistributionVO">
+        SELECT CAST(t.urgency AS CHAR) AS name,
+               COUNT(*)                AS count
+        FROM ticket t
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY t.urgency
+        ORDER BY count DESC
+    </select>
+
+    <!-- 师傅工作量：只统计派过单的工单；按时 = 该工单没触发过处理超时升级 -->
+    <select id="selectWorkerWorkload" resultType="com.bluemalic.repair.vo.StatisticsWorkerWorkloadVO">
+        SELECT t.worker_id                                                        AS workerId,
+               COALESCE(u.real_name, '未知')                                       AS workerName,
+               SUM(CASE WHEN t.finish_time IS NOT NULL THEN 1 ELSE 0 END)          AS finishedCount,
+               AVG(t.handle_minutes)                                              AS avgHandleMinutes,
+               SUM(CASE WHEN EXISTS (
+                   SELECT 1 FROM ticket_log l
+                   WHERE l.ticket_id = t.id AND l.action = 'PROCESS_TIMEOUT'
+               ) THEN 1 ELSE 0 END)                                               AS processTimeoutCount
+        FROM ticket t
+                 JOIN sys_user u ON u.id = t.worker_id
+        WHERE t.deleted = 0
+          AND t.tenant_id = #{tenantId}
+          AND t.worker_id IS NOT NULL
+          AND t.submit_time &gt;= #{start}
+          AND t.submit_time &lt; #{end}
+        GROUP BY t.worker_id, u.real_name
+        ORDER BY finishedCount DESC, t.worker_id
+    </select>
+
+</mapper>
