@@ -1,0 +1,49 @@
+# 前端 CI：只在（且仅在）前端目录变化时触发。
+#
+# 为什么不并进 ci.yml：AGENTS 3.1 第 4 条要求"后端构建不依赖前端"——
+#   · 前端改坏了不该影响后端发布
+#   · 后端 PR 不该为了等 npm install 而变慢
+# 这里也不给 ci.yml 加 paths-ignore：后端 job 是 PR 的必过检查，
+# 一旦因路径被跳过，PR 会一直等一个"永远不会出现的检查"而无法合并。
+#
+# miniapp-h5 工程尚未创建（见 README「当前进度」）；它建好后在下面同样加一个 job 即可。
+
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web-admin/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    paths:
+      - 'web-admin/**'
+      - '.github/workflows/frontend-ci.yml'
+
+jobs:
+  admin:
+    name: 管理端构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-admin
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web-admin/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建
+        run: npm run build

@@ -37,14 +37,29 @@
 | 接口文档 | Knife4j（OpenAPI 3） | 每个接口都要有注解 |
 | AI | LangChain4j + DeepSeek API | Key 只从环境变量读 |
 | 测试 | JUnit 5 + Mockito | |
+| 管理端前端 | Vue 3 + Vite + TypeScript + Element Plus + ECharts | 在 `web-admin/`，自带 package.json |
+| 移动端前端 | uni-app（Vue 3 语法，先编译 H5） | 在 `miniapp-h5/`，学生端与维修工端同一工程按角色路由 |
 | 部署 | Docker + Docker Compose + Nginx | |
-| CI | GitHub Actions | |
+| CI | GitHub Actions | 前端 CI 独立于后端，按路径触发 |
 
 > **"不要引入 Spring Security"指的是一整套安全框架**（过滤器链 + 认证授权 + 自动装配），不是指它的加密工具包。
 > 需要 BCrypt 时可以用 `org.springframework.security:spring-security-crypto`——它只含 BCrypt / Argon2 / PBKDF2，
 > 没有过滤器链、没有自动装配，版本由 Spring Boot 统一管理；鉴权仍然走 Sa-Token，两者不冲突。
 
-**要新增任何依赖，先说明理由并得到确认。**
+**要新增任何依赖，先说明理由并得到确认。**（前端同理：往 `package.json` 加运行时依赖也要先说明。）
+
+---
+
+## 3.1 前端的仓库边界（决定：先单仓，保留将来拆分路径，见 ADR-007）
+
+前端暂时与后端同仓库（`web-admin/`、`miniapp-h5/`），但**必须守住下面四条**，否则将来拆分就从"搬运"变成"重写"：
+
+1. **两个前端各是独立工程**：各自的 `package.json` + lockfile，**不要在仓库根目录搞 npm workspace 把它们连起来**
+2. **不互相引用源码**：前端不 import 后端代码；后端也不引用前端源码。唯一连接点是 nginx 挂载 `dist` 与 `docs/03` 的接口契约
+3. **绝不把前端产物放进后端 jar**（`src/main/resources/static`）——它会让版本一起发、镜像变大、拆分要动 Java 代码
+4. **后端构建不依赖前端**：后端 Dockerfile / 后端 CI 里不出现 Node；前端构建失败不影响后端发布
+
+此外：接口契约以 `docs/03` 为准，前端不去"读后端代码猜接口"；契约变更先改文档再改两端。
 
 ---
 
@@ -66,8 +81,15 @@ com.bluemalic.repair
 ├── vo/            出参
 ├── converter/     DTO / VO / Entity 之间的转换
 ├── interceptor/   数据权限、鉴权拦截器
-├── ai/            Schema 检索、SQL 生成、SQL 安全网关
+├── ai/            Schema 检索、SQL 生成、SQL 安全网关（M4）
 └── job/           定时任务
+```
+
+前端工程（仓库根目录，与后端平级）：
+
+```
+web-admin/     后勤管理端（Vue 3 + Element Plus + ECharts），Vite 构建产物 dist/ 由 nginx 挂载
+miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 由 nginx 挂载
 ```
 
 ---
@@ -112,9 +134,12 @@ com.bluemalic.repair
 ## 8. 测试与提交
 
 - 单测优先覆盖三类：**状态机流转、幂等逻辑、数据权限过滤**。
-- 提交前必须 `mvn -B clean package` 通过。
+- 提交前必须 `mvn -B clean package` 通过；**改了前端**则对应工程 `npm run build` 也要通过。
 - Commit 用 Conventional Commits：`feat(order): ...` / `fix(auth): ...` / `docs(db): ...`。
+  - 前端 scope 固定用 `admin`（管理端）与 `h5`（学生/维修工端），例如 `feat(admin): 工单列表页`；
+    将来按路径切分历史时，这两个 scope 就是天然的分界线。
 - 每个功能走分支 + PR，不要直接推 main。
+- 前端不在后端 CI 里构建（见 3.1 第 4 条）：前端 CI 由 `.github/workflows/frontend-ci.yml` 按路径触发。
 
 ---
 
@@ -129,6 +154,8 @@ com.bluemalic.repair
 | 做失物招领、活动报名 | 与维修无关，只会稀释主线 |
 | 在 Mapper 里手写数据权限条件 | 必须走拦截器，避免漏写造成越权 |
 | 把密码 / API Key 写进代码或提交 `.env` | 一旦进 Git 历史就删不干净 |
+| 把前端产物塞进后端 jar（`resources/static`） | 前后端版本会被绑在一起发；将来拆分要动 Java 代码（见 3.1） |
+| 在仓库根目录用 npm workspace 连起两个前端 | 破坏"各是独立工程"的边界，将来拆分成解绑工作（见 3.1） |
 | 留下 `TODO` 占位就交付 | 要么写完，要么明确标注未做 |
 | 未经确认新增第三方依赖 | 任何新依赖都要能解释为什么需要它 |
 
