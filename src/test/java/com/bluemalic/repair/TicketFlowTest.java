@@ -172,6 +172,16 @@ class TicketFlowTest {
     }
 
     @Test
+    void submitRejectsIllegalUrgency() throws Exception {
+        String student = givenToken("test-urgency-student", 1, 1L, null);
+
+        // 紧急度只有 1/2/3；越界应在参数校验层被拦（10001），不该落库成"0 普通"之外的脏值
+        postJson(student, "/api/student/tickets", Map.of(
+                "repairCode", "482913", "categoryId", 1, "description", "紧急度越界",
+                "urgency", 9)).andExpect(jsonPath("$.code").value(10001));
+    }
+
+    @Test
     void byCodeReturnsLocationOrInvalid() throws Exception {
         String student = givenToken("test-code-student", 1, 1L, null);
 
