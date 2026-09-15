@@ -37,13 +37,20 @@ public class TimeoutScheduler {
     /** ADR-001：秒级消费，触发精度 ≈ 阈值 + 1s。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueEval() {
-        runQuietly("消费到期任务", () -> closeDue(timeoutService.handleDueEval()));
+        runQuietly("消费到期任务[验收]", () -> closeDue(timeoutService.handleDueEval()));
     }
 
-    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径。 */
+    /** 未接单提醒节点：到期仍无人接单 → 提醒调度方（docs/01 §超时）。 */
+    @Scheduled(fixedDelay = 1000)
+    public void consumeDueAccept() {
+        runQuietly("消费到期任务[接单]", () -> remindDue(timeoutService.handleDueAccept()));
+    }
+
+    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径（两个节点都扫）。 */
     @Scheduled(cron = "0 * * * * *")
     public void backstop() {
-        runQuietly("兜底扫描", () -> closeDue(timeoutService.backstopScanEval()));
+        runQuietly("兜底扫描[验收]", () -> closeDue(timeoutService.backstopScanEval()));
+        runQuietly("兜底扫描[接单]", () -> remindDue(timeoutService.backstopScanAccept()));
     }
 
     /**
@@ -69,6 +76,19 @@ public class TimeoutScheduler {
             } catch (Exception e) {
                 // 单工单失败不影响本轮其余任务
                 log.warn("超时自动关闭失败 ticketId={}", ticketId, e);
+            }
+        }
+    }
+
+    private void remindDue(List<Long> ticketIds) {
+        for (Long ticketId : ticketIds) {
+            try {
+                // 幂等与"是否还该提醒"都在 remindAcceptTimeout 里判定（状态 + ticket_log）
+                ticketService.remindAcceptTimeout(ticketId);
+            } catch (BizException e) {
+                log.info("接单提醒跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
+            } catch (Exception e) {
+                log.warn("接单提醒失败 ticketId={}", ticketId, e);
             }
         }
     }

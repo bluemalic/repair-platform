@@ -58,4 +58,14 @@ public interface TicketService {
 
     /** 超时自动关闭（50 → 60）。仅超时调度器调用（系统上下文，操作者=0），不对外暴露接口。 */
     void autoClose(long id);
+
+    /**
+     * 接单超时提醒：20 待接单 超过阈值（默认 24h）仍无人接单时，提醒本租户后勤管理员。
+     * 仅超时调度器调用；不是状态跃迁（20 → 20，只写 ticket_log + 通知）。
+     *
+     * <p><b>职责边界</b>：是否"已到期"由调用方判定（ZSet 按 score、兜底扫描按时间阈值），
+     * 本方法只判定"还该不该提醒"——状态仍是 20，且 ticket_log 里没有 ACCEPT_TIMEOUT 记录
+     * （幂等：兜底扫描每分钟都会扫到同一批超期工单，不判重就会把管理员刷屏）。
+     */
+    void remindAcceptTimeout(long id);
 }
