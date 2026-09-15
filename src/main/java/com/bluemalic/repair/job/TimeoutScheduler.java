@@ -5,6 +5,7 @@ import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.TicketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -19,10 +20,15 @@ import java.util.List;
  *
  * <p>这里只做"编排"：到期工单该做什么（自动关闭）由 {@link TicketService#autoClose} 决定，
  * 调度器不直接碰库。
+ *
+ * <p><b>测试里必须关掉</b>（{@code repair.timeout.scheduler-enabled=false}，见测试注解
+ * {@code @IntegrationTest}）：集成测试用 @Transactional 造数据，后台线程既看不到未提交数据，
+ * 又会在库里/Redis 上反复空转刷日志；超时逻辑本身由 TimeoutAutoCloseTest 直接调服务方法验证。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "repair.timeout", name = "scheduler-enabled", matchIfMissing = true)
 public class TimeoutScheduler {
 
     private final TimeoutService timeoutService;
@@ -31,13 +37,25 @@ public class TimeoutScheduler {
     /** ADR-001：秒级消费，触发精度 ≈ 阈值 + 1s。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueEval() {
-        closeDue(timeoutService.handleDueEval());
+        runQuietly("消费到期任务", () -> closeDue(timeoutService.handleDueEval()));
     }
 
     /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径。 */
     @Scheduled(cron = "0 * * * * *")
     public void backstop() {
-        closeDue(timeoutService.backstopScanEval());
+        runQuietly("兜底扫描", () -> closeDue(timeoutService.backstopScanEval()));
+    }
+
+    /**
+     * 调度任务不向上抛异常：Redis/数据库短暂不可用是常态，抛出去会被 Spring 的 TaskUtils
+     * 按 ERROR 打整段堆栈、每秒一次，把日志冲垮。这里降成一行 WARN，恢复后自然继续。
+     */
+    private void runQuietly(String task, Runnable body) {
+        try {
+            body.run();
+        } catch (Exception e) {
+            log.warn("超时调度[{}]本轮失败（下一轮继续）：{}", task, e.getMessage());
+        }
     }
 
     private void closeDue(List<Long> ticketIds) {

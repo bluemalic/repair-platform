@@ -24,10 +24,14 @@ import java.lang.annotation.Target;
  *
  * <p>{@code @Transactional} 让每个测试方法结束后自动回滚；配合 MockMvc 跑在**同一个线程**，
  * 测试事务里插入的数据对请求可见（这也是不能用 RANDOM_PORT 的原因）。
+ *
+ * <p>{@code properties} 关掉超时调度器：后台 @Scheduled 线程看不到测试未提交的数据，
+ * 只会在库里/Redis 上空转刷日志（超时逻辑本身由 TimeoutAutoCloseTest 直接调服务方法验证）。
+ * 这里属性写死在这个组合注解里，所有测试类配置一致 → 仍然共用一个 Spring 上下文。
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest
+@SpringBootTest(properties = "repair.timeout.scheduler-enabled=false")
 @AutoConfigureMockMvc
 @Transactional
 public @interface IntegrationTest {
