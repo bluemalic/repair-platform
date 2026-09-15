@@ -6,27 +6,40 @@ import java.util.List;
 /**
  * 超时调度（ADR-001：Redis ZSet 延迟队列，ZREM 返回值做多实例去重）。
  *
+ * <p>两个节点各用一个 ZSet key（{@code ticket:timeout:ACCEPT} / {@code ticket:timeout:EVAL}），
+ * member = ticketId、score = 到期毫秒时间戳。按节点分 key 而不是在一个 key 里用
+ * "{@code id:节点}" 拼 member：消费时不需要解析和过滤，取消时也只是对两个 key 各删一次。
+ *
  * <p>职责边界：本接口只负责"登记到期任务 / 消费到期任务 / 兜底扫描"这些**机制**，
- * 到期的工单由谁处理（自动关闭）在调用方（TimeoutScheduler）里编排——这样不被
+ * 到期后做什么（提醒后勤 / 自动关闭）由调用方（TimeoutScheduler）编排——这样不被
  * TicketService 反向依赖，避免两个 Service 互相引用形成循环依赖。
  */
 public interface TimeoutService {
 
+    /** 工单派单后登记未接单提醒：到期时间 = 现在 + 接单阈值（默认 24h）。 */
+    void registerAccept(long ticketId);
+
+    /** 显式指定到期时间登记接单提醒（测试与兜底补录用）。 */
+    void registerAcceptDeadline(long ticketId, Instant deadline);
+
     /** 工单进入 50 已完成时登记验收超时：到期时间 = 现在 + 验收阈值（默认 24h）。 */
     void registerEval(long ticketId);
 
-    /** 显式指定到期时间登记（测试与兜底补录用）。 */
+    /** 显式指定到期时间登记验收超时（测试与兜底补录用）。 */
     void registerEvalDeadline(long ticketId, Instant deadline);
 
-    /** 取消该工单的全部超时登记（到达终态或人工关闭时调用）。 */
+    /** 取消该工单的**全部**超时登记（节点已完成或到达终态时调用）。 */
     void cancel(long ticketId);
 
-    /**
-     * 消费到期任务：取 score ≤ now 的成员，逐个 ZREM —— 只有删除成功的实例才把该工单
-     * 放进返回列表（多实例并发下天然只有一个执行者）。
-     */
+    /** 消费到期的接单提醒：ZREM 成功者才进返回列表（多实例唯一消费）。 */
+    List<Long> handleDueAccept();
+
+    /** 消费到期的验收超时：同上。 */
     List<Long> handleDueEval();
 
-    /** 兜底：直接扫库找"该到期却没在 ZSet 里"的工单（Redis 重启丢任务场景）。 */
+    /** 兜底：直接扫库找"该提醒接单、却没在 ZSet 里"的工单（Redis 重启丢任务场景）。 */
+    List<Long> backstopScanAccept();
+
+    /** 兜底：直接扫库找"该到期却没在 ZSet 里"的已完成工单。 */
     List<Long> backstopScanEval();
 }

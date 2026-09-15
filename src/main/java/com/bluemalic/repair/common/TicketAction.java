@@ -14,7 +14,8 @@ public enum TicketAction {
     CANCEL("撤销工单"),
     CLOSE("关闭工单"),
     REJECT("驳回"),
-    AUTO_CLOSE("超时自动关闭");
+    AUTO_CLOSE("超时自动关闭"),
+    ACCEPT_TIMEOUT("接单超时提醒");
 
     private final String desc;
 

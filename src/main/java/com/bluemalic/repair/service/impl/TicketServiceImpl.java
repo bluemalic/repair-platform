@@ -8,6 +8,7 @@ import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
@@ -72,6 +73,13 @@ public class TicketServiceImpl implements TicketService {
 
     private static final DateTimeFormatter TICKET_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
 
+    /** ticket_log.operator_id 用 0 表示"系统"（超时调度等无登录态动作），与真人操作区分。 */
+    private static final long SYSTEM_OPERATOR = 0L;
+
+    /** 超时提醒类通知（不是状态跃迁，所以不进 TRANSITION_NOTICE 表）：类型与标题放一处。 */
+    private static final String NOTICE_ACCEPT_TIMEOUT = "TICKET_ACCEPT_TIMEOUT";
+    private static final String TITLE_ACCEPT_TIMEOUT = "工单超时未接单";
+
     private final TicketMapper ticketMapper;
     private final TicketLogMapper ticketLogMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
@@ -81,6 +89,7 @@ public class TicketServiceImpl implements TicketService {
     private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
+    private final TimeoutRule timeoutRule;
     private final StringRedisTemplate stringRedisTemplate;
 
     // ==================== 学生端 ====================
@@ -253,6 +262,8 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         .eq(Ticket::getWorkerId, workerId),
                 entity -> entity.setAcceptTime(LocalDateTime.now()));
+        // 接单节点完成：撤掉未接单提醒，避免"已接单还在提醒调度方"
+        timeoutService.cancel(id);
         notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
 
@@ -353,6 +364,8 @@ public class TicketServiceImpl implements TicketService {
                     // 驳回后清空维修工，重新派单时另指派
                     entity.setWorkerId(null);
                 });
+        // 驳回后原节点作废（可能是未接单提醒，也可能是待验收的验收超时）；重新派单会重新登记
+        timeoutService.cancel(ticket.getId());
         log.info("驳回工单 ticketId={} operator={} reason={}", ticket.getId(), operatorId, reason);
     }
 
@@ -380,6 +393,8 @@ public class TicketServiceImpl implements TicketService {
                     entity.setDispatchTime(LocalDateTime.now());
                 });
         notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
+        // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
+        timeoutService.registerAccept(id);
         log.info("派单 ticketId={} workerId={} operator={}", id, dto.getWorkerId(), adminId);
     }
 
@@ -403,13 +418,41 @@ public class TicketServiceImpl implements TicketService {
     public void autoClose(long id) {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
-        // 操作者 0 = 系统定时任务（超时调度），与人工 close 在 ticket_log 上可区分
-        conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, 0L,
+        conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
         timeoutService.cancel(id);
+    }
+
+    @Override
+    @Transactional
+    public void remindAcceptTimeout(long id) {
+        Ticket ticket = requireTicket(id);
+        if (ticket.getStatus() != TicketStatus.TO_ACCEPT.getCode()) {
+            // 已接单/已驳回/已关闭——提醒没意义。兜底扫描每分钟都会扫到同一批，这里静默跳过
+            return;
+        }
+        if (notifiedBefore(id, TicketAction.ACCEPT_TIMEOUT)) {
+            // 幂等：同一工单只提醒一次（否则兜底扫描每分钟提醒一次，管理员会被刷屏）
+            return;
+        }
+        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+                TicketAction.ACCEPT_TIMEOUT, SYSTEM_OPERATOR, null);
+        int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), NOTICE_ACCEPT_TIMEOUT,
+                TITLE_ACCEPT_TIMEOUT,
+                "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
+                        + " 无人接单，请及时调度",
+                id);
+        log.info("接单超时提醒 ticketId={} 送达后勤管理员 {} 人", id, sent);
+    }
+
+    /** 幂等判据：ticket_log 里已有该动作的记录（日志本身就是"已处理过"的事实依据）。 */
+    private boolean notifiedBefore(long ticketId, TicketAction action) {
+        return ticketLogMapper.selectCount(Wrappers.<TicketLog>lambdaQuery()
+                .eq(TicketLog::getTicketId, ticketId)
+                .eq(TicketLog::getAction, action.name())) > 0;
     }
 
     // ==================== 私有工具 ====================
