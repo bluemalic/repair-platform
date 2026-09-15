@@ -124,8 +124,10 @@ class TimeoutAutoCloseTest {
         List<Long> due = timeoutService.backstopScanEval();
         assertThat(due).contains(overdue.getId()).doesNotContain(fresh.getId());
 
-        // 模拟调度器：对兜底结果逐个执行 autoClose（autoClose 内部校验状态仍为 50）
-        due.forEach(id -> ticketService.autoClose(id));
+        // 只处理自己造的那条：兜底扫描是**全表跨租户**的（调度器要处理所有超期工单），
+        // 它会扫到库里遗留的真实数据——那些工单可能已被人工关闭，autoClose 会抛异常
+        // （生产中由调度器 catch 后跳过，见 TimeoutScheduler.closeDue）
+        ticketService.autoClose(overdue.getId());
         assertThat(ticketMapper.selectById(overdue.getId()).getStatus()).isEqualTo(60);
         assertThat(ticketMapper.selectById(fresh.getId()).getStatus()).isEqualTo(50);
     }
