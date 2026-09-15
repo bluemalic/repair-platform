@@ -4,7 +4,30 @@
 
 [![CI](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml)
 
-**在线演示**：http://你的服务器IP:8080 　|　**接口文档**：http://你的服务器IP:8080/doc.html
+**接口文档**：本机启动后 `http://localhost:8080/doc.html`（在线演示地址待部署阶段填）
+
+---
+
+## 当前进度（先看这里）
+
+**本仓库目前是后端工程**。下面区分"已完成"与"规划中"——README 其余部分描述的是**完整目标架构**，
+其中的前端、AI、对象存储等按里程碑推进，未完成的部分在下表和目录结构里都标了状态。
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| M1 | 工程骨架 + 三端账号与权限（Sa-Token + RBAC + 数据范围） | ✅ 已完成 |
+| M2 | 工单全流程 + 8 状态机 + 数据权限拦截器 + 报修码 | ✅ 已完成 |
+| M3 | 站内通知（未读数 / 已读） | ✅ 已完成 |
+| M3 | 超时升级三节点：24h 未接单提醒 · 48h 未处理升级 · 验收超时自动关闭（Redis ZSet 延迟队列 + 兜底扫描） | ✅ 已完成 |
+| M3 | 统计看板四个接口（总览 / 趋势 / 分布 / 师傅工作量） | ✅ 已完成 |
+| — | 文件与图片上传（MinIO） | 🚧 未开始（P0 缺口） |
+| — | 管理端基础数据接口：维修工管理（含负责楼栋）· 报修码管理 · 楼栋 · 类别 | 🚧 未开始（接口已在 docs/03 定义） |
+| M4 | AI 数据助手 + SQL 安全网关（只读账号 / 白名单 / 强制数据权限 / 熔断） | 🚧 未开始（ADR-003、ADR-005 已定方案） |
+| M5 | 前端：后勤管理端 Vue 3 · 学生/维修工端 uni-app | 🚧 未开始 |
+| M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
+| P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
+
+> 测试与验证：`mvn -B clean package` 本地全绿（当前 38 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径）。
 
 ---
 
@@ -34,7 +57,7 @@
 │  uni-app（先编译 H5）       │  Vue 3 后台   │
 └─────────────┬──────────────┴──────┬───────┘
        └──────────────┼──────────────┘
-                      │  HTTPS / REST + SSE
+                      │  HTTP / REST + SSE（HTTPS 待上线阶段配置）
               ┌───────▼────────┐
               │     Nginx      │
               └───────┬────────┘
@@ -69,19 +92,26 @@
 | 部署 | Docker + Docker Compose + Nginx |
 | CI/CD | GitHub Actions |
 
+> ⚠️ 技术栈表与上面的架构图是**完整目标架构**（含前端、MinIO、AI 域）；当前仓库已实现的部分见
+> 顶部"当前进度"表——例如 MinIO 对象存储与 AI 域**尚未接入**，前端工程**尚未开始**。
+
 ---
 
 ## 快速开始（两条命令）
 
 ```bash
 # 1. 准备环境变量
-cp .env.example .env    # 然后填入数据库密码、DeepSeek API Key
+cp .env.example .env    # 然后填入数据库密码（AI 相关变量是 M4 才用）
 
 # 2. 启动（docs/schema.sql 会在 MySQL 首次启动时自动执行）
 docker compose up -d
 ```
 
-访问：接口文档 http://localhost:8080/doc.html 　|　管理端 http://localhost:8080
+访问：接口文档 http://localhost:8080/doc.html
+
+> ⚠️ 前端工程（`web-admin/`、`miniapp-h5/`）**尚未创建**，所以 nginx 的 `/` 与 `/h5/`
+> 现在没有内容可挂（见 `nginx/nginx.conf` 与 `docker-compose.yml` 里的注释）。
+> 现阶段验证接口请直接用 `doc.html`，或把后端单独跑起来（见 [部署文档](docs/05-部署文档.md)）。
 
 > 数据库已存在时不会重复执行初始化脚本；要重建库见 [部署文档](docs/05-部署文档.md)。
 
@@ -115,13 +145,15 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 │   ├── entity/ dto/ vo/     实体 / 入参 / 出参
 │   ├── converter/           Entity / DTO / VO 转换
 │   ├── interceptor/         数据权限、鉴权
-│   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关
-│   └── job/                 定时任务
-├── web-admin/               后勤管理端（Vue 3）
-├── miniapp/                 学生 / 维修工端（uni-app，先编译 H5）
+│   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关　（规划中，M4）
+│   └── job/                 定时任务（超时调度）
+├── web-admin/               后勤管理端（Vue 3）　（规划中，未开始）
+├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5）　（规划中，未开始）
+├── docs/                    需求 / 数据库 / 接口规范 / 架构决策 / 部署
+├── nginx/                   nginx 配置（已预留 / 与 /h5/ 两个前端静态目录）
 ├── Dockerfile
 ├── docker-compose.yml
-└── .github/workflows/ci.yml
+└── .github/workflows/       ci.yml（测试与打包）+ deploy.yml（CD）
 ```
 
 ---
@@ -138,9 +170,21 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 
 ### 3. 超时升级
 
-用 Redis ZSet 延迟队列替代定时轮询，24 小时未接单提醒调度方、48 小时未处理自动升级。
+用 Redis ZSet 延迟队列替代定时轮询（消费时 `ZREM` 返回值做多实例去重 + 每分钟兜底扫库补漏），三个节点：
 
-### 4. AI 数据助手
+| 节点 | 触发 | 动作 |
+|---|---|---|
+| 未接单 | 20 待接单 超 24h（基准 `dispatch_time`） | 提醒后勤管理员（调度方） |
+| 未处理 | 30 处理中 超 48h（基准 `dispatch_time`） | 升级提醒后勤管理员 |
+| 验收 | 50 已完成 超 24h 未关闭 | 自动流转 60（唯一会改状态的超时动作） |
+
+前两个是"记一笔 `ticket_log` + 发通知"（不改状态），**判重依据就是那笔日志**——兜底扫描每分钟都会扫到同一批超期工单，不判重会把管理员刷屏。阈值全部可配（`REPAIR_TIMEOUT_*_MINUTES`）。
+
+### 4. 统计看板
+
+四个接口：核心指标卡（总量 / 平均响应时长 / 平均处理时长 / 超时率 / 满意度）、报修量趋势（day/week）、分布（类别 / 楼栋 / 紧急度）、师傅工作量与按时完成率。**超时口径以 `ticket_log` 里的超时动作为准**，不在统计 SQL 里重算阈值（阈值可配，两处实现会漂移）——看板上的每个超时都能在后台找到那笔触发它的日志。口径详见 [docs/03](docs/03-接口规范.md)。
+
+### 5. AI 数据助手（规划中，M4）
 
 自然语言 → Schema 检索 → SQL 生成 → **安全网关校验** → 执行 → 出图与结论。
 
