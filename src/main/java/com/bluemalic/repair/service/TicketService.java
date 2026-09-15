@@ -68,4 +68,13 @@ public interface TicketService {
      * （幂等：兜底扫描每分钟都会扫到同一批超期工单，不判重就会把管理员刷屏）。
      */
     void remindAcceptTimeout(long id);
+
+    /**
+     * 处理超时升级：30 处理中 自派单起超过阈值（默认 48h）仍未完工时，升级提醒本租户后勤管理员。
+     * 仅超时调度器调用；同样不是状态跃迁（30 → 30，只写 ticket_log + 通知）。
+     *
+     * <p>职责边界与 {@link #remindAcceptTimeout} 一致：是否到期由调用方判定（ZSet score / 兜底扫描阈值），
+     * 本方法只判定"还该不该升级"——状态仍是 30，且 ticket_log 里没有 PROCESS_TIMEOUT 记录。
+     */
+    void escalateProcessTimeout(long id);
 }

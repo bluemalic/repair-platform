@@ -12,6 +12,7 @@ import java.time.Duration;
  *
  * <ul>
  *   <li>{@code REPAIR_TIMEOUT_ACCEPT_MINUTES}：未接单提醒阈值（默认 24h）</li>
+ *   <li>{@code REPAIR_TIMEOUT_PROCESS_MINUTES}：未处理升级阈值（默认 48h）</li>
  *   <li>{@code REPAIR_TIMEOUT_EVAL_MINUTES}：验收超时自动关闭阈值（默认 24h）</li>
  * </ul>
  */
@@ -22,17 +23,26 @@ public class TimeoutRule {
     /** 未接单提醒：20 待接单 超过该时长仍无人接单 → 提醒调度方（docs/01 §超时）。 */
     private final long acceptMinutes;
 
+    /** 未处理升级：30 处理中 自派单起超过该时长仍未完工 → 升级提醒调度方（docs/01 §超时）。 */
+    private final long processMinutes;
+
     /** 验收超时：50 已完成 超过该时长未关闭 → 自动流转 60（docs/02 状态机 "50→60 超时自动关"）。 */
     private final long evalMinutes;
 
     public TimeoutRule(@Value("${repair.timeout.accept-minutes:1440}") long acceptMinutes,
+                       @Value("${repair.timeout.process-minutes:2880}") long processMinutes,
                        @Value("${repair.timeout.eval-minutes:1440}") long evalMinutes) {
         this.acceptMinutes = acceptMinutes;
+        this.processMinutes = processMinutes;
         this.evalMinutes = evalMinutes;
     }
 
     public Duration acceptDuration() {
         return Duration.ofMinutes(acceptMinutes);
+    }
+
+    public Duration processDuration() {
+        return Duration.ofMinutes(processMinutes);
     }
 
     public Duration evalDuration() {
@@ -45,6 +55,10 @@ public class TimeoutRule {
      */
     public String acceptThresholdText() {
         return humanText(acceptMinutes);
+    }
+
+    public String processThresholdText() {
+        return humanText(processMinutes);
     }
 
     private String humanText(long minutes) {

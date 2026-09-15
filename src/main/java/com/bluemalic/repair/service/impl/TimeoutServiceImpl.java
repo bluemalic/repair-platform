@@ -31,6 +31,7 @@ public class TimeoutServiceImpl implements TimeoutService {
 
     private static final String KEY_PREFIX = "ticket:timeout:";
     private static final String NODE_ACCEPT = "ACCEPT";
+    private static final String NODE_PROCESS = "PROCESS";
     private static final String NODE_EVAL = "EVAL";
 
     private final StringRedisTemplate stringRedisTemplate;
@@ -49,6 +50,16 @@ public class TimeoutServiceImpl implements TimeoutService {
     }
 
     @Override
+    public void registerProcess(long ticketId) {
+        registerProcessDeadline(ticketId, Instant.now().plus(timeoutRule.processDuration()));
+    }
+
+    @Override
+    public void registerProcessDeadline(long ticketId, Instant deadline) {
+        add(NODE_PROCESS, ticketId, deadline);
+    }
+
+    @Override
     public void registerEval(long ticketId) {
         registerEvalDeadline(ticketId, Instant.now().plus(timeoutRule.evalDuration()));
     }
@@ -60,7 +71,7 @@ public class TimeoutServiceImpl implements TimeoutService {
 
     @Override
     public void cancel(long ticketId) {
-        for (String node : List.of(NODE_ACCEPT, NODE_EVAL)) {
+        for (String node : List.of(NODE_ACCEPT, NODE_PROCESS, NODE_EVAL)) {
             stringRedisTemplate.opsForZSet().remove(key(node), String.valueOf(ticketId));
         }
     }
@@ -68,6 +79,11 @@ public class TimeoutServiceImpl implements TimeoutService {
     @Override
     public List<Long> handleDueAccept() {
         return takeDue(NODE_ACCEPT);
+    }
+
+    @Override
+    public List<Long> handleDueProcess() {
+        return takeDue(NODE_PROCESS);
     }
 
     @Override
@@ -80,6 +96,16 @@ public class TimeoutServiceImpl implements TimeoutService {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.acceptDuration());
         return ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
                         .eq(Ticket::getStatus, TicketStatus.TO_ACCEPT.getCode())
+                        .lt(Ticket::getDispatchTime, cutoff)
+                        .select(Ticket::getId))
+                .stream().map(Ticket::getId).toList();
+    }
+
+    @Override
+    public List<Long> backstopScanProcess() {
+        LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.processDuration());
+        return ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
+                        .eq(Ticket::getStatus, TicketStatus.PROCESSING.getCode())
                         .lt(Ticket::getDispatchTime, cutoff)
                         .select(Ticket::getId))
                 .stream().map(Ticket::getId).toList();

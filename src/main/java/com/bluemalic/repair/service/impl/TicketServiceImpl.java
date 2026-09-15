@@ -79,6 +79,8 @@ public class TicketServiceImpl implements TicketService {
     /** 超时提醒类通知（不是状态跃迁，所以不进 TRANSITION_NOTICE 表）：类型与标题放一处。 */
     private static final String NOTICE_ACCEPT_TIMEOUT = "TICKET_ACCEPT_TIMEOUT";
     private static final String TITLE_ACCEPT_TIMEOUT = "工单超时未接单";
+    private static final String NOTICE_PROCESS_TIMEOUT = "TICKET_PROCESS_TIMEOUT";
+    private static final String TITLE_PROCESS_TIMEOUT = "工单处理超时升级";
 
     private final TicketMapper ticketMapper;
     private final TicketLogMapper ticketLogMapper;
@@ -262,8 +264,9 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         .eq(Ticket::getWorkerId, workerId),
                 entity -> entity.setAcceptTime(LocalDateTime.now()));
-        // 接单节点完成：撤掉未接单提醒，避免"已接单还在提醒调度方"
+        // 接单节点完成：撤掉未接单提醒；同时登记"未处理升级"（自派单起算 48h 未完工）
         timeoutService.cancel(id);
+        timeoutService.registerProcess(id);
         notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
 
@@ -328,6 +331,8 @@ public class TicketServiceImpl implements TicketService {
                     entity.setResultImages(dto.getResultImages());
                     entity.setHandleMinutes(handleMinutes);
                 });
+        // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
+        timeoutService.cancel(id);
         notifyTransition(ticket, TicketAction.FINISH, null, null);
     }
 
@@ -430,22 +435,42 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void remindAcceptTimeout(long id) {
         Ticket ticket = requireTicket(id);
-        if (ticket.getStatus() != TicketStatus.TO_ACCEPT.getCode()) {
-            // 已接单/已驳回/已关闭——提醒没意义。兜底扫描每分钟都会扫到同一批，这里静默跳过
-            return;
-        }
-        if (notifiedBefore(id, TicketAction.ACCEPT_TIMEOUT)) {
-            // 幂等：同一工单只提醒一次（否则兜底扫描每分钟提醒一次，管理员会被刷屏）
-            return;
-        }
-        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
-                TicketAction.ACCEPT_TIMEOUT, SYSTEM_OPERATOR, null);
-        int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), NOTICE_ACCEPT_TIMEOUT,
-                TITLE_ACCEPT_TIMEOUT,
+        notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
+                NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
-                        + " 无人接单，请及时调度",
-                id);
-        log.info("接单超时提醒 ticketId={} 送达后勤管理员 {} 人", id, sent);
+                        + " 无人接单，请及时调度");
+    }
+
+    @Override
+    @Transactional
+    public void escalateProcessTimeout(long id) {
+        Ticket ticket = requireTicket(id);
+        notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
+                NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
+                "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()
+                        + " 仍未完工，请及时跟进");
+    }
+
+    /**
+     * 超时提醒类动作的公共骨架：状态仍停在预期节点 + 之前没提醒过 → 记一笔日志并发通知给调度方。
+     *
+     * <p>两件事都靠 ticket_log：日志既是"提醒过"的判重依据（兜底扫描每分钟都会扫到同一批超期工单，
+     * 不判重会把管理员刷屏），也是"提醒动作发生过"的可追溯记录。
+     */
+    private void notifyTimeoutOnce(Ticket ticket, int expectedStatus, TicketAction action,
+                                   String noticeType, String noticeTitle, String content) {
+        if (ticket.getStatus() != expectedStatus) {
+            // 已流转（接单/完工/驳回/关闭）——提醒没有意义，静默跳过
+            return;
+        }
+        if (notifiedBefore(ticket.getId(), action)) {
+            return;
+        }
+        writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
+                action, SYSTEM_OPERATOR, null);
+        int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), noticeType,
+                noticeTitle, content, ticket.getId());
+        log.info("{} ticketId={} 送达后勤管理员 {} 人", action.getDesc(), ticket.getId(), sent);
     }
 
     /** 幂等判据：ticket_log 里已有该动作的记录（日志本身就是"已处理过"的事实依据）。 */
