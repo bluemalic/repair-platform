@@ -23,11 +23,13 @@
 | — | 文件与图片上传（MinIO） | 🚧 未开始（P0 缺口） |
 | — | 管理端基础数据接口：维修工管理（含负责楼栋）· 报修码管理 · 楼栋 · 类别 | 🚧 未开始（接口已在 docs/03 定义） |
 | M4 | AI 数据助手 + SQL 安全网关（只读账号 / 白名单 / 强制数据权限 / 熔断） | 🚧 未开始（ADR-003、ADR-005 已定方案） |
-| M5 | 前端：后勤管理端 Vue 3 · 学生/维修工端 uni-app | 🚧 未开始 |
+| M5 | 前端 · 后勤管理端（Vue 3 + Element Plus + ECharts）：登录 / 工单列表与派单 / 统计看板 | 🚧 脚手架已就绪，页面开发中 |
+| M5 | 前端 · 学生与维修工端（uni-app，先编译 H5） | 🚧 未开始 |
 | M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
 | P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
 
-> 测试与验证：`mvn -B clean package` 本地全绿（当前 38 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径）。
+> 测试与验证：`mvn -B clean package` 本地全绿（当前 39 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径）；
+> 前端 CI 独立于后端，按 `web-admin/**` 路径触发（`.github/workflows/frontend-ci.yml`）。
 
 ---
 
@@ -109,9 +111,18 @@ docker compose up -d
 
 访问：接口文档 http://localhost:8080/doc.html
 
-> ⚠️ 前端工程（`web-admin/`、`miniapp-h5/`）**尚未创建**，所以 nginx 的 `/` 与 `/h5/`
-> 现在没有内容可挂（见 `nginx/nginx.conf` 与 `docker-compose.yml` 里的注释）。
-> 现阶段验证接口请直接用 `doc.html`，或把后端单独跑起来（见 [部署文档](docs/05-部署文档.md)）。
+> ⚠️ 学生/维修工端（`miniapp-h5/`）**尚未创建**，且 `web-admin/` 也还没构建出 dist，
+> 所以 nginx 的 `/` 与 `/h5/` 现在没有内容可挂（见 `nginx/nginx.conf` 与 `docker-compose.yml` 的注释）。
+> 前端开发期请用下面的 Vite 开发服务器，不要走 nginx。
+
+### 另一种起法：前端开发服务器（改前端时用）
+
+```bash
+cd web-admin && npm install && npm run dev     # http://localhost:5173
+```
+
+Vite 会把 `/api` 代理到本机后端 8080（`VITE_API_TARGET` 可改），所以后端照上面那两条命令起着就行。
+管理端登录用 `docs/dev-seed.sql` 里的 `admin` 账号。
 
 > 数据库已存在时不会重复执行初始化脚本；要重建库见 [部署文档](docs/05-部署文档.md)。
 
@@ -147,7 +158,7 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 │   ├── interceptor/         数据权限、鉴权
 │   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关　（规划中，M4）
 │   └── job/                 定时任务（超时调度）
-├── web-admin/               后勤管理端（Vue 3）　（规划中，未开始）
+├── web-admin/               后勤管理端（Vue 3 + Element Plus + ECharts，脚手架已就绪）
 ├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5）　（规划中，未开始）
 ├── docs/                    需求 / 数据库 / 接口规范 / 架构决策 / 部署
 ├── nginx/                   nginx 配置（已预留 / 与 /h5/ 两个前端静态目录）
