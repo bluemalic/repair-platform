@@ -1,6 +1,8 @@
 package com.bluemalic.repair.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -35,5 +37,7 @@ public class TicketCreateDTO {
     private List<String> images;
 
     @Schema(description = "紧急度 1普通 2紧急 3特急，不传则用类别默认值")
+    @Min(value = 1, message = "紧急度只能是 1普通 / 2紧急 / 3特急")
+    @Max(value = 3, message = "紧急度只能是 1普通 / 2紧急 / 3特急")
     private Integer urgency;
 }
