@@ -46,11 +46,18 @@ public class TimeoutScheduler {
         runQuietly("消费到期任务[接单]", () -> remindDue(timeoutService.handleDueAccept()));
     }
 
-    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径（两个节点都扫）。 */
+    /** 未处理升级节点：派单超阈值仍未完工 → 升级提醒调度方（docs/01 §超时）。 */
+    @Scheduled(fixedDelay = 1000)
+    public void consumeDueProcess() {
+        runQuietly("消费到期任务[处理]", () -> escalateDue(timeoutService.handleDueProcess()));
+    }
+
+    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径（三个节点都扫）。 */
     @Scheduled(cron = "0 * * * * *")
     public void backstop() {
         runQuietly("兜底扫描[验收]", () -> closeDue(timeoutService.backstopScanEval()));
         runQuietly("兜底扫描[接单]", () -> remindDue(timeoutService.backstopScanAccept()));
+        runQuietly("兜底扫描[处理]", () -> escalateDue(timeoutService.backstopScanProcess()));
     }
 
     /**
@@ -89,6 +96,18 @@ public class TimeoutScheduler {
                 log.info("接单提醒跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
             } catch (Exception e) {
                 log.warn("接单提醒失败 ticketId={}", ticketId, e);
+            }
+        }
+    }
+
+    private void escalateDue(List<Long> ticketIds) {
+        for (Long ticketId : ticketIds) {
+            try {
+                ticketService.escalateProcessTimeout(ticketId);
+            } catch (BizException e) {
+                log.info("处理超时升级跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
+            } catch (Exception e) {
+                log.warn("处理超时升级失败 ticketId={}", ticketId, e);
             }
         }
     }

@@ -22,6 +22,12 @@ public interface TimeoutService {
     /** 显式指定到期时间登记接单提醒（测试与兜底补录用）。 */
     void registerAcceptDeadline(long ticketId, Instant deadline);
 
+    /** 工单进入 30 处理中（接单）后登记未处理升级：到期时间 = 现在 + 处理阈值（默认 48h）。 */
+    void registerProcess(long ticketId);
+
+    /** 显式指定到期时间登记未处理升级（测试与兜底补录用）。 */
+    void registerProcessDeadline(long ticketId, Instant deadline);
+
     /** 工单进入 50 已完成时登记验收超时：到期时间 = 现在 + 验收阈值（默认 24h）。 */
     void registerEval(long ticketId);
 
@@ -34,11 +40,17 @@ public interface TimeoutService {
     /** 消费到期的接单提醒：ZREM 成功者才进返回列表（多实例唯一消费）。 */
     List<Long> handleDueAccept();
 
+    /** 消费到期的未处理升级：同上。 */
+    List<Long> handleDueProcess();
+
     /** 消费到期的验收超时：同上。 */
     List<Long> handleDueEval();
 
     /** 兜底：直接扫库找"该提醒接单、却没在 ZSet 里"的工单（Redis 重启丢任务场景）。 */
     List<Long> backstopScanAccept();
+
+    /** 兜底：直接扫库找"该升级却没在 ZSet 里"的处理中超期工单。 */
+    List<Long> backstopScanProcess();
 
     /** 兜底：直接扫库找"该到期却没在 ZSet 里"的已完成工单。 */
     List<Long> backstopScanEval();
