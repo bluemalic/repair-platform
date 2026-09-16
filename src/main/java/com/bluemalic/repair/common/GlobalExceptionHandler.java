@@ -7,12 +7,15 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -55,6 +58,44 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
         log.warn("参数校验失败: {}", message);
         return ResponseEntity.ok(Result.fail(ErrorCode.PARAM_INVALID, message));
+    }
+
+    /**
+     * 参数"格式"不对的三类：类型转换失败（{@code ?start=abc}）、必填参数没传（{@code ?dimension} 缺失）、
+     * 请求体读不出来（缺失或不是合法 JSON）。
+     *
+     * <p>与上面 {@code @Valid} 校验失败是**同一类问题**——都是"调用方给的参数有问题"，
+     * 所以走同一个错误码 {@code 10001} 和同样的 HTTP 200（docs/03 §2.3）。不单独接住的话会被兜底的
+     * {@code Exception} 处理器算成 500 + {@code 10005 系统繁忙}，调用方拿着"服务端故障"去查自己的参数，
+     * 排查方向从一开始就是错的。
+     *
+     * <p><b>只回参数名，不回参数值</b>：那个值可能是手机号、身份证之类的敏感内容，
+     * 一旦写进日志或返回给前端就收不回来了（AGENTS §5.8）。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<Void>> handleArgumentTypeMismatch(MethodArgumentTypeMismatchException e) {
+        String message = "参数 " + e.getName() + " 类型不正确";
+        log.warn("参数校验失败: {}", message);
+        return ResponseEntity.ok(Result.fail(ErrorCode.PARAM_INVALID, message));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Result<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
+        String message = "缺少必填参数 " + e.getParameterName();
+        log.warn("参数校验失败: {}", message);
+        return ResponseEntity.ok(Result.fail(ErrorCode.PARAM_INVALID, message));
+    }
+
+    /**
+     * 请求体缺失或不是合法 JSON。
+     *
+     * <p>这里**刻意不回显解析器的原始报错**：Jackson 的报错消息里会带上出问题的原文片段，
+     * 那段原文可能正是包含密码的请求体，返回给前端就等于把它回抄了一遍。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<Void>> handleUnreadableBody(HttpMessageNotReadableException e) {
+        log.warn("请求体无法解析（缺失或不是合法 JSON）");
+        return ResponseEntity.ok(Result.fail(ErrorCode.PARAM_INVALID, "请求体缺失或不是合法 JSON"));
     }
 
     @ExceptionHandler(NotLoginException.class)

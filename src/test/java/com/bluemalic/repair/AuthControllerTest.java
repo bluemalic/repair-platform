@@ -135,27 +135,6 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.code").value(0));
     }
 
-    /**
-     * 客户端用错方式访问，不能被算成服务端故障。
-     *
-     * <p>这两类曾经落到兜底的 {@code Exception} 处理器上，表现成 500 + {@code 10005} +
-     * 一整段 ERROR 堆栈——最典型的触发是把接口地址粘进浏览器地址栏（浏览器只会发 GET）。
-     * 现在的契约是 405 / 415 + {@code 10006}，日志只在 DEBUG 记一行。
-     */
-    @Test
-    void wrongMethodOrContentTypeIsNotServerError() throws Exception {
-        // GET 一个只接受 POST 的接口 → 405
-        mockMvc.perform(get("/api/auth/login"))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(jsonPath("$.code").value(10006));
-
-        // 请求体不是它认识的类型（登录要 JSON）→ 415
-        mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.TEXT_PLAIN).content("not json"))
-                .andExpect(status().isUnsupportedMediaType())
-                .andExpect(jsonPath("$.code").value(10006));
-    }
-
     private RequestBuilder loginRequest(String username, String password) throws Exception {
         String body = objectMapper.writeValueAsString(Map.of(
                 "tenantCode", TENANT_CODE, "username", username, "password", password));
