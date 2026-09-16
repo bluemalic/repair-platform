@@ -264,9 +264,10 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         .eq(Ticket::getWorkerId, workerId),
                 entity -> entity.setAcceptTime(LocalDateTime.now()));
-        // 接单节点完成：撤掉未接单提醒；同时登记"未处理升级"（自派单起算 48h 未完工）
+        // 接单节点完成：撤掉未接单提醒；同时登记"未处理升级"。
+        // 基准传派单时间（不是现在）：需求口径是"从派到完工"整体超期，与兜底扫描同基准
         timeoutService.cancel(id);
-        timeoutService.registerProcess(id);
+        timeoutService.registerProcess(id, ticket.getDispatchTime());
         notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
 

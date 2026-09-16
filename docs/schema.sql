@@ -247,7 +247,9 @@ CREATE TABLE `ticket` (
     KEY `idx_tenant_status` (`tenant_id`, `status`, `submit_time`),
     KEY `idx_student` (`student_id`, `submit_time`),
     KEY `idx_worker_status` (`worker_id`, `status`, `submit_time`),
-    KEY `idx_building_time` (`building_id`, `submit_time`)
+    KEY `idx_building_time` (`building_id`, `submit_time`),
+    -- 超时兜底扫描是系统上下文（无租户条件），用不上带 tenant_id 前缀的索引，所以单开一条
+    KEY `idx_status_dispatch`(`status`, `dispatch_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='维修工单主表';
 
 -- 工单流转日志：每次状态变更写一条，用于「流转可追溯」
@@ -278,7 +280,9 @@ CREATE TABLE `ticket_evaluation` (
     PRIMARY KEY (`id`),
     -- ⭐ 唯一索引：一个工单只能评价一次，这是「评价幂等」的兜底
     UNIQUE KEY `uk_ticket` (`ticket_id`),
-    KEY `idx_student` (`student_id`)
+    KEY `idx_student` (`student_id`),
+    -- 兜底扫描按 create_time 找"评价超期且工单仍为 50"的记录，没这条会全表扫
+    KEY `idx_create_time` (`create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT ='工单验收评价';
 
 -- ============================================================

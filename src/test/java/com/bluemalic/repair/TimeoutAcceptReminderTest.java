@@ -81,8 +81,12 @@ class TimeoutAcceptReminderTest {
         createdTickets.add(overdue.getId());
         timeoutService.registerAcceptDeadline(overdue.getId(), Instant.now().minusSeconds(60));
 
-        // 模拟调度器：消费到期成员 → 执行提醒
-        timeoutService.handleDueAccept().forEach(ticketService::remindAcceptTimeout);
+        // 模拟调度器：消费到期成员 → 执行提醒。
+        // 只处理自己造的那条：Redis 不受测试事务回滚保护，早先失败的运行可能留下"工单已回滚、
+        // ZSet 成员还在"的幽灵 id（生产里由调度器 catch 后跳过，测试要对齐这个行为）
+        List<Long> due = timeoutService.handleDueAccept();
+        assertThat(due).contains(overdue.getId());
+        ticketService.remindAcceptTimeout(overdue.getId());
 
         assertLogCount(overdue.getId(), TicketAction.ACCEPT_TIMEOUT, 1);
         assertThat(noticesTo(adminId)).isEqualTo(1);
@@ -106,7 +110,8 @@ class TimeoutAcceptReminderTest {
         Ticket accepted = ticketAt(30, LocalDateTime.now().minusHours(25));
         createdTickets.add(accepted.getId());
         timeoutService.registerAcceptDeadline(accepted.getId(), Instant.now().minusSeconds(60));
-        timeoutService.handleDueAccept().forEach(ticketService::remindAcceptTimeout);
+        assertThat(timeoutService.handleDueAccept()).contains(accepted.getId());
+        ticketService.remindAcceptTimeout(accepted.getId());
         assertLogCount(accepted.getId(), TicketAction.ACCEPT_TIMEOUT, 0);
         assertThat(noticesTo(adminId)).isZero();
     }

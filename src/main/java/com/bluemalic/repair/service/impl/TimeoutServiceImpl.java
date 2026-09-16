@@ -1,10 +1,10 @@
 package com.bluemalic.repair.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.entity.Ticket;
-import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.TimeoutService;
@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -34,6 +35,9 @@ public class TimeoutServiceImpl implements TimeoutService {
     private static final String NODE_PROCESS = "PROCESS";
     private static final String NODE_EVAL = "EVAL";
 
+    /** 单轮兜底扫描上限：防止一次把历史上所有超期工单拉进内存（下一分钟继续处理剩下的）。 */
+    private static final int SCAN_LIMIT = 200;
+
     private final StringRedisTemplate stringRedisTemplate;
     private final TimeoutRule timeoutRule;
     private final TicketMapper ticketMapper;
@@ -50,8 +54,14 @@ public class TimeoutServiceImpl implements TimeoutService {
     }
 
     @Override
-    public void registerProcess(long ticketId) {
-        registerProcessDeadline(ticketId, Instant.now().plus(timeoutRule.processDuration()));
+    public void registerProcess(long ticketId, LocalDateTime dispatchTime) {
+        if (dispatchTime == null) {
+            // 没派单时间就没法按需求口径算到期——交给每分钟的兜底扫描，别在这里用"现在"凑一个基准
+            log.warn("工单缺少派单时间，跳过期升级登记（由兜底扫描接管） ticketId={}", ticketId);
+            return;
+        }
+        registerProcessDeadline(ticketId, dispatchTime.plus(timeoutRule.processDuration())
+                .atZone(ZoneId.systemDefault()).toInstant());
     }
 
     @Override
@@ -94,35 +104,41 @@ public class TimeoutServiceImpl implements TimeoutService {
     @Override
     public List<Long> backstopScanAccept() {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.acceptDuration());
-        return ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
-                        .eq(Ticket::getStatus, TicketStatus.TO_ACCEPT.getCode())
-                        .lt(Ticket::getDispatchTime, cutoff)
-                        .select(Ticket::getId))
-                .stream().map(Ticket::getId).toList();
+        return scanOverdueTickets(TicketStatus.TO_ACCEPT.getCode(), cutoff);
     }
 
     @Override
     public List<Long> backstopScanProcess() {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.processDuration());
-        return ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
-                        .eq(Ticket::getStatus, TicketStatus.PROCESSING.getCode())
-                        .lt(Ticket::getDispatchTime, cutoff)
-                        .select(Ticket::getId))
-                .stream().map(Ticket::getId).toList();
+        return scanOverdueTickets(TicketStatus.PROCESSING.getCode(), cutoff);
     }
 
     /**
-     * 兜底扫描与登记用同一个基准：评价时间（ticket_evaluation.create_time）超过阈值——
+     * 兜底扫描与登记用同一个基准：评价时间（`ticket_evaluation.create_time`）超过阈值——
      * 而不是 finish_time，否则"完工很久才评价"的工单会被按完工时间提前判超时。
-     * 查到的是"评价已超期"的工单，处理交由 autoClose（内部再校验状态必须还是 50）。
+     *
+     * <p>查询在 Mapper XML 里做了三件必须一起做的事（评审点出过缺了会随时间恶化）：
+     * **JOIN ticket 限定 `status = 50`**（否则已关闭工单会被每分钟重复扫到）、
+     * **只取主键**、**LIMIT**（单轮上限）。
      */
     @Override
     public List<Long> backstopScanEval() {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.evalDuration());
-        return ticketEvaluationMapper.selectList(Wrappers.<TicketEvaluation>lambdaQuery()
-                        .lt(TicketEvaluation::getCreateTime, cutoff)
-                        .select(TicketEvaluation::getTicketId))
-                .stream().map(TicketEvaluation::getTicketId).toList();
+        return ticketEvaluationMapper.selectOverdueOpenTicketIds(cutoff, SCAN_LIMIT);
+    }
+
+    /**
+     * 定时任务没有租户上下文（拦截器不注入条件），所以这里的查询天然跨租户——正是兜底想要的；
+     * 但要自己带状态过滤与单轮上限：漏了状态过滤，N 会单调增长（每分钟 N 次无效查询 + N 行日志）。
+     */
+    private List<Long> scanOverdueTickets(int status, LocalDateTime cutoff) {
+        Page<Ticket> page = ticketMapper.selectPage(new Page<>(1, SCAN_LIMIT, false),
+                Wrappers.<Ticket>lambdaQuery()
+                        .eq(Ticket::getStatus, status)
+                        .lt(Ticket::getDispatchTime, cutoff)
+                        .orderByAsc(Ticket::getDispatchTime)
+                        .select(Ticket::getId));
+        return page.getRecords().stream().map(Ticket::getId).toList();
     }
 
     private void add(String node, long ticketId, Instant deadline) {
