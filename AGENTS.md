@@ -102,7 +102,9 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 3. **异常**：业务问题抛自定义业务异常，由全局异常处理器 `@RestControllerAdvice` 兜底；**不要在各处 try-catch 后 return 错误码**。
 4. **对象分离**：入参用 `dto`，出参用 `vo`，数据库实体用 `entity`，**禁止把 entity 直接当接口出入参**。转换逻辑放 `converter`。
 5. **Service 里不写 SQL**。所有 SQL 放 Mapper / XML。
-6. **数据权限不手写**。数据范围由 MyBatis 拦截器统一注入**两层**条件：**租户**（`tenant_id`，所有角色都受限，后勤只在本租户内不限）与**角色**（学生 `student_id`、维修工 `building_id`）——**任何 Mapper 里都不许手写 `student_id = ?` 或 `tenant_id = ?` 之类的过滤条件**，写了就是重复且会漏。无登录态的系统上下文（定时任务）不注入，这是超时兜底能跨租户处理的前提（ADR-008）。
+6. **数据权限**：分两种情况，先判断表在不在拦截器范围内。
+   - **拦截器覆盖的表**（只有 `ticket` 与 `notification`）：`ticket` 注入**两层**条件——**租户**（`tenant_id`，所有角色都受限，后勤只在本租户内不限）+ **角色**（学生 `student_id`、维修工 `building_id`）；`notification` 注入 `receiver_id = 我`。**这两张表的 Mapper 里不许手写 `student_id = ?` / `tenant_id = ?`**，写了就是重复且会漏。无登录态的系统上下文（定时任务）不注入，这是超时兜底能跨租户处理的前提（ADR-008）。
+   - **其余所有表**（`sys_user` / `worker_building` / `repair_code` / `building` / `ticket_category` / 统计聚合…）：**拦截器不管，必须显式写 `tenant_id` 条件**。不写不是"忘了优化"，是**跨租户读写**——基础数据接口尤其危险，因为它们直接读写账号与数据权限依据。**判断标准只有一条：这张表在不在上面那个名单里；不在，就自己写。**
 7. **参数校验**：用 `@Valid` + `jakarta.validation` 注解，不要手写 if 判空。
 8. **日志**：关键业务节点（提交、派单、接单、核销、AI 查询）必须打日志；traceId 由过滤器注入 MDC 贯穿全链路；**手机号、密码等敏感信息不打日志**。
 9. **配置**：全部走 `${ENV_VAR:默认值}` 占位；**任何密码 / Key 都不许硬编码进代码**。
