@@ -115,6 +115,8 @@ public class TicketServiceImpl implements TicketService {
             buildingId = dto.getBuildingId();
             room = dto.getRoom();
         }
+        // 楼栋校验不能只放在上面那个分支里：扫码路径同样要过（码指向的楼栋可能已被停用）
+        requireEnabledBuilding(buildingId, student.getTenantId());
 
         TicketCategory category = ticketCategoryMapper.selectById(dto.getCategoryId());
         if (category == null || !category.getTenantId().equals(student.getTenantId())
@@ -583,6 +585,26 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.REPAIR_CODE_INVALID);
         }
         return repairCode;
+    }
+
+    /**
+     * 楼栋必须是本租户下、启用中的。校验对象是"最终落到工单上的那个 buildingId"，所以两条提交路径都要过。
+     *
+     * <p><b>直接传 buildingId 不校验会怎样</b>：能建出"后勤看得到、师傅永远看不到"的孤儿工单——
+     * 工单的可见范围是"师傅负责的楼栋"，而一个不存在 / 别家租户的楼栋不在任何人的范围内，
+     * 这张单从此没人能接。
+     *
+     * <p><b>扫码路径不校验会怎样</b>：停用一个楼栋并不会自动停用挂在它下面的报修码，
+     * 门上的码照扫、单照建，"停用楼栋 = 不能再用于新报修"（docs/03 §5.4）就成了空话。
+     *
+     * <p>对外不区分"不存在 / 别家租户的 / 已停用"，与类别的校验口径一致（也就不会透露别家的楼栋存在）。
+     */
+    private void requireEnabledBuilding(Long buildingId, Long tenantId) {
+        Building building = buildingMapper.selectById(buildingId);
+        if (building == null || !building.getTenantId().equals(tenantId)
+                || !Integer.valueOf(1).equals(building.getStatus())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "楼栋不存在或已停用");
+        }
     }
 
     /** 工单号：WX + 日期 + 当日序号（Redis INCR），uk_ticket_no 兜底唯一。 */

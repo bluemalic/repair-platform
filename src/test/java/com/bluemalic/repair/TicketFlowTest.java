@@ -1,8 +1,12 @@
 package com.bluemalic.repair;
 
+import com.bluemalic.repair.entity.Building;
+import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
 import com.bluemalic.repair.entity.WorkerBuilding;
+import com.bluemalic.repair.mapper.BuildingMapper;
+import com.bluemalic.repair.mapper.RepairCodeMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
@@ -50,6 +54,12 @@ class TicketFlowTest {
 
     @Autowired
     private WorkerBuildingMapper workerBuildingMapper;
+
+    @Autowired
+    private BuildingMapper buildingMapper;
+
+    @Autowired
+    private RepairCodeMapper repairCodeMapper;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -193,7 +203,65 @@ class TicketFlowTest {
                 .andExpect(jsonPath("$.code").value(20006));
     }
 
+    /**
+     * 楼栋必须是"本租户 + 启用中"，**两条提交路径都要校验**。
+     *
+     * <p>直接传 {@code buildingId} 的那条路径以前不校验：能建出"后勤看得到、师傅永远看不到"的孤儿工单
+     * ——工单的可见范围是"师傅负责的楼栋"，而不存在 / 别家租户的楼栋不在任何人的范围内，这张单没人能接。
+     * 扫码那条路径要防的是另一种情况：**停用楼栋不会自动停用挂在它下面的报修码**，
+     * 门上的码照扫、单照建，"停用楼栋 = 不能再用于新报修"就成了空话。
+     */
+    @Test
+    void submitRejectsBuildingThatIsMissingForeignOrDisabled() throws Exception {
+        String student = givenToken("test-building-student", 1, 1L, null);
+
+        // ① 不存在的楼栋
+        assertSubmitRejected(student, Map.of(
+                "buildingId", 999999L, "room", "1-101", "categoryId", 1, "description", "楼栋不存在"));
+
+        // ② 别家租户的楼栋：与"不存在"同一个返回，不透露别家的楼栋存在
+        Building foreign = givenBuilding(2L, "别家的楼", 1);
+        assertSubmitRejected(student, Map.of(
+                "buildingId", foreign.getId(), "room", "1-101", "categoryId", 1, "description", "跨租户楼栋"));
+
+        // ③ 已停用的楼栋
+        Building stopped = givenBuilding(1L, "停用的楼", 0);
+        assertSubmitRejected(student, Map.of(
+                "buildingId", stopped.getId(), "room", "1-101", "categoryId", 1, "description", "停用楼栋"));
+
+        // ④ 扫码路径：码本身是启用的，但它指向的楼栋已停用 → 同样拦住
+        RepairCode code = new RepairCode();
+        code.setTenantId(1L);
+        code.setCode("112233");
+        code.setBuildingId(stopped.getId());
+        code.setRoom("9-901");
+        code.setStatus(1);
+        repairCodeMapper.insert(code);
+        assertSubmitRejected(student, Map.of(
+                "repairCode", "112233", "categoryId", 1, "description", "停用楼栋的码"));
+
+        // 对照：种子楼栋（1 号楼，启用中）照常能建单——校验不能把正常路径一起挡了
+        submitTicket(student, null);
+    }
+
     // ==================== 工具 ====================
+
+    private void assertSubmitRejected(String token, Map<String, Object> body) throws Exception {
+        postJson(token, "/api/student/tickets", body)
+                .andExpect(jsonPath("$.code").value(10001))
+                .andExpect(jsonPath("$.message").value("楼栋不存在或已停用"));
+    }
+
+    /** 造一栋楼，用于验证"不存在 / 别家租户 / 已停用"三种情况。 */
+    private Building givenBuilding(long tenantId, String name, int status) {
+        Building building = new Building();
+        building.setTenantId(tenantId);
+        building.setName(name);
+        building.setSort(0);
+        building.setStatus(status);
+        buildingMapper.insert(building);
+        return building;
+    }
 
     private String submitTicket(String token, String repairCode) throws Exception {
         // 始终用 1 号楼的报修码提交，方便按楼栋断言数据范围
