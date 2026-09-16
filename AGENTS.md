@@ -129,6 +129,7 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 - 每个接口都要有 Knife4j 注解（`@Tag` / `@Operation` / `@Parameter`）。
 - 分页统一返回 `total / pageNum / pageSize / pages / list`。
 - **报修码是跨端抽象**：`GET /api/tickets/by-code/{code}` 是学生扫码报修和维修工扫码到场共用的接口，不要为某一端单开一个。
+- **接收"可枚举短凭证"的接口必须加 `@RateLimit`**：入参短到能被猜（如 6 位报修码）就是暴力枚举面；加注解即可，阈值走 `repair.rate-limit.*`，不要在注解或代码里写死数字（ADR-009）。
 
 ---
 

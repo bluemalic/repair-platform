@@ -1,6 +1,7 @@
 package com.bluemalic.repair.controller;
 
 import com.bluemalic.repair.common.Result;
+import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.RepairCodeVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,7 +26,9 @@ public class TicketCodeController {
     private final TicketService ticketService;
 
     @Operation(summary = "按报修码查询位置",
-            description = "返回楼栋与房间：学生端用于预填报修表单，维修工端用于比对是否到对了房间")
+            description = "返回楼栋与房间：学生端用于预填报修表单，维修工端用于比对是否到对了房间。"
+                    + "按登录用户限流（默认 60 次/分钟），超限返回 10004")
+    @RateLimit
     @GetMapping("/by-code/{code}")
     public Result<RepairCodeVO> byCode(
             @Parameter(description = "报修码，如 306718") @PathVariable String code) {

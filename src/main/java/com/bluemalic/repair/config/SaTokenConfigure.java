@@ -21,6 +21,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p>白名单只需要放登录接口：拦截器只匹配 {@code /api/**}，所以 {@code /doc.html}、
  * {@code /v3/api-docs}、{@code /actuator/health} 天然不受影响。
+ *
+ * <p><b>order 0 是显式写的</b>：限流拦截器（{@code RateLimitConfig}）依赖"登录校验先跑"，
+ * 它排 order 1，且按登录用户计数。两个数字要一起看，别单独改。
  */
 @Configuration
 public class SaTokenConfigure implements WebMvcConfigurer {
@@ -32,6 +35,7 @@ public class SaTokenConfigure implements WebMvcConfigurer {
                         // 登录接口本身当然不能要求已登录
                         .notMatch("/api/auth/login")
                         .check(r -> StpUtil.checkLogin())))
-                .addPathPatterns("/**");
+                .addPathPatterns("/**")
+                .order(0);
     }
 }
