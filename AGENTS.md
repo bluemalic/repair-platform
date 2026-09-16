@@ -139,7 +139,8 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 - Commit 用 Conventional Commits：`feat(order): ...` / `fix(auth): ...` / `docs(db): ...`。
   - 前端 scope 固定用 `admin`（管理端）与 `h5`（学生/维修工端），例如 `feat(admin): 工单列表页`；
     将来按路径切分历史时，这两个 scope 就是天然的分界线。
-- 每个功能走分支 + PR，不要直接推 main。
+- 每个功能走分支 + PR，不要直接推 main。**合并用 `--rebase`**（保持线性历史：历史里没有 merge commit 不等于没走 PR，`gh pr list --state merged` 才是记录）。
+- 例外：**清理历史**（例如移除排查用的临时提交）需要 `force-push main`，仅限单人阶段、且先在 PR 里说明；多人协作时改为开启分支保护并禁止强推。
 - 前端不在后端 CI 里构建（见 3.1 第 4 条）：前端 CI 由 `.github/workflows/frontend-ci.yml` 按路径触发。
 
 ---

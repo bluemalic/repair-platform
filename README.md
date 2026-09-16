@@ -30,7 +30,7 @@
 | M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
 | P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
 
-> 测试与验证：`mvn -B clean package` 本地全绿（当前 39 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径）；
+> 测试与验证：`mvn -B clean package` 本地全绿（当前 44 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径）；
 > 前端 CI 独立于后端，按 `web-admin/**` 路径触发（`.github/workflows/frontend-ci.yml`）。
 
 ---
@@ -96,8 +96,8 @@
 | 部署 | Docker + Docker Compose + Nginx |
 | CI/CD | GitHub Actions |
 
-> ⚠️ 技术栈表与上面的架构图是**完整目标架构**（含前端、MinIO、AI 域）；当前仓库已实现的部分见
-> 顶部"当前进度"表——例如 MinIO 对象存储与 AI 域**尚未接入**，前端工程**尚未开始**。
+> ⚠️ 技术栈表与上面的架构图是**完整目标架构**（含 MinIO、AI 域、学生/维修工端）；当前仓库已实现的部分见
+> 顶部"当前进度"表——例如 MinIO 对象存储与 AI 域**尚未接入**，`miniapp-h5/`（学生/维修工端）**尚未创建**。
 
 ---
 
@@ -113,9 +113,9 @@ docker compose up -d
 
 访问：接口文档 http://localhost:8080/doc.html
 
-> ⚠️ 学生/维修工端（`miniapp-h5/`）**尚未创建**，且 `web-admin/` 也还没构建出 dist，
+> ⚠️ 管理端（`web-admin/`）已有代码但**还没构建出 dist**，学生/维修工端（`miniapp-h5/`）**尚未创建**，
 > 所以 nginx 的 `/` 与 `/h5/` 现在没有内容可挂（见 `nginx/nginx.conf` 与 `docker-compose.yml` 的注释）。
-> 前端开发期请用下面的 Vite 开发服务器，不要走 nginx。
+> 前端开发期请用下面的 Vite 开发服务器；要用 nginx 托管就先 `cd web-admin && npm run build`。
 
 ### 另一种起法：前端开发服务器（改前端时用）
 
@@ -222,10 +222,11 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 ## 开发约定
 
 - 分支：`main`（始终可部署）+ 短生命周期的 `feature/*`（修改用 `fix/*`）
-- 每个功能走分支 + PR 合入 `main`，不直接推 `main`
+- 每个功能走分支 + PR 合入 `main`
 - 不设长期 `develop`：单人项目里它只会带来"哪个分支才是可部署版本"的歧义和多余的合并开销
 - 提交：[Conventional Commits](https://www.conventionalcommits.org/)，如 `feat(order): 新增工单状态机`
-- 所有改动走 PR，`main` 开启分支保护
+- **合并方式：PR + `--rebase`**，保持线性历史——所以 `git log` 里看不到 merge commit，别误以为"没走 PR"（`gh pr list --state merged` 才是 PR 的真实记录）
+- **`main` 未开启分支保护**（单人项目，需要重写历史时得留得下 `force-push` 的口子；上一次这么做是清理 6 个排查用的 `debug(ci)` 提交）。多人协作时应开启保护并禁用强推
 - 代码格式计划在阶段 5 接入 Spotless（CI 已预留检查步骤，当前尚未启用）
 
 ---
