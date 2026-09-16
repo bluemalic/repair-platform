@@ -384,8 +384,10 @@ public class TicketServiceImpl implements TicketService {
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
 
         SysUser worker = sysUserMapper.selectById(dto.getWorkerId());
+        // 跨租户的师傅与"不存在的师傅"返回同一个错误：不告诉调用方"这个师傅是别家的"
         if (worker == null || !Integer.valueOf(2).equals(worker.getUserType())
-                || !Integer.valueOf(1).equals(worker.getStatus())) {
+                || !Integer.valueOf(1).equals(worker.getStatus())
+                || !ticket.getTenantId().equals(worker.getTenantId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "维修工不存在或已停用");
         }
 
