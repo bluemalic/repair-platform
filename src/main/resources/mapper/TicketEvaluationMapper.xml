@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  兜底扫描的查询。三个约束缺一不可（评审点出过：少了前两个会随时间恶化）：
+  1. JOIN ticket 限定 status = 50 —— 处理过的工单会离开结果集，N 不会单调增长
+  2. 只取主键
+  3. LIMIT —— 单轮上限，剩下的下一分钟继续
+  另外两点：
+  · 定时任务没有租户上下文，这里**故意不带 tenant_id**（兜底要跨租户处理）
+  · **故意不写 ORDER BY**：status 过滤已保证处理过的工单会离开结果集（不会饿死），
+    而排序会让 MySQL 先物化+filesort 整个候选集（EXPLAIN 实测 Using temporary; Using filesort），
+    成本远大于"先处理哪几条"带来的公平性收益
+-->
+<mapper namespace="com.bluemalic.repair.mapper.TicketEvaluationMapper">
+
+    <select id="selectOverdueOpenTicketIds" resultType="java.lang.Long">
+        SELECT t.id
+        FROM ticket_evaluation e
+                 JOIN ticket t ON t.id = e.ticket_id
+        WHERE e.create_time &lt; #{cutoff}
+          AND t.deleted = 0
+          AND t.status = 50
+        LIMIT #{limit}
+    </select>
+
+</mapper>

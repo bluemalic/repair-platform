@@ -1,6 +1,7 @@
 package com.bluemalic.repair.service;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -22,8 +23,14 @@ public interface TimeoutService {
     /** 显式指定到期时间登记接单提醒（测试与兜底补录用）。 */
     void registerAcceptDeadline(long ticketId, Instant deadline);
 
-    /** 工单进入 30 处理中（接单）后登记未处理升级：到期时间 = 现在 + 处理阈值（默认 48h）。 */
-    void registerProcess(long ticketId);
+    /**
+     * 工单进入 30 处理中（接单）后登记未处理升级。
+     *
+     * <p>基准时间**必须传派单时间**：需求口径是"从派到完工"整体超期（docs/01），
+     * 兜底扫描用的也是 `dispatch_time`——两处必须同基准，否则"接了单但拖着不完工"的工单
+     * 会在毫秒级路径与分钟级兜底路径上得到不同的到期时刻（这个漂移曾经发生过，见评审）。
+     */
+    void registerProcess(long ticketId, LocalDateTime dispatchTime);
 
     /** 显式指定到期时间登记未处理升级（测试与兜底补录用）。 */
     void registerProcessDeadline(long ticketId, Instant deadline);

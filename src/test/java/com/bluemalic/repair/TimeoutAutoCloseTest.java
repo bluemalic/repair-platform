@@ -70,9 +70,11 @@ class TimeoutAutoCloseTest {
         createdTickets.add(ticket.getId());
         timeoutService.registerEvalDeadline(ticket.getId(), Instant.now().minusSeconds(60));
 
-        // 模拟调度器：消费到期成员 → 逐个执行 autoClose
+        // 模拟调度器：消费到期成员 → 执行 autoClose。
+        // 只处理自己造的那条：Redis 不回滚，早先失败运行可能留下"工单已回滚、成员还在"的幽灵 id
         List<Long> due = timeoutService.handleDueEval();
-        due.forEach(id -> ticketService.autoClose(id));
+        assertThat(due).contains(ticket.getId());
+        ticketService.autoClose(ticket.getId());
 
         Ticket closed = ticketMapper.selectById(ticket.getId());
         assertThat(closed.getStatus()).isEqualTo(60);
@@ -85,7 +87,9 @@ class TimeoutAutoCloseTest {
         assertThat(notices).isEqualTo(1);
 
         // 幂等：再消费一次不产生第二条日志/通知（成员已被 ZREM、状态已是 60）
-        timeoutService.handleDueEval().forEach(id -> ticketService.autoClose(id));
+        timeoutService.handleDueEval().stream()
+                .filter(id -> id.equals(ticket.getId()))
+                .forEach(ticketService::autoClose);
         assertLogCount(ticket.getId(), TicketAction.AUTO_CLOSE, 1);
     }
 
@@ -101,13 +105,12 @@ class TimeoutAutoCloseTest {
         createdTickets.add(alreadyClosed.getId());
         timeoutService.registerEvalDeadline(alreadyClosed.getId(), Instant.now().minusSeconds(60));
         // 与调度器行为一致：成员被消费，但对 60 执行 autoClose 会抛"状态不允许"，被捕获跳过
-        timeoutService.handleDueEval().forEach(id -> {
-            try {
-                ticketService.autoClose(id);
-            } catch (com.bluemalic.repair.common.BizException expected) {
-                assertThat(id).isEqualTo(alreadyClosed.getId());
-            }
-        });
+        assertThat(timeoutService.handleDueEval()).contains(alreadyClosed.getId());
+        try {
+            ticketService.autoClose(alreadyClosed.getId());
+        } catch (com.bluemalic.repair.common.BizException expected) {
+            assertThat(expected.getErrorCode()).isEqualTo(com.bluemalic.repair.common.ErrorCode.TICKET_STATUS_NOT_ALLOWED);
+        }
         assertThat(ticketMapper.selectById(alreadyClosed.getId()).getStatus()).isEqualTo(60);
         assertLogCount(alreadyClosed.getId(), TicketAction.AUTO_CLOSE, 0);
     }
@@ -121,8 +124,16 @@ class TimeoutAutoCloseTest {
         createdTickets.add(fresh.getId());
         givenEvaluation(fresh, LocalDateTime.now().minusMinutes(30)); // 评价未超期
 
+        // 已关闭（60）且评价早已过期：状态过滤必须把它挡在扫描之外，
+        // 否则它会被每分钟重复扫到（处理不了、也不会离开结果集）
+        Ticket alreadyClosed = ticketAt(60, LocalDateTime.now().minusDays(3), LocalDateTime.now().minusDays(3));
+        createdTickets.add(alreadyClosed.getId());
+        givenEvaluation(alreadyClosed, LocalDateTime.now().minusDays(3));
+
         List<Long> due = timeoutService.backstopScanEval();
-        assertThat(due).contains(overdue.getId()).doesNotContain(fresh.getId());
+        assertThat(due).contains(overdue.getId())
+                .doesNotContain(fresh.getId())
+                .doesNotContain(alreadyClosed.getId());
 
         // 只处理自己造的那条：兜底扫描是**全表跨租户**的（调度器要处理所有超期工单），
         // 它会扫到库里遗留的真实数据——那些工单可能已被人工关闭，autoClose 会抛异常

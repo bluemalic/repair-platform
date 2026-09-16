@@ -12,11 +12,13 @@ import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.TicketService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Instant;
@@ -64,6 +66,12 @@ class TimeoutProcessEscalationTest {
     @Autowired
     private TicketService ticketService;
 
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    private TimeoutRule timeoutRule;
+
     private final List<Long> createdTickets = new ArrayList<>();
 
     @AfterEach
@@ -105,6 +113,22 @@ class TimeoutProcessEscalationTest {
         timeoutService.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
         assertLogCount(finished.getId(), TicketAction.PROCESS_TIMEOUT, 0);
         assertThat(noticesTo(adminId)).isZero();
+    }
+
+    @Test
+    void registerProcessUsesDispatchTimeAsBasis() {
+        LocalDateTime dispatchAt = LocalDateTime.now().minusHours(30);
+        Ticket ticket = ticketAt(30, dispatchAt);
+        createdTickets.add(ticket.getId());
+
+        timeoutService.registerProcess(ticket.getId(), ticket.getDispatchTime());
+
+        Double score = stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS", String.valueOf(ticket.getId()));
+        assertThat(score).isNotNull();
+        // 与兜底扫描同基准：派单时间 + 阈值（若用"现在 + 阈值"就会比这里晚 30 小时）
+        long expected = dispatchAt.plus(timeoutRule.processDuration())
+                .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        assertThat(score.longValue()).isEqualTo(expected);
     }
 
     @Test
