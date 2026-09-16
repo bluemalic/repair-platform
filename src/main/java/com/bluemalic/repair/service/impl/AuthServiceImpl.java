@@ -12,6 +12,7 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AuthService;
+import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.CurrentUserVO;
 import com.bluemalic.repair.vo.LoginVO;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     /** 复用同一个权限查询实现，避免"当前用户看到的权限"和"鉴权用的权限"两套口径 */
     private final StpInterface stpInterface;
+    private final CurrentTenantService currentTenantService;
 
     @Override
     public LoginVO login(LoginDTO dto) {
@@ -57,6 +59,8 @@ public class AuthServiceImpl implements AuthService {
         }
 
         StpUtil.login(user.getId());
+        // 把租户写进 Session：数据权限拦截器每个请求都要用，从 Session 读可省掉每请求一次查库
+        currentTenantService.bind(tenant.getId());
         SaTokenInfo tokenInfo = StpUtil.getTokenInfo();
 
         LoginVO vo = new LoginVO();

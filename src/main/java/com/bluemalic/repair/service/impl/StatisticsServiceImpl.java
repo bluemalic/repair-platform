@@ -1,12 +1,10 @@
 package com.bluemalic.repair.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.dto.StatisticsQueryDTO;
-import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.mapper.StatisticsMapper;
-import com.bluemalic.repair.mapper.SysUserMapper;
+import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.StatisticsService;
 import com.bluemalic.repair.vo.StatisticsDistributionVO;
 import com.bluemalic.repair.vo.StatisticsOverviewVO;
@@ -45,7 +43,7 @@ public class StatisticsServiceImpl implements StatisticsService {
     private static final Map<String, String> URGENCY_LABELS = Map.of("1", "普通", "2", "紧急", "3", "特急");
 
     private final StatisticsMapper statisticsMapper;
-    private final SysUserMapper sysUserMapper;
+    private final CurrentTenantService currentTenantService;
 
     @Override
     public StatisticsOverviewVO overview(StatisticsQueryDTO query) {
@@ -119,12 +117,9 @@ public class StatisticsServiceImpl implements StatisticsService {
     // ==================== 私有工具 ====================
 
     private Long currentTenantId() {
-        long userId = StpUtil.getLoginIdAsLong();
-        SysUser user = sysUserMapper.selectById(userId);
-        if (user == null) {
-            throw new BizException(ErrorCode.NOT_LOGIN);
-        }
-        return user.getTenantId();
+        // 租户来源与数据权限拦截器同源（ADR-008）：登录时写进 Session，这里读缓存，
+        // 不再每个统计请求都查一次 sys_user
+        return currentTenantService.requireTenantId();
     }
 
     /** 区间左闭右开：[start 00:00, end+1天 00:00)。 */
