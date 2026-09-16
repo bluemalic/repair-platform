@@ -31,7 +31,7 @@
 | M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
 | P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
 
-> 测试与验证：`mvn -B clean package` 本地全绿（当前 49 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径、限流边界）；
+> 测试与验证：`mvn -B clean package` 本地全绿（当前 53 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径、限流边界、接口错误契约）；
 > 前端 CI 独立于后端，按 `web-admin/**` 路径触发（`.github/workflows/frontend-ci.yml`）。
 
 ---
