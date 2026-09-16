@@ -5,6 +5,7 @@ import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
+import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -67,8 +68,11 @@ public class WorkerTicketController {
         return Result.ok();
     }
 
-    @Operation(summary = "扫报到场打卡", description = "校验报修码与工单房间一致；到场时间 = 响应时长的依据")
+    @Operation(summary = "扫报到场打卡",
+            description = "校验报修码与工单房间一致；到场时间 = 响应时长的依据。"
+                    + "请求体里的报修码同样按登录用户限流（默认 60 次/分钟），超限返回 10004")
     @SaCheckPermission("ticket:arrive")
+    @RateLimit
     @PostMapping("/{id}/arrive")
     public Result<Void> arrive(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketArriveDTO dto) {
