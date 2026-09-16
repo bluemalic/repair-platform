@@ -1,0 +1,37 @@
+# Docker 构建上下文过滤。
+#
+# 为什么必须有：docker-compose 的 app 服务 context 是仓库根 `.`，而我们做的是**单仓多工程**
+# （后端 + web-admin 前端）。没有这个文件时，`web-admin/node_modules`（上百个包、上万文件）、
+# `target/`、`data/mysql`（MySQL 数据目录！）、`logs/` 都会被塞进构建上下文 —— 构建变慢，
+# 而且把本地数据和日志一起送给构建守护进程。
+#
+# 注意：Dockerfile 只 COPY pom.xml / src（见 Dockerfile），所以这里排除的都是它用不到的。
+
+# 版本控制与 IDE
+.git
+.gitignore
+.gitattributes
+.idea
+.zcode
+
+# 构建产物与依赖
+target
+**/node_modules
+web-admin/dist
+miniapp-h5/dist
+
+# 本地数据与日志（MySQL 数据目录在里面，绝对不能进上下文）
+data
+logs
+
+# 前端工程源码（后端镜像用不到；将来若改为一体化镜像再放开）
+web-admin
+miniapp-h5
+
+# 文档与本机配置
+docs
+.env
+.env.example
+README.md
+AGENTS.md
+*.md
