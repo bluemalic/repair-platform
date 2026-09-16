@@ -99,11 +99,16 @@ public class RepairCodeServiceImpl implements RepairCodeService {
         entity.setCode(nextCode(tenantId));
         insertCode(entity);
 
+        // create_time 由数据库的 DEFAULT CURRENT_TIMESTAMP 填充，MyBatis 不会把它读回实体。
+        // 接口要返回这个字段就得插完再读一次：否则"生成"响应里是 null、"列表"里却有值，
+        // 同一个字段两副面孔（前端要按它显示生成时间）
+        RepairCode saved = repairCodeMapper.selectById(entity.getId());
+
         // 码是贴在门口的位置码，不是口令：记进日志便于排查（区别于手机号 / 密码）
         log.info("生成报修码 codeId={} code={} buildingId={} room={} operator={}",
                 entity.getId(), entity.getCode(), dto.getBuildingId(), dto.getRoom(),
                 StpUtil.getLoginIdAsLong());
-        return RepairCodeConverter.toVO(entity, building.getName());
+        return RepairCodeConverter.toVO(saved, building.getName());
     }
 
     @Override

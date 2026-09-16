@@ -93,6 +93,11 @@ class RepairCodeManageTest {
         assertThat(code).matches("[1-9]\\d{5}");
         assertThat(created.path("buildingName").asText()).isEqualTo("1号楼");
         assertThat(created.path("status").asInt()).isEqualTo(1);
+        // create_time 由数据库填充：生成响应里也必须带上它，否则"生成"返回 null、"列表"有值，
+        // 同名字段两副面孔（前端要按它显示生成时间）
+        // 用 hasNonNull 而不是 asText().isNotBlank()：Jackson 的 NullNode.asText() 返回字符串 "null"，
+        // 那样断言恒真、等于没断言
+        assertThat(created.hasNonNull("createTime")).isTrue();
 
         // 端到端：这条新码立刻能被扫码接口查到，位置正确
         JsonNode byCode = getJson(student, "/api/tickets/by-code/" + code);
