@@ -101,11 +101,11 @@ class DictionaryManageTest {
     void buildingNameMustBeUniqueWithinTenant() throws Exception {
         String admin = givenToken("test-dict-unique", 3, ROLE_ADMIN);
 
-        postJson(admin, "/api/admin/buildings", Map.of("name", "1号楼"))
+        long id = createBuilding(admin, "唯一楼", null, 0);
+        // 用自己造的名字验重，不借种子的名字——种子里那些名字管理员可以在管理端改掉
+        postJson(admin, "/api/admin/buildings", Map.of("name", "唯一楼"))
                 .andExpect(jsonPath("$.code").value(10001))
                 .andExpect(jsonPath("$.message").value("楼栋名称已存在"));
-
-        long id = createBuilding(admin, "唯一楼", null, 0);
         long other = createBuilding(admin, "另一栋", null, 0);
 
         // 改名撞上已有的名字也要拦
