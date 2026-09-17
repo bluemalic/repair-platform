@@ -27,7 +27,7 @@
 | — | 管理端基础数据接口：**维修工（含负责楼栋）· 楼栋 · 类别 · 报修码** | ✅ 已完成 |
 | M4 | AI 数据助手 + SQL 安全网关（只读账号 / 白名单 / 强制数据权限 / 熔断） | 🚧 未开始（ADR-003、ADR-005 已定方案） |
 | M5 | 前端 · 后勤管理端（Vue 3 + Element Plus + ECharts）：登录 / 工单（派单选人 + 详情抽屉）/ 通知（未读角标）/ 统计看板 / 维修工 · 报修码 · 楼栋 · 类别 | ✅ 已完成 |
-| M5 | 前端 · 学生与维修工端（uni-app，先编译 H5） | 🚧 未开始 |
+| M5 | 前端 · 学生与维修工端（uni-app，先编译 H5，在 `miniapp-h5/`） | 🚧 骨架已就绪（登录 + 角色分流首页），业务页开发中 |
 | M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
 | P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
 
@@ -98,7 +98,7 @@
 | CI/CD | GitHub Actions |
 
 > ⚠️ 技术栈表与上面的架构图是**完整目标架构**（含 MinIO、AI 域、学生/维修工端）；当前仓库已实现的部分见
-> 顶部"当前进度"表——例如 MinIO 对象存储与 AI 域**尚未接入**，`miniapp-h5/`（学生/维修工端）**尚未创建**。
+> 顶部"当前进度"表——例如 MinIO 对象存储与 AI 域**尚未接入**，`miniapp-h5/`（学生/维修工端）**只有骨架**。
 
 ---
 
@@ -114,9 +114,9 @@ docker compose up -d
 
 访问：接口文档 http://localhost:8080/doc.html
 
-> ⚠️ 管理端（`web-admin/`）已有代码但**还没构建出 dist**，学生/维修工端（`miniapp-h5/`）**尚未创建**，
-> 所以 nginx 的 `/` 与 `/h5/` 现在没有内容可挂（见 `nginx/nginx.conf` 与 `docker-compose.yml` 的注释）。
-> 前端开发期请用下面的 Vite 开发服务器；要用 nginx 托管就先 `cd web-admin && npm run build`。
+> 两个前端都还没构建出 dist 并挂进 nginx（见 `nginx/nginx.conf` 与 `docker-compose.yml` 的注释）。
+> 开发期请用各自的 Vite 开发服务器；要用 nginx 托管就先：
+> `cd web-admin && npm run build`（产物 `dist/`）与 `cd miniapp-h5 && npm run build:h5`（产物 `dist/build/h5/`，uni-app 的约定路径）。
 
 ### 另一种起法：前端开发服务器（改前端时用）
 
@@ -162,7 +162,7 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 │   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关　（规划中，M4）
 │   └── job/                 定时任务（超时调度）
 ├── web-admin/               后勤管理端（Vue 3 + Element Plus + ECharts，脚手架已就绪）
-├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5）　（规划中，未开始）
+├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5，骨架已就绪）
 ├── docs/                    需求 / 数据库 / 接口规范 / 架构决策 / 部署
 ├── nginx/                   nginx 配置（已预留 / 与 /h5/ 两个前端静态目录）
 ├── Dockerfile

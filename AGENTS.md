@@ -62,6 +62,16 @@
 
 此外：接口契约以 `docs/03` 为准，前端不去"读后端代码猜接口"；契约变更先改文档再改两端。
 
+### 3.2 移动端（uni-app）的额外约定
+
+`miniapp-h5` 先编译 H5，但**代码必须保持"将来能编小程序"**（备案后可能就编小程序，见 ADR-007）。因此：
+
+1. **只用 `uni.*` 与 Vue，不用只有浏览器才有的东西**：网络请求用 `uni.request`（**不用 axios**，小程序端没有 `XMLHttpRequest`）；存储用 `uni.getStorageSync`（不用 `localStorage`）；页面跳转用 `uni.reLaunch/navigateTo`（不用 `location`）。
+2. **H5 端没有 `uni.scanCode`**（该 API 只在 App / 小程序端有）。所以扫码报修在 H5 上只能：**手输 6 位报修码**（必做，零依赖）＋ 可选的"页面内摄像头扫码"（`getUserMedia` + 二维码解析库，需要 HTTPS，新增依赖要先确认）。
+3. **依赖版本独立于 web-admin**：uni-app 的 `vite-plugin-uni` 把 `vite` 钉在 5.2.8、编译器钉在 3.4.21，所以这边的 vite/vue 与 `web-admin`（vite 8 / vue 3.5）**不同版本是正常的**，不要去"对齐"。
+4. **构建产物路径不同**：`web-admin` 是 `dist/`，`miniapp-h5` 是 `dist/build/h5/`（uni-app 的约定），nginx 挂载与 CI 都按这个路径。
+5. CI 独立：`.github/workflows/miniapp-ci.yml` 按 `miniapp-h5/**` 触发，与 `frontend-ci.yml`（web-admin）互不牵连。
+
 ---
 
 ## 4. 包结构
