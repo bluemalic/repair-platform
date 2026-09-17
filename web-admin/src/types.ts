@@ -68,3 +68,16 @@ export interface WorkerWorkload {
   processTimeoutCount: number
   onTimeRate: number | null
 }
+
+/** 维修工（docs/03 §5.4 基础数据）。buildingIds / buildingNames 是"他负责的楼栋"，即数据可见范围的依据。 */
+export interface WorkerVO {
+  id: string
+  /** 工号，同时是登录名 */
+  username: string
+  realName: string
+  phone: string | null
+  /** 1启用 0停用 */
+  status: number
+  buildingIds: string[]
+  buildingNames: string[]
+}

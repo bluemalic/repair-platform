@@ -24,7 +24,11 @@ function handleError(code: number, message: string): void {
   ElMessage.error(message || '请求失败')
 }
 
-async function request<T>(method: 'get' | 'post' | 'put', url: string, payload?: unknown): Promise<T> {
+async function request<T>(
+  method: 'get' | 'post' | 'put' | 'delete',
+  url: string,
+  payload?: unknown,
+): Promise<T> {
   try {
     const resp = await instance.request<Result<T>>({ method, url, data: payload })
     const body = resp.data
@@ -52,6 +56,8 @@ export const http = {
     request<T>('get', url + toQuery(params)),
   post: <T>(url: string, data?: unknown) => request<T>('post', url, data),
   put: <T>(url: string, data?: unknown) => request<T>('put', url, data),
+  // 命名用 del 不用 delete：delete 是保留字，写成对象方法虽然合法，但读起来容易被当成操作符
+  del: <T>(url: string) => request<T>('delete', url),
 }
 
 function toQuery(params?: Record<string, unknown>): string {
