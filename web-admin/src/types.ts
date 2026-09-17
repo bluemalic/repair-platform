@@ -91,3 +91,14 @@ export interface BuildingVO {
   /** 1启用 0停用 */
   status: number
 }
+
+/** 报修类别（docs/03 §5.4 基础数据）。defaultUrgency 是学生没选紧急度时的默认值。 */
+export interface CategoryVO {
+  id: string
+  name: string
+  /** 1普通 2紧急 3特急 */
+  defaultUrgency: number
+  sort: number
+  /** 1启用 0停用 */
+  status: number
+}

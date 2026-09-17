@@ -26,6 +26,8 @@ async function logout() {
           <template #title>基础数据</template>
           <!-- 菜单项随页面一起加：指向未注册路由的菜单点了会是一片空白 -->
           <el-menu-item index="/workers">维修工管理</el-menu-item>
+          <el-menu-item index="/buildings">楼栋管理</el-menu-item>
+          <el-menu-item index="/categories">类别管理</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
