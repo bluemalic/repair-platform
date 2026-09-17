@@ -196,8 +196,11 @@ class TicketFlowTest {
         String student = givenToken("test-code-student", 1, 1L, null);
 
         JsonNode ok = getJson(student, "/api/tickets/by-code/482913");
-        assertThat(ok.get("data").get("buildingName").asText()).isEqualTo("1号楼");
+        // 断言 id 与房间（种子数据里稳定），楼栋名取当前值——名字可以在楼栋管理页改
+        assertThat(ok.get("data").get("buildingId").asText()).isEqualTo("1");
         assertThat(ok.get("data").get("room").asText()).isEqualTo("1-101");
+        assertThat(ok.get("data").get("buildingName").asText())
+                .isEqualTo(buildingMapper.selectById(1L).getName());
 
         getJsonRaw(student, "/api/tickets/by-code/000000")
                 .andExpect(jsonPath("$.code").value(20006));

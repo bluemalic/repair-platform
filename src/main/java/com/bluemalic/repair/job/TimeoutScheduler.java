@@ -10,6 +10,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 超时调度任务（M3，ADR-001 + docs/01 §超时）：
@@ -33,6 +35,12 @@ public class TimeoutScheduler {
 
     private final TimeoutService timeoutService;
     private final TicketService ticketService;
+
+    /**
+     * 任务名 → 上一次已经 WARN 过的失败信息（见 {@link #runQuietly}）。
+     * 四个任务跑在调度线程池的不同线程上，所以用并发容器。
+     */
+    private final Map<String, String> lastWarned = new ConcurrentHashMap<>();
 
     /** ADR-001：秒级消费，触发精度 ≈ 阈值 + 1s。 */
     @Scheduled(fixedDelay = 1000)
@@ -63,12 +71,27 @@ public class TimeoutScheduler {
     /**
      * 调度任务不向上抛异常：Redis/数据库短暂不可用是常态，抛出去会被 Spring 的 TaskUtils
      * 按 ERROR 打整段堆栈、每秒一次，把日志冲垮。这里降成一行 WARN，恢复后自然继续。
+     *
+     * <p><b>同一类失败只提醒一次</b>：一个任务每秒跑一轮，Redis 挂掉时三个消费任务会各刷一行——
+     * 实测每秒 3 行、一天 20 多万行，真正的问题反而被淹掉。所以按「任务 + 失败信息」去重：
+     * 第一次 WARN，之后的同类失败降 DEBUG；**恢复后清除标记**，下一次故障还会重新提醒。
+     * 失败信息变化（比如 Redis 好了但数据库挂了）也会立刻 WARN，不会把新问题吞掉。
+     *
+     * <p>与 {@code RateLimitInterceptor} 的降级日志是同一条原则：故障期间日志要能说明问题，
+     * 而不是用它自己的量把问题埋了。
      */
     private void runQuietly(String task, Runnable body) {
         try {
             body.run();
+            // 恢复即重置：下次故障重新提醒一次
+            lastWarned.remove(task);
         } catch (Exception e) {
-            log.warn("超时调度[{}]本轮失败（下一轮继续）：{}", task, e.getMessage());
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            if (!message.equals(lastWarned.put(task, message))) {
+                log.warn("超时调度[{}]本轮失败（同类失败此后只记 DEBUG，恢复后重新提醒）：{}", task, message);
+            } else {
+                log.debug("超时调度[{}]仍失败：{}", task, message);
+            }
         }
     }
 

@@ -21,7 +21,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -91,7 +90,7 @@ class RepairCodeManageTest {
 
         // 6 位数字，且不以 0 开头（手输时前导零最容易漏）
         assertThat(code).matches("[1-9]\\d{5}");
-        assertThat(created.path("buildingName").asText()).isEqualTo("1号楼");
+        assertThat(created.path("buildingName").asText()).isEqualTo(buildingNameOf(BUILDING_1));
         assertThat(created.path("status").asInt()).isEqualTo(1);
         // create_time 由数据库填充：生成响应里也必须带上它，否则"生成"返回 null、"列表"有值，
         // 同名字段两副面孔（前端要按它显示生成时间）
@@ -102,7 +101,7 @@ class RepairCodeManageTest {
         // 端到端：这条新码立刻能被扫码接口查到，位置正确
         JsonNode byCode = getJson(student, "/api/tickets/by-code/" + code);
         assertThat(byCode.path("code").asInt()).isZero();
-        assertThat(byCode.path("data").path("buildingName").asText()).isEqualTo("1号楼");
+        assertThat(byCode.path("data").path("buildingId").asText()).isEqualTo(String.valueOf(BUILDING_1));
         assertThat(byCode.path("data").path("room").asText()).isEqualTo("1-201");
 
         // 也能直接用它提交报修（扫码报修的完整闭环）
@@ -209,7 +208,9 @@ class RepairCodeManageTest {
         JsonNode byBuilding = getJson(admin, "/api/admin/repair-codes",
                 "buildingId", String.valueOf(BUILDING_2));
         assertThat(byBuilding.path("data").path("total").asInt()).isEqualTo(2);
-        assertThat(namesOf(byBuilding, "buildingName")).containsOnly("2号楼");
+        assertThat(StreamSupport.stream(byBuilding.path("data").path("list").spliterator(), false)
+                .map(node -> node.path("buildingId").asText()).distinct().toList())
+                .containsExactly(String.valueOf(BUILDING_2));
 
         // 按状态筛：2 号楼那条已停用
         JsonNode stopped = getJson(admin, "/api/admin/repair-codes",
@@ -268,12 +269,14 @@ class RepairCodeManageTest {
                 .orElseThrow(() -> new AssertionError("列表里没有房间 " + room));
     }
 
-    private List<String> namesOf(JsonNode pageResult, String field) {
-        List<String> values = new ArrayList<>();
-        StreamSupport.stream(pageResult.path("data").path("list").spliterator(), false)
-                .forEach(node -> values.add(node.path(field).asText()));
-        return values;
+    /**
+     * 楼栋名取库里的当前值：它可以在楼栋管理页改，硬编码会在管理员改名后变红——
+     * 那种红是噪音，会让人不再相信测试（这条断言真正要守的是"码指向哪个楼栋"，用 id 表达）。
+     */
+    private String buildingNameOf(long buildingId) {
+        return buildingMapper.selectById(buildingId).getName();
     }
+
 
     /** 造一栋属于租户 2 的楼，用于验证跨租户隔离。 */
     private long givenForeignBuilding() {

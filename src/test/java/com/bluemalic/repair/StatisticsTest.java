@@ -8,7 +8,9 @@ import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
+import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
+import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
@@ -25,6 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -68,6 +71,12 @@ class StatisticsTest {
 
     @Autowired
     private TenantMapper tenantMapper;
+
+    @Autowired
+    private BuildingMapper buildingMapper;
+
+    @Autowired
+    private TicketCategoryMapper ticketCategoryMapper;
 
     @Autowired
     private TicketMapper ticketMapper;
@@ -143,12 +152,14 @@ class StatisticsTest {
         String admin = givenAdmin("gdou");
 
         JsonNode byCategory = getData(admin, "/api/admin/statistics/distribution" + RANGE + "&dimension=category");
-        assertThat(countOn(byCategory, "水电")).isEqualTo(3);
-        assertThat(countOn(byCategory, "家具")).isEqualTo(1);
+        // 名字按 id 从库里取当前值：楼栋名与类别名现在都能在管理端改，
+        // 硬编码"水电""1号楼"会在管理员改个名字之后变红——那种红是噪音，不是回归
+        assertThat(countOn(byCategory, categoryName(1L))).isEqualTo(3);
+        assertThat(countOn(byCategory, categoryName(2L))).isEqualTo(1);
 
         JsonNode byBuilding = getData(admin, "/api/admin/statistics/distribution" + RANGE + "&dimension=building");
-        assertThat(countOn(byBuilding, "1号楼")).isEqualTo(3);
-        assertThat(countOn(byBuilding, "2号楼")).isEqualTo(1);
+        assertThat(countOn(byBuilding, buildingName(1L))).isEqualTo(3);
+        assertThat(countOn(byBuilding, buildingName(2L))).isEqualTo(1);
 
         JsonNode byUrgency = getData(admin, "/api/admin/statistics/distribution" + RANGE + "&dimension=urgency");
         assertThat(countOn(byUrgency, "普通")).isEqualTo(2);
@@ -241,7 +252,10 @@ class StatisticsTest {
     private long givenWorker(String realName) {
         SysUser worker = new SysUser();
         worker.setTenantId(1L);
-        worker.setUsername("test-stat-worker-" + System.nanoTime() % 100000);
+        // 后缀用 UUID 截 8 位，不用 System.nanoTime() % 100000：后者的取值空间只有 5 位，
+        // 同一时刻的两次调用会撞出同一个工号，表现为"偶发 DuplicateKey"（2026-09-17 撞到过一次）。
+        // 偶发红的测试比没有测试更糟——它会消耗掉排查 CI 的时间。
+        worker.setUsername("test-stat-worker-" + UUID.randomUUID().toString().substring(0, 8));
         worker.setPassword(passwordEncoder.encode(PASSWORD));
         worker.setRealName(realName);
         worker.setUserType(2);
@@ -304,6 +318,15 @@ class StatisticsTest {
     }
 
     /** 从 [{name/date, count}] 里取某一项的 count；找不到时返回 -1（便于断言失败时看清）。 */
+    /** 这几条断言只关心"分布有没有按 id 正确聚合"，名字取当前值即可（它是可改的展示字段）。 */
+    private String buildingName(long buildingId) {
+        return buildingMapper.selectById(buildingId).getName();
+    }
+
+    private String categoryName(long categoryId) {
+        return ticketCategoryMapper.selectById(categoryId).getName();
+    }
+
     private int countOn(JsonNode rows, String key) {
         for (JsonNode row : rows) {
             if (key.equals(row.path("name").asText()) || key.equals(row.path("date").asText())) {
