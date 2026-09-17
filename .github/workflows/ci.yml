@@ -44,22 +44,6 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
-      # 对象存储是外部依赖（事务回滚不了它），所以真上传的用例需要它在这里起来；
-      # 校验层的用例（类型/大小/魔数）不依赖 MinIO，MinIO 没起也能跑。
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: ci-minio-user
-          MINIO_ROOT_PASSWORD: ci-minio-password
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd="mc --version || true; curl -f http://localhost:9000/minio/health/live"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
-        command: server /data
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -84,6 +68,27 @@ jobs:
       # 一条命令同时跑测试和打包。测试报告会留在 target/surefire-reports/，
       # 而单独的 mvn clean package 会把上一步的测试报告一起清掉 —— 所以合成一步。
       # 变量名与 docker-compose.yml 的 app.environment 对齐，配置读取方式见 application.yml。
+      # 对象存储（MinIO）为什么不用 services 起：Actions 的 service 不能覆盖容器的启动命令，
+      # 而 minio/minio 镜像不带 `server /data` 参数会直接退出——表现是 job 卡在 "Initialize containers"。
+      # 这里显式 docker run + 等健康检查，失败时的报错也清楚。
+      # 只有"真上传"的用例需要它：类型 / 大小 / 魔数这些校验用例不依赖 MinIO。
+      - name: 启动 MinIO（对象存储）
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=ci-minio-user \
+            -e MINIO_ROOT_PASSWORD=ci-minio-password \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live; then
+              echo "MinIO 已就绪"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO 未在 60 秒内就绪" >&2
+          docker logs minio
+          exit 1
+
       - name: 运行单元测试并打包
         env:
           MYSQL_HOST: 127.0.0.1
