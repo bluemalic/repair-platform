@@ -2,7 +2,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { closeTicket, dispatchTicket, pageTickets, rejectTicket } from '@/api/ticket'
-import type { TicketVO } from '@/types'
+import { pageWorkers } from '@/api/worker'
+import type { TicketVO, WorkerVO } from '@/types'
 
 /** 状态字典：与后端 TicketStatus 一一对应（docs/02）。 */
 const STATUS: Record<number, { label: string; type: 'info' | 'warning' | 'primary' | 'success' | 'danger' }> = {
@@ -34,13 +35,54 @@ async function load() {
   }
 }
 
-async function doDispatch(row: TicketVO) {
-  const { value } = await ElMessageBox.prompt('输入维修工的用户ID', `派单 · ${row.ticketNo}`, {
-    inputPlaceholder: '例如 2（维修工管理接口未实现前需手填）',
-    inputValidator: (v) => (v && /^\d+$/.test(v) ? true : '请输入数字ID'),
-  })
-  await dispatchTicket(row.id, value)
+// ==================== 派单选人 ====================
+
+const dispatchVisible = ref(false)
+const dispatchTarget = ref<TicketVO | null>(null)
+const selectedWorkerId = ref<string | undefined>(undefined)
+const workerOptions = ref<WorkerVO[]>([])
+const workerSearching = ref(false)
+/** 命中总数：下拉里只放前 N 条，超过时提示"用关键字继续搜"，避免让人以为就这么多 */
+const workerTotal = ref(0)
+
+async function openDispatch(row: TicketVO) {
+  dispatchTarget.value = row
+  selectedWorkerId.value = undefined
+  dispatchVisible.value = true
+  await searchWorkers('')
+}
+
+/**
+ * 维修工下拉走服务端搜索（`pageSize` 有上限，一次拉全在人多时会静默截断）：
+ * 打开时先给一页可选项，输入关键字再查。
+ */
+async function searchWorkers(keyword: string) {
+  workerSearching.value = true
+  try {
+    const page = await pageWorkers({
+      pageNum: 1,
+      pageSize: 20,
+      status: 1,
+      keyword: keyword || undefined,
+    })
+    workerOptions.value = page.list
+    workerTotal.value = page.total
+  } finally {
+    workerSearching.value = false
+  }
+}
+
+/** 下拉里显示"姓名（工号）— 负责 1号楼、2号楼"：派单要看的就是"他管不管这栋楼"。 */
+function workerLabel(worker: WorkerVO): string {
+  const buildings = worker.buildingNames.length ? worker.buildingNames.join('、') : '未配置楼栋'
+  return `${worker.realName}（${worker.username}）— 负责 ${buildings}`
+}
+
+async function confirmDispatch() {
+  if (!dispatchTarget.value || !selectedWorkerId.value) return
+  await dispatchTicket(dispatchTarget.value.id, selectedWorkerId.value)
   ElMessage.success('派单成功')
+  dispatchVisible.value = false
   await load()
 }
 
@@ -89,7 +131,7 @@ onMounted(load)
       <el-table-column prop="submitTime" label="提交时间" width="170" />
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.status === 10 || row.status === 80" link type="primary" @click="doDispatch(row)">
+          <el-button v-if="row.status === 10 || row.status === 80" link type="primary" @click="openDispatch(row)">
             派单
           </el-button>
           <el-button v-if="[20, 30, 40].includes(row.status)" link type="danger" @click="doReject(row)">驳回</el-button>
@@ -106,6 +148,37 @@ onMounted(load)
       :current-page="query.pageNum"
       @current-change="(p: number) => { query.pageNum = p; load() }"
     />
+
+    <el-dialog v-model="dispatchVisible" title="派单" width="520px">
+      <el-form label-width="72px">
+        <el-form-item label="工单">
+          <span>
+            {{ dispatchTarget?.ticketNo }} · {{ dispatchTarget?.buildingName }} {{ dispatchTarget?.room }}
+          </span>
+        </el-form-item>
+        <el-form-item label="维修工">
+          <el-select
+            v-model="selectedWorkerId"
+            filterable
+            remote
+            reserve-keyword
+            :remote-method="searchWorkers"
+            :loading="workerSearching"
+            placeholder="输入工号或姓名搜索"
+            style="width: 100%"
+          >
+            <el-option v-for="w in workerOptions" :key="w.id" :label="workerLabel(w)" :value="w.id" />
+          </el-select>
+          <div class="hint">
+            只列出启用中的维修工，共 {{ workerTotal }} 位；看不全就输入关键字继续搜
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dispatchVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedWorkerId" @click="confirmDispatch">确认派单</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -118,5 +191,11 @@ onMounted(load)
 .pager {
   margin-top: 12px;
   justify-content: flex-end;
+}
+.hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
 }
 </style>
