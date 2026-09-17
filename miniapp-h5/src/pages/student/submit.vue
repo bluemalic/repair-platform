@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { listEnabledCategories } from '@/api/category'
 import { uploadImage } from '@/api/file'
 import { createTicket, getPositionByCode } from '@/api/ticket'
@@ -34,7 +34,23 @@ onLoad(async () => {
   } catch {
     // request 里已提示
   }
+  // 扫码页识别成功后把码 emit 回来（不共享可变状态，页面卸载时记得解绑）
+  uni.$on('scan:result', onScanResult)
 })
+
+onUnload(() => {
+  uni.$off('scan:result', onScanResult)
+})
+
+/** 扫到码就填上并直接定位，少一步点击。 */
+function onScanResult(scanned: string) {
+  code.value = scanned
+  lookup()
+}
+
+function goScan() {
+  uni.navigateTo({ url: '/pages/common/scan' })
+}
 
 /** 查位置：拿到楼栋+房间后前端只做展示，提交时只把码给后端（服务端再解一次，不信任前端）。 */
 async function lookup() {
@@ -131,7 +147,8 @@ async function submit() {
           <input v-model="code" class="input" type="number" maxlength="6" placeholder="房间门口贴的 6 位数字" />
           <button class="lookup" :loading="looking" :disabled="looking" @click="lookup">定位</button>
         </view>
-        <text class="hint">H5 暂不支持扫码，先手输；代码里已留好加摄像头扫码的位置</text>
+        <button class="scan" @click="goScan">扫二维码</button>
+        <text class="hint">扫不出来就手输：摄像头需要 HTTPS 或 localhost，且要授权</text>
       </view>
 
       <view v-if="position" class="position">
@@ -225,6 +242,13 @@ async function submit() {
   font-size: 28rpx;
   line-height: 80rpx;
   background: #2c6cf6;
+  border-radius: 8rpx;
+}
+.scan {
+  margin-top: 16rpx;
+  color: #2c6cf6;
+  font-size: 28rpx;
+  background: #f0f7ff;
   border-radius: 8rpx;
 }
 .hint {

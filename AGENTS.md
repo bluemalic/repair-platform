@@ -67,7 +67,11 @@
 `miniapp-h5` 先编译 H5，但**代码必须保持"将来能编小程序"**（备案后可能就编小程序，见 ADR-007）。因此：
 
 1. **只用 `uni.*` 与 Vue，不用只有浏览器才有的东西**：网络请求用 `uni.request`（**不用 axios**，小程序端没有 `XMLHttpRequest`）；存储用 `uni.getStorageSync`（不用 `localStorage`）；页面跳转用 `uni.reLaunch/navigateTo`（不用 `location`）。
-2. **H5 端没有 `uni.scanCode`**（该 API 只在 App / 小程序端有）。所以扫码报修在 H5 上只能：**手输 6 位报修码**（必做，零依赖）＋ 可选的"页面内摄像头扫码"（`getUserMedia` + 二维码解析库，需要 HTTPS，新增依赖要先确认）。
+2. **H5 端没有 `uni.scanCode`**（该 API 只在 App / 小程序端有），所以扫码用**条件编译**分两端实现（`pages/common/scan.vue`）：
+   - **H5**：`getUserMedia` 取摄像头 + `jsqr` 解码（**依赖已在 `package.json` 里**）。浏览器只在 **HTTPS 或 localhost** 下给摄像头，http 域名下必须给出"改用手输"的明确提示，不能静默失败。
+   - **小程序 / App**：`uni.scanCode` 一步到位。
+   - **手输 6 位码永远保留**：摄像头被拒、贴纸磨损、环境不支持时全靠它。
+   - `jsqr` 只认**标准 QR**，不支持 Micro QR。我们自己生成的码是标准 QR（前端 qrcode 库产出），所以够用；若将来要兼容第三方生成的 Micro QR，得换 `@zxing/browser`（体积大得多）。
 3. **依赖版本独立于 web-admin**：uni-app 的 `vite-plugin-uni` 把 `vite` 钉在 5.2.8、编译器钉在 3.4.21，所以这边的 vite/vue 与 `web-admin`（vite 8 / vue 3.5）**不同版本是正常的**，不要去"对齐"。
 4. **构建产物路径不同**：`web-admin` 是 `dist/`，`miniapp-h5` 是 `dist/build/h5/`（uni-app 的约定），nginx 挂载与 CI 都按这个路径。
 5. CI 独立：`.github/workflows/miniapp-ci.yml` 按 `miniapp-h5/**` 触发，与 `frontend-ci.yml`（web-admin）互不牵连。
