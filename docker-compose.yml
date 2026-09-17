@@ -129,11 +129,11 @@ services:
       - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # ⚠️ 以下两个前端产物目录尚未创建（前端工程未开始，见 README「当前进度」）：
-      #    目录不存在时 Docker 会挂成空目录，访问 / 与 /h5/ 会是 403 —— 属预期，不是故障。
-      #    前端就绪后把 dist 构建到这两个路径即可，无需改这里。
+      # 两个前端的产物目录。目录还不存在时 Docker 会挂成空目录、访问 / 与 /h5/ 返回 403，属预期不是故障。
+      # 注意两边路径不同：web-admin 构建到 dist/，而 miniapp-h5（uni-app）构建到 dist/build/h5/
+      # —— 写错这一处会静默挂上空目录，表现为"/h5/ 打不开"。
       - ./web-admin/dist:/usr/share/nginx/html/admin:ro
-      - ./miniapp-h5/dist:/usr/share/nginx/html/h5:ro
+      - ./miniapp-h5/dist/build/h5:/usr/share/nginx/html/h5:ro
     networks: [frontend]
 
 networks:

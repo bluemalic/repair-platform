@@ -1,0 +1,15 @@
+{
+  "name": "后勤报修",
+  // appid 留空：H5 构建不需要它；将来要编微信小程序时，在这里填 DCloud 申请的 appid
+  "appid": "",
+  "description": "学生报修与维修工接单（先编译 H5，备案后可编小程序）",
+  "versionName": "0.0.1",
+  "versionCode": "1",
+  "vueVersion": "3",
+  "h5": {
+    "title": "后勤报修",
+    "router": {
+      "mode": "hash"
+    }
+  }
+}

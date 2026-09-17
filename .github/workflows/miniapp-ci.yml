@@ -1,0 +1,45 @@
+# 移动端 CI：与前端 CI 同理由，按路径独立触发。
+#
+# 为什么不和 frontend-ci.yml 合成一个 workflow 的两个 job：那样 web-admin 的改动会连带跑移动端构建，
+# 移动端一挂就会挡住管理端的 PR —— 两个前端"各是独立工程"（AGENTS §3.1）也包括构建互不牵连。
+# 两个 workflow 各自 paths 过滤，互不影响；后端 ci.yml 同样不掺和。
+
+name: Miniapp CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'miniapp-h5/**'
+      - '.github/workflows/miniapp-ci.yml'
+  pull_request:
+    paths:
+      - 'miniapp-h5/**'
+      - '.github/workflows/miniapp-ci.yml'
+
+jobs:
+  h5:
+    name: 移动端构建（H5）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: miniapp-h5
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: miniapp-h5/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建 H5
+        run: npm run build:h5

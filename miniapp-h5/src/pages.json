@@ -1,0 +1,28 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": { "navigationBarTitleText": "登录" }
+    },
+    {
+      "path": "pages/student/home",
+      "style": {
+        "navigationBarTitleText": "我的报修",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/worker/home",
+      "style": {
+        "navigationBarTitleText": "我的任务",
+        "enablePullDownRefresh": true
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "后勤报修",
+    "navigationBarBackgroundColor": "#2c6cf6",
+    "backgroundColor": "#f5f6f8"
+  }
+}

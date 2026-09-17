@@ -1,0 +1,24 @@
+{
+  "name": "repair-miniapp",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev:h5": "uni",
+    "build:h5": "uni build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-alpha-5020620260914001",
+    "@dcloudio/uni-components": "3.0.0-alpha-5020620260914001",
+    "@dcloudio/uni-h5": "3.0.0-alpha-5020620260914001",
+    "vue": "3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "3.4.31",
+    "@types/node": "^22.10.0",
+    "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5020620260914001",
+    "typescript": "^5.4.5",
+    "vite": "5.2.8",
+    "vue-tsc": "^2.0.16"
+  }
+}
