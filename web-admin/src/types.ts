@@ -37,6 +37,8 @@ export interface TicketVO {
   categoryName: string
   workerId: string | null
   submitTime: string
+  dispatchTime: string | null
+  finishTime: string | null
   arriveMinutes: number | null
   handleMinutes: number | null
 }
@@ -116,5 +118,51 @@ export interface RepairCodeDetailVO {
   room: string
   /** 1启用 0停用 */
   status: number
+  createTime: string
+}
+
+/** 工单流转日志（详情页的时间线）。action 是后端 TicketAction 的枚举名。 */
+export interface TicketLogVO {
+  id: string
+  action: string
+  fromStatus: number | null
+  toStatus: number | null
+  operatorId: string | null
+  operatorName: string | null
+  remark: string | null
+  createTime: string
+}
+
+export interface TicketEvaluationVO {
+  id: string
+  score: number
+  content: string | null
+  createTime: string
+}
+
+/** 工单详情：比列表多出描述、图片、维修结果、驳回原因与流转时间线。 */
+export interface TicketDetailVO extends TicketVO {
+  description: string | null
+  images: string[] | null
+  resultDesc: string | null
+  resultImages: string[] | null
+  rejectReason: string | null
+  acceptTime: string | null
+  arriveTime: string | null
+  closeTime: string | null
+  logs: TicketLogVO[]
+  /** 未评价时为 null */
+  evaluation: TicketEvaluationVO | null
+}
+
+/** 站内通知。title / content 由后端按动作规格生成，前端直接展示即可。 */
+export interface NotificationVO {
+  id: string
+  type: string
+  title: string
+  content: string | null
+  ticketId: string | null
+  /** 0未读 1已读 */
+  isRead: number
   createTime: string
 }

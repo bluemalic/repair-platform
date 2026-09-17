@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { PageResult, TicketVO } from '@/types'
+import type { PageResult, TicketDetailVO, TicketVO } from '@/types'
 
 export interface TicketQuery {
   pageNum: number
@@ -11,6 +11,11 @@ export interface TicketQuery {
 
 export function pageTickets(query: TicketQuery) {
   return http.get<PageResult<TicketVO>>('/admin/tickets', { ...query })
+}
+
+/** 详情：含流转时间线、验收评价与图片 */
+export function getTicketDetail(id: string) {
+  return http.get<TicketDetailVO>(`/admin/tickets/${id}`)
 }
 
 export function dispatchTicket(id: string, workerId: string) {
