@@ -68,8 +68,10 @@ jobs:
       # 一条命令同时跑测试和打包。测试报告会留在 target/surefire-reports/，
       # 而单独的 mvn clean package 会把上一步的测试报告一起清掉 —— 所以合成一步。
       # 变量名与 docker-compose.yml 的 app.environment 对齐，配置读取方式见 application.yml。
-      # 对象存储（MinIO）为什么不用 services 起：Actions 的 service 不能覆盖容器的启动命令，
-      # 而 minio/minio 镜像不带 `server /data` 参数会直接退出——表现是 job 卡在 "Initialize containers"。
+      # 对象存储（MinIO）为什么不用 services 起：Actions 的 service 不支持覆盖容器启动命令，
+      # 而这个镜像不带 `server /data` 参数会直接退出（表现为 job 卡在 "Initialize containers"）。
+      # 镜像走 quay.io：minio/minio 在 Docker Hub 上已拉不到（pull access denied），
+      # 本地因为早就缓存过才没暴露——`docker-compose.yml` 里也是同样的坑，一并改了。
       # 这里显式 docker run + 等健康检查，失败时的报错也清楚。
       # 只有"真上传"的用例需要它：类型 / 大小 / 魔数这些校验用例不依赖 MinIO。
       - name: 启动 MinIO（对象存储）
@@ -77,7 +79,7 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=ci-minio-user \
             -e MINIO_ROOT_PASSWORD=ci-minio-password \
-            minio/minio server /data
+            quay.io/minio/minio server /data
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live; then
               echo "MinIO 已就绪"
