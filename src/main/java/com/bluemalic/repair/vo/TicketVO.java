@@ -37,9 +37,6 @@ public class TicketVO {
 
     private Long workerId;
 
-    @Schema(description = "报修码对应的房间码（扫码报修时回显用）")
-    private String repairCode;
-
     private LocalDateTime submitTime;
 
     private LocalDateTime dispatchTime;
