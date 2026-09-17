@@ -20,6 +20,14 @@
       "style": { "navigationBarTitleText": "工单详情" }
     },
     {
+      "path": "pages/worker/detail",
+      "style": { "navigationBarTitleText": "工单处理" }
+    },
+    {
+      "path": "pages/worker/finish",
+      "style": { "navigationBarTitleText": "完工上报" }
+    },
+    {
       "path": "pages/worker/home",
       "style": {
         "navigationBarTitleText": "我的任务",

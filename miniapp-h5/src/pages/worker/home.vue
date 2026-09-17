@@ -61,9 +61,8 @@ function logout() {
   uni.reLaunch({ url: '/pages/login/login' })
 }
 
-function openDetail() {
-  // 下一批：工单详情 + 接单 / 到场打卡 / 完工上报
-  uni.showToast({ title: '接单与到场下一批做', icon: 'none' })
+function openDetail(row: TicketVO) {
+  uni.navigateTo({ url: `/pages/worker/detail?id=${row.id}` })
 }
 </script>
 
@@ -76,10 +75,10 @@ function openDetail() {
 
     <view v-if="rows.length === 0 && !loading" class="empty">
       <text>暂时没有派给你的工单</text>
-      <text class="empty-tip">可见范围 = 你负责的楼栋，由后勤在管理端配置</text>
+      <text class="empty-tip">这里只显示你负责楼栋的工单；有派单后会出现在这里</text>
     </view>
 
-    <view v-for="row in rows" :key="row.id" class="card" @click="openDetail">
+    <view v-for="row in rows" :key="row.id" class="card" @click="() => openDetail(row)">
       <view class="card-head">
         <text class="position">{{ row.buildingName }} {{ row.room }}</text>
         <text class="status" :style="{ color: STATUS[row.status]?.color }">

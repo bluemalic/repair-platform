@@ -37,6 +37,9 @@ export interface TicketVO {
   categoryName: string
   workerId: string | null
   submitTime: string
+  /** 后端列表里就有这两个时间，Vue 侧要用到（详情里显示"派单/完工"时刻） */
+  dispatchTime: string | null
+  finishTime: string | null
   arriveMinutes: number | null
   handleMinutes: number | null
 }

@@ -41,3 +41,29 @@ export function getTicketDetail(id: string) {
 export function cancelTicket(id: string) {
   return request<void>({ url: `/student/tickets/${id}/cancel`, method: 'POST' })
 }
+
+// ==================== 维修工动作 ====================
+
+/** 接单：待接单 → 处理中；被别人抢先返回 20003。 */
+export function acceptTicket(id: string) {
+  return request<void>({ url: `/worker/tickets/${id}/accept`, method: 'POST' })
+}
+
+/** 驳回：待接单 / 处理中 → 已驳回（可被重新派单）。 */
+export function rejectTicket(id: string, reason: string) {
+  return request<void>({ url: `/worker/tickets/${id}/reject`, method: 'POST', data: { reason } })
+}
+
+/** 到场打卡：服务端会校验码与工单的楼栋房间一致，不一致返回 20007。 */
+export function arriveTicket(id: string, repairCode: string) {
+  return request<void>({ url: `/worker/tickets/${id}/arrive`, method: 'POST', data: { repairCode } })
+}
+
+/** 完工上报：处理中 → 待验收。 */
+export function finishTicket(id: string, resultDesc: string, resultImages?: string[]) {
+  return request<void>({
+    url: `/worker/tickets/${id}/finish`,
+    method: 'POST',
+    data: { resultDesc, resultImages },
+  })
+}
