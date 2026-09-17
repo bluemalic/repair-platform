@@ -20,6 +20,10 @@
       "style": { "navigationBarTitleText": "工单详情" }
     },
     {
+      "path": "pages/student/evaluate",
+      "style": { "navigationBarTitleText": "验收评价" }
+    },
+    {
       "path": "pages/worker/detail",
       "style": { "navigationBarTitleText": "工单处理" }
     },

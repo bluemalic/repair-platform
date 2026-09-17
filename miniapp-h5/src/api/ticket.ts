@@ -79,3 +79,12 @@ export function finishTicket(id: string, resultDesc: string, resultImages?: stri
     data: { resultDesc, resultImages },
   })
 }
+
+/** 验收评价：待验收 → 已完成（40 → 50）。评分 1-5 必填，留言选填。 */
+export function evaluateTicket(id: string, score: number, content?: string) {
+  return request<void>({
+    url: `/student/tickets/${id}/evaluate`,
+    method: 'POST',
+    data: { score, content },
+  })
+}
