@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import TicketDetail from '@/components/TicketDetail.vue'
 import { acceptTicket, arriveTicket, getWorkerTicketDetail, rejectTicket } from '@/api/ticket'
 import type { TicketDetailVO } from '@/types'
@@ -24,7 +24,21 @@ const canFinish = computed(() => detail.value?.status === 30 && !!detail.value?.
 
 onLoad((options) => {
   ticketId.value = options?.id ?? ''
+  // 扫码页识别成功后把码 emit 回来（到场要求扫门口那张码：扫码是主入口，手输是兜底）
+  uni.$on('scan:result', onScanResult)
 })
+
+onUnload(() => {
+  uni.$off('scan:result', onScanResult)
+})
+
+function onScanResult(code: string) {
+  arriveCode.value = code
+}
+
+function goScan() {
+  uni.navigateTo({ url: '/pages/common/scan' })
+}
 
 onShow(async () => {
   if (!ticketId.value) {
@@ -108,6 +122,7 @@ function goFinish() {
         <text class="label">到场打卡</text>
         <text class="hint">输入房间门口的 6 位报修码（与工单位置不一致会被拒绝）</text>
         <input v-model="arriveCode" class="input" type="number" maxlength="6" placeholder="如 482913" />
+        <button class="scan" @click="goScan">扫房间门口的码</button>
       </view>
 
       <view class="actions">
@@ -160,6 +175,13 @@ function goFinish() {
   font-size: 32rpx;
   letter-spacing: 4rpx;
   background: #f5f6f8;
+  border-radius: 8rpx;
+}
+.scan {
+  margin-top: 16rpx;
+  color: #2c6cf6;
+  font-size: 28rpx;
+  background: #f0f7ff;
   border-radius: 8rpx;
 }
 .actions {
