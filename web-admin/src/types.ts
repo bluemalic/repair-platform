@@ -81,3 +81,13 @@ export interface WorkerVO {
   buildingIds: string[]
   buildingNames: string[]
 }
+
+/** 楼栋（docs/03 §5.4 基础数据）。列表不分页：字典数据量小，下拉要一次拿全。 */
+export interface BuildingVO {
+  id: string
+  name: string
+  area: string | null
+  sort: number
+  /** 1启用 0停用 */
+  status: number
+}
