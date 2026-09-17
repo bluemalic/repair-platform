@@ -16,6 +16,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -96,6 +97,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleUnreadableBody(HttpMessageNotReadableException e) {
         log.warn("请求体无法解析（缺失或不是合法 JSON）");
         return ResponseEntity.ok(Result.fail(ErrorCode.PARAM_INVALID, "请求体缺失或不是合法 JSON"));
+    }
+
+    /**
+     * multipart 超过**容器**上限（{@code spring.servlet.multipart.max-file-size}）。
+     *
+     * <p>容器上限设得比业务上限（5MB）略大，正常超限由业务层返回 `50002` 并带清晰文案；
+     * 走到这里的是"明显异常的大包"——同样回 `50002`，不让它变成 500。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过容器上限: {}", e.getMessage());
+        return ResponseEntity.ok(Result.fail(ErrorCode.FILE_SIZE_EXCEEDED, "图片超过大小上限"));
     }
 
     @ExceptionHandler(NotLoginException.class)

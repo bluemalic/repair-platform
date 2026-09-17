@@ -105,9 +105,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 应用连 MinIO 走容器网络地址；返回给前端的图片 URL 必须用"浏览器能访问到的地址"
+      # （本机是 127.0.0.1:9000，线上换成域名）——合成一个键就会出现"内网地址进了数据库、前端打不开"
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_BASE_URL: ${MINIO_PUBLIC_BASE_URL:-http://127.0.0.1:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-repair}
       # AI 相关：Key 只从环境变量注入，绝不写进代码或仓库
       AI_MODEL_API_KEY: ${AI_MODEL_API_KEY}
       AI_MODEL_BASE_URL: ${AI_MODEL_BASE_URL:-https://api.deepseek.com}
