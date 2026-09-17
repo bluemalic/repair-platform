@@ -33,8 +33,20 @@ export function createTicket(body: {
   return request<TicketVO>({ url: '/student/tickets', method: 'POST', data: body })
 }
 
+/**
+ * 学生看自己的工单详情。
+ *
+ * <p>**维修工不能用它**：这条路径属于 `/api/student/**`，权限码是 `ticket:list:self`，
+ * 维修工调会 403（真机验证时踩到过）。两端各有一个详情接口，服务端是同一个 service 方法，
+ * 差别只在路由与权限；数据可见范围仍由拦截器按角色注入。
+ */
 export function getTicketDetail(id: string) {
   return request<TicketDetailVO>({ url: `/student/tickets/${id}` })
+}
+
+/** 维修工看派给自己楼栋的工单详情。 */
+export function getWorkerTicketDetail(id: string) {
+  return request<TicketDetailVO>({ url: `/worker/tickets/${id}` })
 }
 
 /** 撤单：只有"待派单"可以撤（10 → 70）。 */
