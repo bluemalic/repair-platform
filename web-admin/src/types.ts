@@ -102,3 +102,19 @@ export interface CategoryVO {
   /** 1启用 0停用 */
   status: number
 }
+
+/**
+ * 报修码记录（管理端）。注意与"扫码返回的位置"区分：这里带主键、码本身的状态与生成时间，
+ * 改码时用的是 id（不是 code 字符串）。码是位置码，一张码 = 一个房间门口的那张。
+ */
+export interface RepairCodeDetailVO {
+  id: string
+  /** 6 位数字 */
+  code: string
+  buildingId: string
+  buildingName: string
+  room: string
+  /** 1启用 0停用 */
+  status: number
+  createTime: string
+}
