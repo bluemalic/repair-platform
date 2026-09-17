@@ -44,6 +44,22 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
+      # 对象存储是外部依赖（事务回滚不了它），所以真上传的用例需要它在这里起来；
+      # 校验层的用例（类型/大小/魔数）不依赖 MinIO，MinIO 没起也能跑。
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: ci-minio-user
+          MINIO_ROOT_PASSWORD: ci-minio-password
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="mc --version || true; curl -f http://localhost:9000/minio/health/live"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+        command: server /data
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -77,6 +93,12 @@ jobs:
           MYSQL_PASSWORD: ci-root-password
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: '6379'
+          # 真上传用例要连 MinIO（桶由首次上传时自动创建，无需预置）
+          MINIO_ENDPOINT: http://127.0.0.1:9000
+          MINIO_PUBLIC_BASE_URL: http://127.0.0.1:9000
+          MINIO_ACCESS_KEY: ci-minio-user
+          MINIO_SECRET_KEY: ci-minio-password
+          MINIO_BUCKET: repair-ci
         run: mvn -B clean package
 
       - name: 上传测试报告
