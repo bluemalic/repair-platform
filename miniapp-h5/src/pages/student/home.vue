@@ -61,9 +61,12 @@ function logout() {
   uni.reLaunch({ url: '/pages/login/login' })
 }
 
-function openDetail() {
-  // 下一批：工单详情 + 撤单
-  uni.showToast({ title: '工单详情下一批做', icon: 'none' })
+function openDetail(row: TicketVO) {
+  uni.navigateTo({ url: `/pages/student/detail?id=${row.id}` })
+}
+
+function goSubmit() {
+  uni.navigateTo({ url: '/pages/student/submit' })
 }
 </script>
 
@@ -74,12 +77,14 @@ function openDetail() {
       <text class="logout" @click="logout">退出</text>
     </view>
 
+    <button class="primary" @click="goSubmit">我要报修</button>
+
     <view v-if="rows.length === 0 && !loading" class="empty">
       <text>还没有报修记录</text>
-      <text class="empty-tip">扫码报修下一批做（也可以先让后勤帮你建单）</text>
+      <text class="empty-tip">点上面的「我要报修」，输入房间门口的 6 位报修码</text>
     </view>
 
-    <view v-for="row in rows" :key="row.id" class="card" @click="openDetail">
+    <view v-for="row in rows" :key="row.id" class="card" @click="() => openDetail(row)">
       <view class="card-head">
         <text class="position">{{ row.buildingName }} {{ row.room }}</text>
         <text class="status" :style="{ color: STATUS[row.status]?.color }">
@@ -136,6 +141,12 @@ function openDetail() {
   margin-top: 12rpx;
   font-size: 24rpx;
   color: #c0c4cc;
+}
+.primary {
+  margin-bottom: 24rpx;
+  color: #fff;
+  background: #2c6cf6;
+  border-radius: 8rpx;
 }
 .card {
   margin-bottom: 20rpx;

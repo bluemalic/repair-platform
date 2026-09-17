@@ -40,3 +40,57 @@ export interface TicketVO {
   arriveMinutes: number | null
   handleMinutes: number | null
 }
+
+/** 报修类别（各端共用的只读接口 `/api/categories` 只返回启用中的）。 */
+export interface CategoryVO {
+  id: string
+  name: string
+  /** 1普通 2紧急 3特急 */
+  defaultUrgency: number
+  sort: number
+  status: number
+}
+
+/** 按报修码查到的位置（学生报修预填、维修工到场比对都用它）。 */
+export interface RepairCodeVO {
+  buildingId: string
+  buildingName: string
+  room: string
+}
+
+export interface TicketLogVO {
+  id: string
+  action: string
+  fromStatus: number | null
+  toStatus: number | null
+  operatorName: string | null
+  remark: string | null
+  createTime: string
+}
+
+export interface TicketEvaluationVO {
+  id: string
+  score: number
+  content: string | null
+  createTime: string
+}
+
+/** 工单详情：比列表多出描述、图片、维修结果与流转时间线。 */
+export interface TicketDetailVO extends TicketVO {
+  description: string | null
+  images: string[] | null
+  resultDesc: string | null
+  resultImages: string[] | null
+  rejectReason: string | null
+  acceptTime: string | null
+  arriveTime: string | null
+  closeTime: string | null
+  logs: TicketLogVO[]
+  evaluation: TicketEvaluationVO | null
+}
+
+/** 上传结果（docs/03 §7.3）。 */
+export interface FileUploadVO {
+  url: string
+  objectKey: string
+}

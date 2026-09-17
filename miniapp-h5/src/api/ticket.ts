@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { PageResult, TicketVO } from '@/types'
+import type { PageResult, RepairCodeVO, TicketDetailVO, TicketVO } from '@/types'
 
 /** 学生：我的报修（可见范围由后端数据权限拦截器按"本人"注入） */
 export function pageMyTickets(pageNum: number, pageSize = 10) {
@@ -15,4 +15,29 @@ export function pageMyTasks(pageNum: number, pageSize = 10) {
     url: '/worker/tickets',
     data: { pageNum, pageSize },
   })
+}
+
+/** 按报修码查位置（跨端共用接口，docs/03 §7.1）；码是位置码，不指向某张工单。 */
+export function getPositionByCode(code: string) {
+  return request<RepairCodeVO>({ url: `/tickets/by-code/${code}` })
+}
+
+/** 提交报修：带报修码，楼栋房间由服务端从码里取（前端不传）。 */
+export function createTicket(body: {
+  repairCode: string
+  categoryId: string
+  description: string
+  images?: string[]
+  urgency?: number
+}) {
+  return request<TicketVO>({ url: '/student/tickets', method: 'POST', data: body })
+}
+
+export function getTicketDetail(id: string) {
+  return request<TicketDetailVO>({ url: `/student/tickets/${id}` })
+}
+
+/** 撤单：只有"待派单"可以撤（10 → 70）。 */
+export function cancelTicket(id: string) {
+  return request<void>({ url: `/student/tickets/${id}/cancel`, method: 'POST' })
 }

@@ -234,6 +234,27 @@ class DictionaryManageTest {
         assertThat(namesOf(getJson(admin, "/api/admin/categories"), "name")).doesNotContain("没人用的类别");
     }
 
+    /**
+     * 各端共用的只读类别接口：学生没有 `category:manage` 权限，但报修表单必须能选类别
+     * ——这正是这个接口存在的理由（docs/03 §5.1）。只返回启用中的。
+     */
+    @Test
+    void enabledCategoriesAreReadableByStudents() throws Exception {
+        String admin = givenToken("test-cat-query-admin", 3, ROLE_ADMIN);
+        String student = givenToken("test-cat-query-student", 1, ROLE_STUDENT);
+
+        createCategory(admin, "学生能选的类别", 1, 0);
+        long hiddenId = createCategory(admin, "已下线的类别", 1, 0);
+        putJson(admin, "/api/admin/categories/" + hiddenId, Map.of(
+                "name", "已下线的类别", "defaultUrgency", 1, "sort", 0, "status", 0))
+                .andExpect(jsonPath("$.code").value(0));
+
+        JsonNode list = getJson(student, "/api/categories");
+        assertThat(list.path("code").asInt()).isZero();
+        assertThat(namesOf(list, "name")).contains("学生能选的类别");
+        assertThat(namesOf(list, "name")).doesNotContain("已下线的类别");
+    }
+
     @Test
     void studentCannotManageDictionaries() throws Exception {
         String student = givenToken("test-dict-forbidden", 1, ROLE_STUDENT);
