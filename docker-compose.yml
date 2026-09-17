@@ -65,7 +65,9 @@ services:
           memory: 384M
 
   minio:
-    image: minio/minio:latest
+    # 镜像在 quay.io：minio/minio 在 Docker Hub 上已拉不到（pull access denied）。
+    # 本机因为早就缓存过 Docker Hub 的镜像，一直没暴露这个坑——新机器上会直接拉取失败。
+    image: quay.io/minio/minio:latest
     container_name: repair-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
