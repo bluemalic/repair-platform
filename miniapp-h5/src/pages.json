@@ -12,6 +12,14 @@
       }
     },
     {
+      "path": "pages/student/submit",
+      "style": { "navigationBarTitleText": "报修" }
+    },
+    {
+      "path": "pages/student/detail",
+      "style": { "navigationBarTitleText": "工单详情" }
+    },
+    {
       "path": "pages/worker/home",
       "style": {
         "navigationBarTitleText": "我的任务",
