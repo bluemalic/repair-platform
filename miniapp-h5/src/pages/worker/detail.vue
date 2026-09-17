@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import TicketDetail from '@/components/TicketDetail.vue'
-import { acceptTicket, arriveTicket, getTicketDetail, rejectTicket } from '@/api/ticket'
+import { acceptTicket, arriveTicket, getWorkerTicketDetail, rejectTicket } from '@/api/ticket'
 import type { TicketDetailVO } from '@/types'
 
 /**
@@ -38,7 +38,7 @@ onShow(async () => {
 async function load() {
   loading.value = true
   try {
-    detail.value = await getTicketDetail(ticketId.value)
+    detail.value = await getWorkerTicketDetail(ticketId.value)
   } finally {
     loading.value = false
   }
