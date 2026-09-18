@@ -5,6 +5,10 @@
 #
 # 用法：cp .env.example .env && 填好变量
 # 中间件端口只绑 127.0.0.1（仅本机可达）：MySQL 13306、Redis 6379、MinIO 9000/9001
+#
+# 各服务的内存上限与几个吃内存的参数**走环境变量**，默认值是本地开发用的宽松值。
+# 小内存机器（2C2G 这类）照 .env.example 里"小内存机型"那一段改，别改这个文件——
+# 改这里会让服务器上的配置和仓库里的事实对不上，下次拉取就丢了。
 
 services:
   mysql:
@@ -22,6 +26,8 @@ services:
       --max-connections=200
       --slow-query-log=1
       --long-query-time=1
+      --innodb-buffer-pool-size=${MYSQL_BUFFER_POOL:-128M}
+      --performance-schema=${MYSQL_PERFORMANCE_SCHEMA:-ON}
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./logs/mysql:/var/log/mysql
@@ -39,7 +45,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: ${MYSQL_MEM_LIMIT:-768M}
 
   redis:
     # redis-stack 比官方镜像多出 RediSearch，为 M4 的 AI 向量检索准备
@@ -51,7 +57,7 @@ services:
     command: >
       redis-server
       --appendonly yes
-      --maxmemory 256mb
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
       --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_PASSWORD}
     volumes:
@@ -62,7 +68,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: ${REDIS_MEM_LIMIT:-384M}
 
   minio:
     # 镜像在 quay.io：minio/minio 在 Docker Hub 上已拉不到（pull access denied）。
@@ -76,20 +82,27 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./data/minio:/data
-    networks: [backend]
+    # 同时挂 frontend：nginx 要反代 /files/ 到它（见 nginx.conf）。
+    # 另一条路是把 nginx 接进 backend，但那会让 nginx 也能碰到 MySQL / Redis——
+    # 让唯一对外暴露的容器离数据库远一点，是这张网络分区图存在的意义。
+    networks: [backend, frontend]
     # 只给本机访问：9000 是 S3 API（应用/调试用），9001 是管理台
+    # 公网要看图走 nginx 的 /files/，不靠把这两个端口开出去
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: ${MINIO_MEM_LIMIT:-256M}
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      # 国内构建要换 Maven 镜像源，否则会卡在 TLS 中断上（见 Dockerfile 注释与 .env.example）
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
     image: ${IMAGE_NAME:-repair-app:latest}
     container_name: repair-app
     restart: unless-stopped
@@ -99,6 +112,9 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       TZ: Asia/Shanghai
+      # 容器内存上限的百分之多少给堆（见 Dockerfile）。留 30% 给元空间/线程栈/直接内存，
+      # 小内存机型上这个比例要下调，否则堆没满、容器先被 OOM killer 干掉
+      JAVA_MAX_RAM_PERCENTAGE: ${JAVA_MAX_RAM_PERCENTAGE:-70}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
@@ -108,7 +124,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       # 应用连 MinIO 走容器网络地址；返回给前端的图片 URL 必须用"浏览器能访问到的地址"
-      # （本机是 127.0.0.1:9000，线上换成域名）——合成一个键就会出现"内网地址进了数据库、前端打不开"
+      # （线上是 http://域名:8080/files，走 nginx 反代）——合成一个键就会出现"内网地址进了数据库、前端打不开"
       MINIO_ENDPOINT: http://minio:9000
       MINIO_PUBLIC_BASE_URL: ${MINIO_PUBLIC_BASE_URL:-http://127.0.0.1:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -124,7 +140,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: ${APP_MEM_LIMIT:-768M}
 
   nginx:
     image: nginx:1.27-alpine
@@ -132,7 +148,8 @@ services:
     restart: unless-stopped
     depends_on: [app]
     ports:
-      - "8080:80"
+      # 宿主端口可改：本机 8080 常被 IDEA 里跑的应用占着；服务器上按需换成 80
+      - "${NGINX_PORT:-8080}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # 两个前端的产物目录。目录还不存在时 Docker 会挂成空目录、访问 / 与 /h5/ 返回 403，属预期不是故障。
