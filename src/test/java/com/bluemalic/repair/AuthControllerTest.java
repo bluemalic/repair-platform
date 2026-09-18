@@ -12,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.RequestBuilder;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -19,6 +20,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -41,6 +43,7 @@ class AuthControllerTest {
 
     private static final String TENANT_CODE = "gdou";
     private static final String PASSWORD = "Test@123456";
+    private static final String NEW_PASSWORD = "Changed@9876";
     private static final long ROLE_STUDENT = 1L;
     private static final long ROLE_ADMIN = 3L;
 
@@ -133,6 +136,93 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/admin/probe/dispatch").header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
+    }
+
+    // ==================== 自助改密（PUT /api/auth/password） ====================
+
+    @Test
+    void passwordIsReallyChanged() throws Exception {
+        givenUser("test-pwd-change", 3, ROLE_ADMIN);
+        String token = login("test-pwd-change", PASSWORD);
+
+        changePassword(token, PASSWORD, NEW_PASSWORD).andExpect(jsonPath("$.code").value(0));
+
+        // 旧密码立刻作废、新密码能登上 —— 这两条缺一条，都说明"改了个寂寞"
+        mockMvc.perform(loginRequest("test-pwd-change", PASSWORD))
+                .andExpect(jsonPath("$.code").value(30001));
+        login("test-pwd-change", NEW_PASSWORD);
+    }
+
+    @Test
+    void allSessionsDieAfterPasswordChange() throws Exception {
+        givenUser("test-pwd-sessions", 3, ROLE_ADMIN);
+        String token = login("test-pwd-sessions", PASSWORD);
+
+        changePassword(token, PASSWORD, NEW_PASSWORD).andExpect(jsonPath("$.code").value(0));
+
+        // 发起改密的那次会话也一起失效：改密的动机之一就是"怀疑账号被别人用着"，
+        // 而"当前这个会话可信"这个前提并不成立。前端因此必须清登录态跳登录页。
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(10002));
+    }
+
+    @Test
+    void wrongOldPasswordIsRejectedAndChangesNothing() throws Exception {
+        givenUser("test-pwd-wrong-old", 3, ROLE_ADMIN);
+        String token = login("test-pwd-wrong-old", PASSWORD);
+
+        changePassword(token, "not-my-password", NEW_PASSWORD)
+                .andExpect(jsonPath("$.code").value(30001));
+
+        // 关键：密码没被改掉，旧密码仍然能登
+        login("test-pwd-wrong-old", PASSWORD);
+    }
+
+    @Test
+    void sameAsOldPasswordIsRejected() throws Exception {
+        givenUser("test-pwd-same", 3, ROLE_ADMIN);
+        String token = login("test-pwd-same", PASSWORD);
+
+        changePassword(token, PASSWORD, PASSWORD).andExpect(jsonPath("$.code").value(10001));
+    }
+
+    @Test
+    void tooShortNewPasswordIsRejected() throws Exception {
+        givenUser("test-pwd-short", 3, ROLE_ADMIN);
+        String token = login("test-pwd-short", PASSWORD);
+
+        changePassword(token, PASSWORD, "1234567").andExpect(jsonPath("$.code").value(10001));
+    }
+
+    @Test
+    void anonymousCannotChangePassword() throws Exception {
+        mockMvc.perform(put("/api/auth/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("oldPassword", PASSWORD, "newPassword", NEW_PASSWORD))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(10002));
+    }
+
+    @Test
+    void studentCanChangeOwnPasswordToo() throws Exception {
+        // 三端共用：维修工/后勤能改，学生也要能改（学生是这套系统里量最大的一类账号）
+        givenUser("test-pwd-student", 1, ROLE_STUDENT);
+        String token = login("test-pwd-student", PASSWORD);
+
+        changePassword(token, PASSWORD, NEW_PASSWORD).andExpect(jsonPath("$.code").value(0));
+        login("test-pwd-student", NEW_PASSWORD);
+    }
+
+    private ResultActions changePassword(String token, String oldPassword, String newPassword)
+            throws Exception {
+        String body = objectMapper.writeValueAsString(
+                Map.of("oldPassword", oldPassword, "newPassword", newPassword));
+        return mockMvc.perform(put("/api/auth/password")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
     }
 
     private RequestBuilder loginRequest(String username, String password) throws Exception {

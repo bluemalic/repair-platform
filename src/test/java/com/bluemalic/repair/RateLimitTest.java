@@ -1,9 +1,9 @@
 package com.bluemalic.repair;
 
+import com.bluemalic.repair.common.RateLimiter;
 import com.bluemalic.repair.config.RateLimitRule;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
-import com.bluemalic.repair.interceptor.RateLimitInterceptor;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +27,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 报修码限流（ADR-009）。重点验证三件事，都是"写错了也照样能跑"的那种：
+ * 限流（ADR-009）。两套机制共用同一个 Redis 原语（{@code RateLimiter}），但计数维度不同，
+ * 所以分开验证：
+ *
+ * <p><b>报修码查询 / 扫码到场（拦截器，按登录用户计）</b>重点验证三件事，都是"写错了也照样能跑"的那种：
  *
  * <ol>
  *   <li><b>阈值边界</b>：第 N 次放行、第 N+1 次拦（10004），且业务失败仍是 HTTP 200 + 业务码</li>
@@ -36,6 +39,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li><b>限流在业务逻辑之前</b>：到场接口拿一个不存在的工单 ID 也能把计数打满，
  *       说明它是在进入 Service 之前拦下的（也顺带证明 20001 优先于权限问题，不是被 403 挡的）</li>
  * </ol>
+ *
+ * <p><b>登录（业务层，按租户 + 账号计）</b>验证的是另一组性质：按账号分桶（别人被刷不影响我）、
+ * 以及<b>用对密码也照样被拦</b>——计数发生在验密之前，否则爆破者只要用错密码就会被"只统计失败"
+ * 的实现放过额度。
  *
  * <p>阈值从 {@link RateLimitRule} 读，不硬写 60：测试环境若用环境变量调过阈值，这里跟着走。
  *
@@ -73,7 +80,7 @@ class RateLimitTest {
 
     @AfterEach
     void clearCounters() {
-        Set<String> keys = redis.keys(RateLimitInterceptor.KEY_PREFIX + "*");
+        Set<String> keys = redis.keys(RateLimiter.KEY_PREFIX + "*");
         if (keys != null && !keys.isEmpty()) {
             redis.delete(keys);
         }
@@ -136,7 +143,56 @@ class RateLimitTest {
         byCode(worker, VALID_CODE).andExpect(jsonPath("$.code").value(0));
     }
 
+    // ==================== 登录：按租户 + 账号计数 ====================
+
+    @Test
+    void loginIsLimitedPerAccount() throws Exception {
+        // 用不存在的账号：限流在验密之前就计数，所以不需要造用户（也就没有 BCrypt 的开销）
+        for (int i = 1; i <= rule.getLoginMaxRequests(); i++) {
+            login("test-rate-limit-ghost", "whatever-password")
+                    .andExpect(jsonPath("$.code").value(30001));
+        }
+
+        login("test-rate-limit-ghost", "whatever-password")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(10004));
+    }
+
+    @Test
+    void loginCounterIsPerAccount() throws Exception {
+        exhaustLogin("test-rate-limit-victim");
+
+        // 同租户下的另一个账号不受影响：不能因为有人刷某个学号，别人就登不上
+        login("test-rate-limit-other", "whatever-password")
+                .andExpect(jsonPath("$.code").value(30001));
+    }
+
+    @Test
+    void correctPasswordIsAlsoBlockedOnceExhausted() throws Exception {
+        givenUser("test-rate-limit-real", 1, 1L);
+        exhaustLogin("test-rate-limit-real");
+
+        // 第 N+1 次改成用**正确的**密码：照样 10004。
+        // 这条是在守"计数发生在验密之前"——若实现成"只统计失败次数"，爆破者反而能无限试。
+        login("test-rate-limit-real", PASSWORD)
+                .andExpect(jsonPath("$.code").value(10004));
+    }
+
     // ==================== 工具 ====================
+
+    /** 把某个账号的登录额度打满（用错密码，最后一次仍然放行）。 */
+    private void exhaustLogin(String username) throws Exception {
+        for (int i = 1; i <= rule.getLoginMaxRequests(); i++) {
+            login(username, "whatever-password").andExpect(jsonPath("$.code").value(30001));
+        }
+    }
+
+    private ResultActions login(String username, String password) throws Exception {
+        return mockMvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of(
+                        "tenantCode", "gdou", "username", username, "password", password))));
+    }
 
     /** 把某个用户的计数打到阈值上限（本次请求仍然放行）。 */
     private void exhaust(String token) throws Exception {
@@ -159,6 +215,17 @@ class RateLimitTest {
 
     /** 造用户 + 角色并登录拿 token（与其它测试同一套写法：租户 1 = 种子数据 gdou）。 */
     private String givenToken(String username, int userType, long roleId) throws Exception {
+        givenUser(username, userType, roleId);
+
+        MvcResult result = login(username, PASSWORD)
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .path("data").path("tokenValue").asText();
+    }
+
+    /** 只造用户和角色关联，不登录（需要自己控制登录次数时用）。 */
+    private void givenUser(String username, int userType, long roleId) {
         SysUser user = new SysUser();
         user.setTenantId(1L);
         user.setUsername(username);
@@ -172,14 +239,5 @@ class RateLimitTest {
         link.setUserId(user.getId());
         link.setRoleId(roleId);
         sysUserRoleMapper.insert(link);
-
-        MvcResult result = mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "tenantCode", "gdou", "username", username, "password", PASSWORD))))
-                .andExpect(jsonPath("$.code").value(0))
-                .andReturn();
-        return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
-                .path("data").path("tokenValue").asText();
     }
 }
