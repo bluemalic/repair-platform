@@ -5,6 +5,10 @@
       "style": { "navigationBarTitleText": "扫码" }
     },
     {
+      "path": "pages/common/password",
+      "style": { "navigationBarTitleText": "修改密码" }
+    },
+    {
       "path": "pages/login/login",
       "style": { "navigationBarTitleText": "登录" }
     },

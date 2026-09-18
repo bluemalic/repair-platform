@@ -61,6 +61,10 @@ function logout() {
   uni.reLaunch({ url: '/pages/login/login' })
 }
 
+function goPassword() {
+  uni.navigateTo({ url: '/pages/common/password' })
+}
+
 function openDetail(row: TicketVO) {
   uni.navigateTo({ url: `/pages/student/detail?id=${row.id}` })
 }
@@ -74,7 +78,10 @@ function goSubmit() {
   <view class="page">
     <view class="header">
       <text class="hello">{{ auth.user?.realName }}，你好</text>
-      <text class="logout" @click="logout">退出</text>
+      <view class="header-actions">
+        <text class="action" @click="goPassword">修改密码</text>
+        <text class="action" @click="logout">退出</text>
+      </view>
     </view>
 
     <button class="primary" @click="goSubmit">我要报修</button>
@@ -127,6 +134,14 @@ function goSubmit() {
   color: #303133;
 }
 .logout {
+  font-size: 26rpx;
+  color: #2c6cf6;
+}
+.header-actions {
+  display: flex;
+  gap: 24rpx;
+}
+.action {
   font-size: 26rpx;
   color: #2c6cf6;
 }

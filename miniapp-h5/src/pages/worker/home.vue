@@ -61,6 +61,10 @@ function logout() {
   uni.reLaunch({ url: '/pages/login/login' })
 }
 
+function goPassword() {
+  uni.navigateTo({ url: '/pages/common/password' })
+}
+
 function openDetail(row: TicketVO) {
   uni.navigateTo({ url: `/pages/worker/detail?id=${row.id}` })
 }
@@ -70,7 +74,10 @@ function openDetail(row: TicketVO) {
   <view class="page">
     <view class="header">
       <text class="hello">{{ auth.user?.realName }}，你好</text>
-      <text class="logout" @click="logout">退出</text>
+      <view class="header-actions">
+        <text class="action" @click="goPassword">修改密码</text>
+        <text class="action" @click="logout">退出</text>
+      </view>
     </view>
 
     <view v-if="rows.length === 0 && !loading" class="empty">
@@ -121,6 +128,14 @@ function openDetail(row: TicketVO) {
   color: #303133;
 }
 .logout {
+  font-size: 26rpx;
+  color: #2c6cf6;
+}
+.header-actions {
+  display: flex;
+  gap: 24rpx;
+}
+.action {
   font-size: 26rpx;
   color: #2c6cf6;
 }

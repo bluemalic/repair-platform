@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { changePassword } from '@/api/auth'
 import { auth, clearLogin } from '@/store/auth'
 import { refreshUnread, unread } from '@/store/notification'
 
@@ -32,6 +33,49 @@ async function logout() {
   clearLogin()
   router.push('/login')
 }
+
+// ---------- 修改密码 ----------
+
+const pwdVisible = ref(false)
+const pwdFormRef = ref<FormInstance>()
+const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+const pwdRules: FormRules = {
+  oldPassword: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 8, max: 32, message: '新密码长度需为 8-32 位', trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: '请再输入一次新密码', trigger: 'blur' },
+    {
+      // 两次输入一致是前端防手滑，后端不校验（它只收一个值）——这一条必须写在前端
+      validator: (_rule, value: string, callback) =>
+        value === pwdForm.newPassword ? callback() : callback(new Error('两次输入的新密码不一致')),
+      trigger: 'blur',
+    },
+  ],
+}
+
+function openPasswordDialog() {
+  pwdForm.oldPassword = ''
+  pwdForm.newPassword = ''
+  pwdForm.confirmPassword = ''
+  pwdVisible.value = true
+}
+
+async function submitPassword() {
+  if (!(await pwdFormRef.value?.validate().catch(() => false))) {
+    return
+  }
+  await changePassword(pwdForm.oldPassword, pwdForm.newPassword)
+  pwdVisible.value = false
+  // 改密后所有会话都被服务端注销了（含当前这次），所以必须重新登录。
+  // 这不是"顺手退出"，是设计：改密的动机之一就是怀疑账号被别人用着。
+  ElMessage.success('密码已修改，请用新密码重新登录')
+  clearLogin()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -57,12 +101,33 @@ async function logout() {
     <el-container>
       <el-header class="header">
         <span>{{ auth.user?.realName }}（后勤管理）</span>
-        <el-button link type="primary" @click="logout">退出登录</el-button>
+        <span class="header-actions">
+          <el-button link type="primary" @click="openPasswordDialog">修改密码</el-button>
+          <el-button link type="primary" @click="logout">退出登录</el-button>
+        </span>
       </el-header>
       <el-main>
         <router-view />
       </el-main>
     </el-container>
+
+    <el-dialog v-model="pwdVisible" title="修改密码" width="440px">
+      <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
+        <el-form-item label="当前密码" prop="oldPassword">
+          <el-input v-model="pwdForm.oldPassword" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input v-model="pwdForm.newPassword" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input v-model="pwdForm.confirmPassword" type="password" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pwdVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitPassword">保存</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
@@ -84,5 +149,9 @@ async function logout() {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--el-border-color-light);
+}
+.header-actions {
+  display: flex;
+  gap: 4px;
 }
 </style>
