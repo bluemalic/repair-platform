@@ -10,6 +10,16 @@ const router = useRouter()
 const loading = ref(false)
 const form = reactive({ tenantCode: 'gdou', username: 'admin', password: '' })
 
+/**
+ * 演示部署才显示的账号提示。
+ *
+ * <p>演示站必须让访客知道拿什么登录（否则点进来是一片登录页，谁也不知道账号），
+ * 但生产站提示账号信息是错的、还会误导。所以做成**构建时注入**：
+ * 构建前设 `VITE_DEMO_ACCOUNTS="管理端 admin / H5 worker01、20260001，口令 xxx"` 才会有这一行，
+ * 不设就没有——两种部署用同一份代码。
+ */
+const demoHint = import.meta.env.VITE_DEMO_ACCOUNTS as string | undefined
+
 async function submit() {
   if (!form.username || !form.password) {
     ElMessage.warning('请输入账号与密码')
@@ -48,6 +58,7 @@ async function submit() {
           <el-button type="primary" :loading="loading" @click="submit">登录</el-button>
         </el-form-item>
       </el-form>
+      <p v-if="demoHint" class="hint">{{ demoHint }}</p>
     </el-card>
   </div>
 </template>
@@ -62,5 +73,11 @@ async function submit() {
 }
 .login-card {
   width: 380px;
+}
+.hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
 }
 </style>

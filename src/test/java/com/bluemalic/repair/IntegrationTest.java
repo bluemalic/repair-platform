@@ -31,7 +31,13 @@ import java.lang.annotation.Target;
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest(properties = "repair.timeout.scheduler-enabled=false")
+@SpringBootTest(properties = {
+        "repair.timeout.scheduler-enabled=false",
+        // 演示模式的开关**保持默认的 false**：这样测试里 DemoResetJob 根本不会被装配，
+        // 后台线程也就不会跑去重置数据。这里只给一个演示口令，供 DemoResetTest 验证
+        // "重置后演示账号能登录"——口令为空时登录接口过不了 @NotBlank 校验。
+        "repair.demo.password=Demo@123456"
+})
 @AutoConfigureMockMvc
 @Transactional
 public @interface IntegrationTest {

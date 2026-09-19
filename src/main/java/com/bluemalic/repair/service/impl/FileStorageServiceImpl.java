@@ -16,12 +16,18 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.model.S3Object;
+import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -43,6 +49,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 @RequiredArgsConstructor
 public class FileStorageServiceImpl implements FileStorageService {
+
+    /** 单次清理的对象数上限，纯粹是防御（演示租户不该到这个量级）。 */
+    private static final int MAX_PURGE_OBJECTS = 5000;
 
     private final StorageProperties storage;
     private final CurrentTenantService currentTenantService;
@@ -88,8 +97,52 @@ public class FileStorageServiceImpl implements FileStorageService {
         return new FileUploadVO(publicUrl(objectKey), objectKey);
     }
 
-    private ImageTypeDetector.ImageType detectType(MultipartFile file) {
-        byte[] head;
+    @Override
+    public int purgeTenant(long tenantId) {
+        if (!storage.configured()) {
+            log.warn("对象存储未配置，跳过图片清理 tenantId={}", tenantId);
+            return 0;
+        }
+        // 对象键是「租户ID/日期/uuid.扩展名」，所以按前缀就能圈出这个租户的全部图片
+        String prefix = tenantId + "/";
+        int deleted = 0;
+        try {
+            ListObjectsV2Iterable pages = client().listObjectsV2Paginator(
+                    builder -> builder.bucket(storage.getBucket()).prefix(prefix));
+            for (ListObjectsV2Response page : pages) {
+                List<S3Object> objects = page.contents();
+                if (objects.isEmpty()) {
+                    continue;
+                }
+                List<ObjectIdentifier> keys = objects.stream()
+                        .map(object -> ObjectIdentifier.builder().key(object.key()).build())
+                        .toList();
+                client().deleteObjects(DeleteObjectsRequest.builder()
+                        .bucket(storage.getBucket())
+                        .delete(delete -> delete.objects(keys))
+                        .build());
+                deleted += keys.size();
+                if (deleted >= MAX_PURGE_OBJECTS) {
+                    // 上限只用于防御：演示租户不该有这个量级，撞到说明哪里不对劲，留个线索
+                    log.warn("单次清理达到上限，剩余对象留到下次 tenantId={} 上限={}", tenantId, MAX_PURGE_OBJECTS);
+                    break;
+                }
+            }
+        } catch (S3Exception e) {
+            // 桶还没建（从没人传过图）→ 等价于"没有要清理的"；其他失败只记一行，不打断重置
+            if (e.statusCode() == 404) {
+                return 0;
+            }
+            log.warn("清理图片失败 tenantId={} 已删={} 原因={}", tenantId, deleted, e.toString());
+            return deleted;
+        }
+        if (deleted > 0) {
+            log.info("已清理演示图片 tenantId={} 对象数={}", tenantId, deleted);
+        }
+        return deleted;
+    }
+
+    private ImageTypeDetector.ImageType detectType(MultipartFile file) {        byte[] head;
         try (InputStream in = file.getInputStream()) {
             head = in.readNBytes(ImageTypeDetector.HEAD_BYTES);
         } catch (IOException e) {
