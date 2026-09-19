@@ -9,7 +9,12 @@
   "h5": {
     "title": "后勤报修",
     "router": {
-      "mode": "hash"
+      "mode": "hash",
+      // 部署位置是 nginx 的 /h5/（见 nginx/nginx.conf），不是域名根目录。
+      // 不写 base 的话，构建产物里的资源路径是 /assets/...（绝对根路径），
+      // 浏览器会去管理端的目录找这些 js/css，全部 404 → 页面白屏，而 nginx 日志里只有一堆 404 看不出原因。
+      // 注意：本地开发时访问地址也跟着变成 http://localhost:5175/h5/
+      "base": "/h5/"
     }
   }
 }

@@ -31,7 +31,12 @@ services:
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./logs/mysql:/var/log/mysql
-      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # ⚠️ 建表脚本**不直接挂进 docker-entrypoint-initdb.d**。
+      #    这个容器里 mysql 客户端的默认 character_set_client 是 latin1（实测），
+      #    直接执行 .sql 会让所有中文按 latin1 解释后存进库，变成 åŽŠå‹¤... 这种乱码，
+      #    而且不报错、看起来像成功了。改由下面的 .sh 用显式 --default-character-set=utf8mb4 导入。
+      - ./docs/schema.sql:/opt/repair-schema.sql:ro
+      - ./docs/initdb/01-load-schema.sh:/docker-entrypoint-initdb.d/01-load-schema.sh:ro
     networks: [backend]
     # 绑定 127.0.0.1：既能让你本机 IDEA 连上，又不会暴露到局域网/公网（服务器上同样安全）
     # 宿主端口用 13306 而非 3306：本机已装原生 MySQL80 服务占着 3306
