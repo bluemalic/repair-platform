@@ -8,6 +8,12 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 
+/**
+ * 演示部署才显示的账号提示：构建前用 `VITE_DEMO_ACCOUNTS` 注入（见 docs/05 §演示部署）。
+ * 不注入就没有这一行——生产站不该提示任何账号信息，而演示站的访客必须知道拿什么登录。
+ */
+const demoHint = import.meta.env.VITE_DEMO_ACCOUNTS as string | undefined
+
 async function submit() {
   if (!tenantCode.value || !username.value || !password.value) {
     uni.showToast({ title: '请填写完整', icon: 'none' })
@@ -49,6 +55,7 @@ async function submit() {
     </view>
 
     <view class="tip">后勤管理账号请用电脑端管理后台登录</view>
+    <view v-if="demoHint" class="demo-tip">{{ demoHint }}</view>
   </view>
 </template>
 
@@ -103,6 +110,14 @@ async function submit() {
   margin-top: 32rpx;
   font-size: 24rpx;
   color: #c0c4cc;
+  text-align: center;
+}
+.demo-tip {
+  margin-top: 16rpx;
+  padding: 0 16rpx;
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: #2c6cf6;
   text-align: center;
 }
 </style>

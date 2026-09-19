@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  演示重置的物理删除。**全部按 tenant_id 限定**：即使在多租户部署上误开了演示模式，
+  破坏范围也只落在配置指定的那一个租户里，不会把别的学校的数据一起清掉。
+-->
+<mapper namespace="com.bluemalic.repair.mapper.DemoResetMapper">
+
+    <delete id="deleteTickets">
+        DELETE FROM ticket WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <delete id="deleteTicketLogs">
+        DELETE FROM ticket_log WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <delete id="deleteEvaluations">
+        DELETE FROM ticket_evaluation WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <delete id="deleteNotifications">
+        DELETE FROM notification WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <!-- 维修工负责楼栋：重置时整体重建，避免演示工单落在"没人负责的楼栋"上 -->
+    <delete id="deleteWorkerBuildings">
+        DELETE FROM worker_building WHERE tenant_id = #{tenantId}
+    </delete>
+</mapper>
