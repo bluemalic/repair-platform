@@ -48,7 +48,6 @@ async function submit() {
           <el-button type="primary" :loading="loading" @click="submit">登录</el-button>
         </el-form-item>
       </el-form>
-      <p class="hint">本地演示账号见 docs/dev-seed.sql（admin / Repair@2026）</p>
     </el-card>
   </div>
 </template>
@@ -63,10 +62,5 @@ async function submit() {
 }
 .login-card {
   width: 380px;
-}
-.hint {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  margin: 0;
 }
 </style>
