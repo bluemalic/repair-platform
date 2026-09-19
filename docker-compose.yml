@@ -114,12 +114,22 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # ⚠️ .env 里的变量**不会自动进容器**：compose 只拿它做文件内的 `${}` 替换。
+    #    要让应用读到，要么在 environment 里逐条列出，要么整个文件传进去（这里选后者）。
+    #
+    #    为什么用 env_file 而不是逐条列：踩过——把演示模式的配置写进 .env 却没在 environment 里列出，
+    #    结果是"配置写了、应用读不到"，演示模式一直不生效，日志里连一行都没有，很不好查。
+    #    现在只要求"写进 .env 即可"，新增配置不必再回来改这个文件。
+    #    注意下面的 environment 优先级更高，所以容器网络内的地址不会被 .env 里的值覆盖。
+    env_file:
+      - .env
     environment:
       SPRING_PROFILES_ACTIVE: prod
       TZ: Asia/Shanghai
       # 容器内存上限的百分之多少给堆（见 Dockerfile）。留 30% 给元空间/线程栈/直接内存，
       # 小内存机型上这个比例要下调，否则堆没满、容器先被 OOM killer 干掉
       JAVA_MAX_RAM_PERCENTAGE: ${JAVA_MAX_RAM_PERCENTAGE:-70}
+      # 以下必须是**容器网络内的地址**，不能被 .env 覆盖（.env 里的是给宿主机/浏览器用的）
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
