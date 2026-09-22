@@ -11,6 +11,18 @@ const loading = ref(false)
 const form = reactive({ tenantCode: 'gdou', username: 'admin', password: '' })
 
 /**
+ * 平台运营登录：学校编码固定填 `platform`（那是"平台自身"这个租户的编码），所以这个框直接藏起来。
+ * 平台账号与学校账号走的是**同一个登录接口**，只是它挂在租户 0 上——登录契约没有任何特殊分支
+ * （ADR-012）。
+ */
+const isPlatformLogin = ref(false)
+
+function togglePlatformLogin() {
+  isPlatformLogin.value = !isPlatformLogin.value
+  form.password = ''
+}
+
+/**
  * 演示部署才显示的账号提示。
  *
  * <p>演示站必须让访客知道拿什么登录（否则点进来是一片登录页，谁也不知道账号），
@@ -27,7 +39,17 @@ async function submit() {
   }
   loading.value = true
   try {
-    const vo = await login(form.tenantCode, form.username, form.password)
+    const tenantCode = isPlatformLogin.value ? 'platform' : form.tenantCode
+    const vo = await login(tenantCode, form.username, form.password)
+    if (isPlatformLogin.value) {
+      if (vo.userType !== 4) {
+        ElMessage.error('该账号不是平台运营账号')
+        return
+      }
+      setLogin(vo)
+      router.push('/platform/tenants')
+      return
+    }
     if (vo.userType !== 3) {
       ElMessage.error('该账号不是后勤管理角色，无法登录管理端')
       return
@@ -43,21 +65,30 @@ async function submit() {
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2>后勤报修 · 管理端</h2>
+      <h2>{{ isPlatformLogin ? '后勤报修 · 平台运营' : '后勤报修 · 管理端' }}</h2>
       <el-form :model="form" label-width="72px" @submit.prevent="submit">
-        <el-form-item label="学校编码">
+        <el-form-item v-if="!isPlatformLogin" label="学校编码">
           <el-input v-model="form.tenantCode" />
         </el-form-item>
         <el-form-item label="账号">
-          <el-input v-model="form.username" placeholder="后勤管理账号" />
+          <el-input
+            v-model="form.username"
+            :placeholder="isPlatformLogin ? '平台运营账号' : '后勤管理账号'"
+          />
         </el-form-item>
         <el-form-item label="密码">
           <el-input v-model="form.password" type="password" show-password @keyup.enter="submit" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="submit">登录</el-button>
+          <el-button link type="primary" @click="togglePlatformLogin">
+            {{ isPlatformLogin ? '返回学校登录' : '平台运营登录' }}
+          </el-button>
         </el-form-item>
       </el-form>
+      <p v-if="!isPlatformLogin" class="hint">
+        忘记口令？后勤管理员请联系平台运营；学生 / 维修工请联系学校后勤。
+      </p>
       <p v-if="demoHint" class="hint">{{ demoHint }}</p>
     </el-card>
   </div>

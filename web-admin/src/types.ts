@@ -21,8 +21,14 @@ export interface LoginVO {
   userId: string
   username: string
   realName: string
-  /** 1学生 2维修工 3后勤管理 */
+  /** 1学生 2维修工 3后勤管理 4平台运营 */
   userType: number
+  /**
+   * true = 还在用管理员 / 平台设的初始口令，必须先去改密。
+   * 服务端也拦着（未改密时只放行 `/api/auth/**`），前端拿它决定"直接把改密框弹出来"，
+   * 否则用户会看到一屏 10003 却不知道去哪改。
+   */
+  mustChangePassword: boolean
 }
 
 export interface TicketVO {
@@ -187,4 +193,32 @@ export interface NotificationVO {
   /** 0未读 1已读 */
   isRead: number
   createTime: string
+}
+
+/**
+ * 学校（租户）。只有平台运营看得到（docs/03 §5.5）——平台看不到任何学校的业务数据。
+ * 列表里**不含平台自身**（`tenant.id = 0` 那一行是平台，不是学校）。
+ */
+export interface TenantVO {
+  id: string
+  name: string
+  /** 学校编码，师生登录时填的那个 */
+  code: string
+  contact: string | null
+  phone: string | null
+  /** 1启用 0停用。停用会踢掉该校全部在线用户，之后他们也登不进来 */
+  status: number
+  createTime: string
+}
+
+/** 某所学校的后勤管理员。不含口令——任何接口都不返回口令。 */
+export interface TenantAdminVO {
+  id: string
+  username: string
+  realName: string | null
+  phone: string | null
+  /** 1启用 0停用 */
+  status: number
+  /** true = 还在用初始口令，说明这个账号还没被激活过 */
+  mustChangePassword: boolean
 }

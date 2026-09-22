@@ -12,7 +12,7 @@ import org.springframework.util.StringUtils;
  * <ul>
  *   <li>{@code REPAIR_PLATFORM_BOOTSTRAP_USERNAME}：平台运营账号的登录名</li>
  *   <li>{@code REPAIR_PLATFORM_BOOTSTRAP_PASSWORD}：它的初始口令（**首次登录必须改**）</li>
- *   <li>{@code REPAIR_PLATFORM_BOOTSTRAP_REAL_NAME}：显示名（默认"平台运营"）</li>
+ *   <li>{@code REPAIR_PLATFORM_BOOTSTRAP_REAL_NAME}：显示名（默认"平台管理员"）</li>
  * </ul>
  *
  * <p><b>为什么平台账号由环境变量引导，而不是像首个后勤管理员那样手写 SQL</b>：手工插库要操作者
@@ -39,7 +39,7 @@ public class PlatformProperties {
 
     public PlatformProperties(@Value("${repair.platform.bootstrap.username:}") String bootstrapUsername,
                              @Value("${repair.platform.bootstrap.password:}") String bootstrapPassword,
-                             @Value("${repair.platform.bootstrap.real-name:平台运营}") String bootstrapRealName) {
+                             @Value("${repair.platform.bootstrap.real-name:平台管理员}") String bootstrapRealName) {
         boolean hasUsername = StringUtils.hasText(bootstrapUsername);
         boolean hasPassword = StringUtils.hasText(bootstrapPassword);
         if (hasUsername != hasPassword) {
