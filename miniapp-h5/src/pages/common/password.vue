@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { changePassword } from '@/api/auth'
 import { clearLogin } from '@/store/auth'
 
@@ -7,6 +8,16 @@ const oldPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const loading = ref(false)
+
+/**
+ * 首次登录被强制跳过来的（`?force=1`）：文案要说清"为什么非改不可"，
+ * 否则用户看到的是一个没头没尾的改密页——他会以为进错了地方。
+ */
+const force = ref(false)
+
+onLoad((query) => {
+  force.value = query?.force === '1'
+})
 
 async function submit() {
   if (!oldPassword.value || !newPassword.value || !confirmPassword.value) {
@@ -61,7 +72,9 @@ async function submit() {
       <button class="submit" :loading="loading" :disabled="loading" @click="submit">保存</button>
     </view>
 
-    <view class="tip">改完之后需要用新密码重新登录一次。</view>
+    <view class="tip">
+      {{ force ? '这是管理员发的初始口令，改成你自己的之后才能使用其它功能。' : '改完之后需要用新密码重新登录一次。' }}
+    </view>
   </view>
 </template>
 

@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.converter.RepairCodeConverter;
 import com.bluemalic.repair.dto.RepairCodeCreateDTO;
@@ -66,7 +67,7 @@ public class RepairCodeServiceImpl implements RepairCodeService {
         long tenantId = currentTenantService.requireTenantId();
 
         Page<RepairCode> page = repairCodeMapper.selectPage(
-                new Page<>(clamp(pageNum), clamp(pageSize)),
+                new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 Wrappers.<RepairCode>lambdaQuery()
                         .eq(RepairCode::getTenantId, tenantId)
                         .eq(buildingId != null, RepairCode::getBuildingId, buildingId)
@@ -225,10 +226,4 @@ public class RepairCodeServiceImpl implements RepairCodeService {
                 .collect(Collectors.toMap(Building::getId, Building::getName));
     }
 
-    private long clamp(long value) {
-        if (value < 1) {
-            return 1;
-        }
-        return Math.min(value, 100);
-    }
 }

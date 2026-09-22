@@ -3,10 +3,10 @@ package com.bluemalic.repair.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.config.DemoProperties;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.SysUser;
-import com.bluemalic.repair.entity.SysUserRole;
 import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketCategory;
@@ -16,19 +16,18 @@ import com.bluemalic.repair.entity.WorkerBuilding;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.DemoResetMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
-import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
+import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.DemoResetService;
 import com.bluemalic.repair.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -61,15 +60,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class DemoResetServiceImpl implements DemoResetService {
 
+    private static final int STATUS_ENABLED = 1;
+
     private static final DateTimeFormatter TICKET_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     /** 演示账号（口令统一取配置里的那个，见 {@link DemoProperties}）。 */
     private static final List<AccountSpec> ACCOUNTS = List.of(
-            new AccountSpec("admin", "后勤管理员", 3, 3L),
-            new AccountSpec("worker01", "维修工小李", 2, 2L),
-            new AccountSpec("worker02", "维修工小张", 2, 2L),
-            new AccountSpec("20260001", "学生小王", 1, 1L),
-            new AccountSpec("20260002", "学生小李", 1, 1L));
+            new AccountSpec("admin", "后勤管理员", UserType.ADMIN),
+            new AccountSpec("worker01", "维修工小李", UserType.WORKER),
+            new AccountSpec("worker02", "维修工小张", UserType.WORKER),
+            new AccountSpec("20260001", "学生小王", UserType.STUDENT),
+            new AccountSpec("20260002", "学生小李", UserType.STUDENT));
 
     /** 演示站要保证存在的楼栋与类别（被访客删掉时补回来；已有的不动）。 */
     private static final List<String> DEMO_BUILDINGS = List.of("1号楼", "2号楼", "3号楼");
@@ -118,14 +119,13 @@ public class DemoResetServiceImpl implements DemoResetService {
                     "想换一个更大的热水器", null, null, null));
 
     private final DemoProperties demo;
-    private final PasswordEncoder passwordEncoder;
+    private final AccountService accountService;
     private final StringRedisTemplate redis;
     private final PlatformTransactionManager transactionManager;
     private final FileStorageService fileStorageService;
     private final DemoResetMapper demoResetMapper;
     private final TenantMapper tenantMapper;
     private final SysUserMapper sysUserMapper;
-    private final SysUserRoleMapper sysUserRoleMapper;
     private final WorkerBuildingMapper workerBuildingMapper;
     private final BuildingMapper buildingMapper;
     private final TicketCategoryMapper categoryMapper;
@@ -222,42 +222,38 @@ public class DemoResetServiceImpl implements DemoResetService {
     // ==================== 演示账号 ====================
 
     private Map<String, SysUser> ensureAccounts(long tenantId) {
-        // 五个账号共用同一个口令：**演示站上这是刻意的**——口令要写在登录页给访客抄，
-        // 一人一个反而没人记得住。所以这里只编码一次，五个用户共用同一串哈希。
-        String encoded = passwordEncoder.encode(demo.getPassword());
         Map<String, SysUser> result = new LinkedHashMap<>();
         for (AccountSpec spec : ACCOUNTS) {
-            SysUser user = sysUserMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
+            SysUser existing = sysUserMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
                     .eq(SysUser::getTenantId, tenantId)
                     .eq(SysUser::getUsername, spec.username()));
-            if (user == null) {
-                user = new SysUser();
-                user.setTenantId(tenantId);
-                user.setUsername(spec.username());
-                user.setPassword(encoded);
-                user.setRealName(spec.realName());
-                user.setUserType(spec.userType());
-                user.setStatus(1);
-                sysUserMapper.insert(user);
-            } else {
-                // 已存在：把口令改回来（访客可能改过）、并保证是启用状态
-                user.setPassword(encoded);
-                user.setRealName(spec.realName());
-                user.setUserType(spec.userType());
-                user.setStatus(1);
-                sysUserMapper.updateById(user);
-            }
-
-            // 角色关联删了重建：保证只有该有的那一条，不会因为重复重置堆出多条
-            sysUserRoleMapper.delete(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, user.getId()));
-            SysUserRole link = new SysUserRole();
-            link.setUserId(user.getId());
-            link.setRoleId(spec.roleId());
-            sysUserRoleMapper.insert(link);
-
+            // 建号与"恢复成初始样子"都走 AccountService：账号的写操作只有一份实现，
+            // 三条不变量（写角色关联、停用踢下线、带 tenant_id）也就只有一处需要维护
+            SysUser user = existing == null
+                    ? accountService.create(new AccountService.NewAccount(
+                            tenantId, spec.username(), demo.getPassword(), spec.realName(), null,
+                            spec.userType().getCode(), spec.userType().getRoleCode(), false, "账号"))
+                    : restore(existing, tenantId, spec);
             result.put(spec.username(), user);
         }
         return result;
+    }
+
+    /**
+     * 已存在的演示账号：把口令、状态、角色改回初始样子。
+     *
+     * <p>访客能登录演示站，他可能改过口令、停用过账号——这些都要被重置抹平，否则演示站会
+     * 在某天悄悄失效，而现象只是"登录页上写的口令登不上"。
+     *
+     * <p>注意 {@code mustChangePassword=false}：演示站的口令本来就公开写在登录页上，
+     * "强制改密"在这里没有意义，反而会把访客拦在改密页上。
+     */
+    private SysUser restore(SysUser user, long tenantId, AccountSpec spec) {
+        accountService.updateProfile(user.getId(), tenantId, spec.realName(), null);
+        accountService.changeStatus(user.getId(), tenantId, STATUS_ENABLED, "账号");
+        accountService.resetPassword(user.getId(), tenantId, demo.getPassword(), false);
+        accountService.resetRole(user.getId(), spec.userType().getRoleCode());
+        return user;
     }
 
     private void ensureWorkerBuildings(long tenantId, Map<String, SysUser> users, List<Building> buildings) {
@@ -446,8 +442,11 @@ public class DemoResetServiceImpl implements DemoResetService {
      *
      * <p>这里是**刻意复制的**，没有抽公共类：抽的话要改 {@code TicketServiceImpl}——
      * 那是系统里最核心的写路径，刚上线不久，为几行格式化代码去动它并重跑全部工单测试，
-     * 不值得。代价是格式改动时要改两处，所以在两处都写了这条注释。（与 worker 管理里
-     * {@code clamp} 的处理同一个判断标准：等第三处出现再抽。）
+     * 不值得。代价是格式改动时要改两处，所以在两处都写了这条注释。
+     *
+     * <p>判断标准与分页参数相反：{@code clamp} 在四个 Service 里各复制了一份，已经抽成了
+     * {@code Paging}——这类"出现的次数多、每处都一模一样"的逻辑就该抽；而这里只出现两次，
+     * 且抽它要动核心写路径，收益抵不上风险。
      */
     private String nextTicketNo() {
         String date = LocalDate.now().format(TICKET_NO_DATE);
@@ -457,7 +456,7 @@ public class DemoResetServiceImpl implements DemoResetService {
         return "WX" + date + String.format("%06d", seq == null ? 1 : seq);
     }
 
-    private record AccountSpec(String username, String realName, int userType, long roleId) {
+    private record AccountSpec(String username, String realName, UserType userType) {
     }
 
     private record TicketSpec(TicketStatus status, int submitMinutesAgo, String category, String room,

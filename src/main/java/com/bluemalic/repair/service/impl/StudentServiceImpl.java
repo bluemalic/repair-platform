@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.converter.StudentConverter;
@@ -80,7 +81,7 @@ public class StudentServiceImpl implements StudentService {
         }
 
         Page<SysUser> page = sysUserMapper.selectPage(
-                new Page<>(clamp(pageNum), clamp(pageSize)),
+                new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 query.orderByAsc(SysUser::getUsername));
 
         Page<StudentVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -222,13 +223,6 @@ public class StudentServiceImpl implements StudentService {
                 .stream()
                 .map(SysUser::getUsername)
                 .toList());
-    }
-
-    private long clamp(long value) {
-        if (value < 1) {
-            return 1;
-        }
-        return Math.min(value, 100);
     }
 
     /** 解析结果：学号 → 姓名（保持名单里的顺序），以及被忽略的条数。 */

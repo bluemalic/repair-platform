@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
@@ -165,7 +166,7 @@ public class TicketServiceImpl implements TicketService {
     public PageResult<TicketVO> page(long pageNum, long pageSize, Integer status, Long buildingId, Long categoryId) {
         // 数据范围（学生=本人 / 维修工=负责楼栋 / 后勤=全部）由数据权限拦截器注入，这里只管筛选与排序
         Page<Ticket> page = ticketMapper.selectPage(
-                new Page<>(clamp(pageNum), clamp(pageSize)),
+                new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 Wrappers.<Ticket>lambdaQuery()
                         .eq(status != null, Ticket::getStatus, status)
                         .eq(buildingId != null, Ticket::getBuildingId, buildingId)
@@ -614,13 +615,6 @@ public class TicketServiceImpl implements TicketService {
         Long seq = stringRedisTemplate.opsForValue().increment(seqKey);
         stringRedisTemplate.expire(seqKey, Duration.ofDays(2));
         return "WX" + date + String.format("%06d", seq);
-    }
-
-    private long clamp(long value) {
-        if (value < 1) {
-            return 1;
-        }
-        return Math.min(value, 100);
     }
 
     /** 批量 id → 楼栋名（selectByIds 一次拿全，避免循环回库的 N+1）。 */

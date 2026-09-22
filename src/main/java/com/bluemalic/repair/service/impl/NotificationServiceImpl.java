@@ -3,6 +3,7 @@ package com.bluemalic.repair.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.converter.NotificationConverter;
 import com.bluemalic.repair.entity.Notification;
@@ -101,7 +102,7 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public PageResult<NotificationVO> page(long pageNum, long pageSize, Integer isRead) {
         Page<Notification> result = notificationMapper.selectPage(
-                new Page<>(clamp(pageNum), clamp(pageSize)),
+                new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 Wrappers.<Notification>lambdaQuery()
                         .eq(isRead != null, Notification::getIsRead, isRead)
                         .orderByDesc(Notification::getCreateTime)
@@ -146,10 +147,4 @@ public class NotificationServiceImpl implements NotificationService {
                 .set(Notification::getIsRead, 1));
     }
 
-    private long clamp(long value) {
-        if (value < 1) {
-            return 1;
-        }
-        return Math.min(value, 100);
-    }
 }
