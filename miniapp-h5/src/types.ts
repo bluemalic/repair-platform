@@ -23,6 +23,8 @@ export interface LoginVO {
   realName: string
   /** 1学生 2维修工 3后勤管理（移动端只有前两种，后勤用 web-admin） */
   userType: number
+  /** true = 还在用初始口令，登录后必须先去改密 */
+  mustChangePassword?: boolean
 }
 
 export interface TicketVO {

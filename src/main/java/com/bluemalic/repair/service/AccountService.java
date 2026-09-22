@@ -48,6 +48,14 @@ public interface AccountService {
      */
     SysUser require(long userId, long tenantId, int userType, String accountLabel);
 
+    /**
+     * 把账号的角色重设为指定角色的**唯一一条关联**（先删旧关联再写）。
+     *
+     * <p>给"重建"类场景用（演示重置每天要把账号恢复成初始样子）。日常的建号走
+     * {@link #create}——它写的是唯一的关联，不需要重设。
+     */
+    void resetRole(long userId, String roleCode);
+
     /** 用户名是否已存在。批量导入用它跳过重复项；并发下的真正兜底仍是唯一键。 */
     boolean usernameExists(long tenantId, String username);
 

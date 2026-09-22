@@ -87,11 +87,11 @@ public class AccountServiceImpl implements AccountService {
         // 停用只写库是不够的：登录态在 Redis，不受 status 影响，他手上的 token 还能用满 7 天。
         // isLogin 先判断是必要的——**从没登录过的账号直接 kickout 会抛异常**，
         // 而"新建完立刻停用"是很常见的操作顺序。
-        if (StpUtil.isLogin(userId)) {
+        if (isLogin(userId)) {
             StpUtil.kickout(userId);
-            log.info("停用账号并踢下线 userId={} 操作人={}", userId, StpUtil.getLoginIdAsLong());
+            log.info("停用账号并踢下线 userId={} 操作人={}", userId, operator());
         } else {
-            log.info("停用账号（该账号当前无登录态）userId={} 操作人={}", userId, StpUtil.getLoginIdAsLong());
+            log.info("停用账号（该账号当前无登录态）userId={} 操作人={}", userId, operator());
         }
     }
 
@@ -105,7 +105,7 @@ public class AccountServiceImpl implements AccountService {
         requireUpdated(rows, "账号");
         // 只记"谁改了哪个账号的口令"，口令本身不进日志
         log.info("重置账号口令 userId={} 需强制改密={} 操作人={}",
-                userId, mustChangePassword, StpUtil.getLoginIdAsLong());
+                userId, mustChangePassword, operator());
     }
 
     @Override
@@ -125,6 +125,17 @@ public class AccountServiceImpl implements AccountService {
             throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, accountLabel + "不存在");
         }
         return user;
+    }
+
+    @Override
+    @Transactional
+    public void resetRole(long userId, String roleCode) {
+        // 先删后插：保证结果只有一条该角色的关联，重复执行不会越堆越多
+        sysUserRoleMapper.delete(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId));
+        SysUserRole link = new SysUserRole();
+        link.setUserId(userId);
+        link.setRoleId(roleIdByCode(roleCode));
+        sysUserRoleMapper.insert(link);
     }
 
     @Override
@@ -151,6 +162,32 @@ public class AccountServiceImpl implements AccountService {
      * <p>当前角色是全局的（种子数据 {@code sys_role.tenant_id = 0}），所以只按码查；
      * 将来若变成各租户自带角色，这里就是唯一需要改的地方。
      */
+    /**
+     * 账号操作**不一定发生在请求线程里**——演示重置就跑在调度线程上，那里没有 Sa-Token 上下文，
+     * 直接调 {@code StpUtil.isLogin(id)} 或 {@code getLoginIdAsLong()} 会抛
+     * "SaTokenContext 上下文尚未初始化"。
+     *
+     * <p>这个坑是测试抓出来的（DemoResetTest 六条一起红），值得在这里留一句：
+     * 把"读当前登录用户"这种请求上下文相关的东西随手写进公共服务，是要还的。
+     */
+    private boolean isLogin(long userId) {
+        try {
+            return StpUtil.isLogin(userId);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 日志里的操作人；没有登录态时写"系统"（与 {@code ticket_log.operator_id = 0} 同一语义）。 */
+    private String operator() {
+        try {
+            Long id = StpUtil.getLoginIdDefaultNull() == null ? null : StpUtil.getLoginIdAsLong();
+            return id == null ? "系统" : String.valueOf(id);
+        } catch (Exception e) {
+            return "系统";
+        }
+    }
+
     private long roleIdByCode(String roleCode) {
         return sysRoleMapper.selectList(Wrappers.<SysRole>lambdaQuery()
                         .eq(SysRole::getCode, roleCode))

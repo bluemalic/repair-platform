@@ -23,7 +23,8 @@ async function submit() {
   try {
     const vo = await login(tenantCode.value.trim(), username.value.trim(), password.value)
     setLogin(vo)
-    goHomeByRole(vo.userType)
+    // 初始口令是一次性的：服务端会把这类账号挡在改密页之前
+    goHomeByRole(vo.userType, vo.mustChangePassword)
   } catch {
     // request 里已经弹过错误提示（账号密码错误 / 租户不存在等），这里不重复提示
   } finally {

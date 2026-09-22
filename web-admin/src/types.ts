@@ -84,6 +84,28 @@ export interface WorkerVO {
   buildingNames: string[]
 }
 
+export interface StudentVO {
+  id: string
+  /** 学号，同时是登录名 */
+  username: string
+  realName: string | null
+  phone: string | null
+  /** 1启用 0停用 */
+  status: number
+  /** true = 还在用管理员设的初始口令，该学生首次登录会被要求改密 */
+  mustChangePassword: boolean
+}
+
+/** 批量导入结果。跳过不是错误：补录名单里必然带着上次已导的人。 */
+export interface StudentImportResult {
+  created: number
+  skipped: number
+  /** 被跳过的学号，便于核对是不是导错了名单 */
+  skippedUsernames: string[]
+  /** 名单里被忽略的空行 / 批次内重复行 */
+  ignored: number
+}
+
 /** 楼栋（docs/03 §5.4 基础数据）。列表不分页：字典数据量小，下拉要一次拿全。 */
 export interface BuildingVO {
   id: string

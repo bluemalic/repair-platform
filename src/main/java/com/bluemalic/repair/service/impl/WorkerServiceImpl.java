@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.converter.WorkerConverter;
@@ -74,7 +75,7 @@ public class WorkerServiceImpl implements WorkerService {
         }
 
         Page<SysUser> page = sysUserMapper.selectPage(
-                new Page<>(clamp(pageNum), clamp(pageSize)),
+                new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 query.orderByAsc(SysUser::getUsername));
 
         List<Long> workerIds = page.getRecords().stream().map(SysUser::getId).toList();
@@ -196,10 +197,4 @@ public class WorkerServiceImpl implements WorkerService {
                 .collect(Collectors.toMap(Building::getId, Building::getName));
     }
 
-    private long clamp(long value) {
-        if (value < 1) {
-            return 1;
-        }
-        return Math.min(value, 100);
-    }
 }
