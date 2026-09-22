@@ -10,6 +10,7 @@ import com.bluemalic.repair.common.RateLimiter;
 import com.bluemalic.repair.config.RateLimitRule;
 import com.bluemalic.repair.dto.LoginDTO;
 import com.bluemalic.repair.dto.PasswordChangeDTO;
+import com.bluemalic.repair.interceptor.MustChangePasswordInterceptor;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
@@ -67,6 +68,9 @@ public class AuthServiceImpl implements AuthService {
         StpUtil.login(user.getId());
         // 把租户写进 Session：数据权限拦截器每个请求都要用，从 Session 读可省掉每请求一次查库
         currentTenantService.bind(tenant.getId());
+        // 待改密标记也放 Session：拦截器每个请求都要读它，放这里同样省掉每请求一次查库
+        boolean mustChangePassword = Integer.valueOf(1).equals(user.getMustChangePassword());
+        StpUtil.getSession().set(MustChangePasswordInterceptor.SESSION_KEY, mustChangePassword);
         SaTokenInfo tokenInfo = StpUtil.getTokenInfo();
 
         LoginVO vo = new LoginVO();
@@ -76,6 +80,7 @@ public class AuthServiceImpl implements AuthService {
         vo.setUsername(user.getUsername());
         vo.setRealName(user.getRealName());
         vo.setUserType(user.getUserType());
+        vo.setMustChangePassword(mustChangePassword);
 
         // 不打印账号口令等敏感信息，只记定位问题需要的 ID
         log.info("登录成功 userId={} tenantId={} userType={}",
@@ -131,15 +136,20 @@ public class AuthServiceImpl implements AuthService {
         SysUser update = new SysUser();
         update.setId(userId);
         update.setPassword(passwordEncoder.encode(dto.getNewPassword()));
+        // 改密即"不再是初始口令"。这一步放在同一个更新里：分成两次写就可能出现
+        // "密码变了、标记还在"的中间态，用户改完还是被拦在改密页上。
+        update.setMustChangePassword(0);
         sysUserMapper.updateById(update);
 
         // 改密之后让该账号的所有会话失效，包括正在发起这次改密的会话。
         // 只失效其他端是不够的：改密的动机之一就是"怀疑账号被别人用着"，
         // 而"当前这个会话是可信的"这个前提并不成立——它可能正是被盗用的那一个。
         // 代价是改完要重新登录一次，正好也验证了新密码记得住。
+        // 顺带：拦截器读的"待改密"标记存在 Session 里，会话一注销它就没了，
+        // 不需要单独清——这也是把标记放 Session 而不是每请求查库带来的好处。
         StpUtil.logout(userId);
 
-        log.info("修改密码 userId={}", userId);
+        log.info("修改密码 userId={} 操作人={}", userId, userId);
     }
 
     @Override

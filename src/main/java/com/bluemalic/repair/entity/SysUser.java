@@ -35,6 +35,15 @@ public class SysUser {
     /** 1启用 0停用 */
     private Integer status;
 
+    /**
+     * 是否需强制改密：0否 1是。管理员建的账号（学生批量导入、维修工新增）为 1，
+     * 改密成功后由 {@code AuthServiceImpl.changePassword} 置 0。
+     *
+     * <p>存在的原因：初始口令只能是**统一**的（要写在纸上发给学生，一人一个没人记得住），
+     * 而学号在班里是公开的——统一口令意味着同学之间可以互相登录。所以它必须是一次性的。
+     */
+    private Integer mustChangePassword;
+
     /** 逻辑删除 0否 1是。名字必须叫 deleted，全局配置按这个名字识别，改名会导致逻辑删除失效 */
     private Integer deleted;
 

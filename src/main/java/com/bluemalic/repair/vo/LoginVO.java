@@ -24,4 +24,14 @@ public class LoginVO {
 
     @Schema(description = "1学生 2维修工 3后勤管理")
     private Integer userType;
+
+    /**
+     * 是否必须先去改口令。true 表示这个账号还在用管理员设的初始口令——
+     * 前端应该直接跳到改密页，而不是进主页；后端也会在拦截器里挡住其它接口。
+     *
+     * <p>为什么不止让前端判断：前端的跳转是"引导"，绕过它照样能调接口。
+     * 首登强制改密要真的成立，必须在服务端也拦一道。
+     */
+    @Schema(description = "是否需先修改初始口令")
+    private Boolean mustChangePassword;
 }
