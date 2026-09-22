@@ -22,7 +22,7 @@ public class LoginVO {
 
     private String realName;
 
-    @Schema(description = "1学生 2维修工 3后勤管理")
+    @Schema(description = "1学生 2维修工 3后勤管理 4平台运营")
     private Integer userType;
 
     /**

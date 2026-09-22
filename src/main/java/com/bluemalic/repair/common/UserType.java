@@ -6,19 +6,24 @@ import lombok.Getter;
  * 用户类型，与 {@code sys_user.user_type} 的取值一一对应。
  *
  * <p>把"类型码 + 角色码"放在一起，是因为它们在这个项目里是**一对一**的：
- * 学生用 STUDENT 角色、维修工用 WORKER、后勤用 ADMIN。以前这两个值散在各处硬编码
+ * 学生用 STUDENT 角色、维修工用 WORKER、后勤用 ADMIN、平台运营用 PLATFORM。以前这两个值散在各处硬编码
  * （`USER_TYPE_WORKER = 2` 在维修工服务里、演示重置里又写了一遍 `1/2/3`），
  * 改一个漏一个的表现是"账号能登录但每个接口都 403"——很难往常量写错上想。
  *
  * <p>服务端建账号时**类型与角色都由代码指定**，绝不接受前端传入：否则"新增维修工"那个接口
  * 就能造出一个后勤管理员。
+ *
+ * <p>{@link #PLATFORM} 是唯一的例外：它不属于任何一个租户，账号的 {@code tenant_id} 固定是 0
+ * （平台自身，见 {@code tenant} 种子数据与 ADR-012）。建它的入口只有环境变量引导的
+ * {@code PlatformBootstrapJob}，**没有任何接口能造出平台账号**。
  */
 @Getter
 public enum UserType {
 
     STUDENT(1, "学生", "STUDENT"),
     WORKER(2, "维修工", "WORKER"),
-    ADMIN(3, "后勤管理", "ADMIN");
+    ADMIN(3, "后勤管理", "ADMIN"),
+    PLATFORM(4, "平台运营", "PLATFORM");
 
     private final int code;
 

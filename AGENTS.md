@@ -87,7 +87,8 @@ com.bluemalic.repair
 ├── controller/
 │   ├── student/   学生端接口
 │   ├── worker/    维修工端接口
-│   └── admin/     后勤管理端接口
+│   ├── admin/     后勤管理端接口
+│   └── platform/  平台运营端接口（开学校 / 停学校，不属于任何租户，ADR-012）
 ├── service/       接口
 │   └── impl/      实现
 ├── mapper/        MyBatis-Plus Mapper
@@ -97,7 +98,7 @@ com.bluemalic.repair
 ├── converter/     DTO / VO / Entity 之间的转换
 ├── interceptor/   数据权限、鉴权拦截器
 ├── ai/            Schema 检索、SQL 生成、SQL 安全网关（M4）
-└── job/           定时任务
+└── job/           定时任务与启动引导（演示数据重置、平台账号引导）
 ```
 
 前端工程（仓库根目录，与后端平级）：
@@ -142,7 +143,8 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 
 ## 7. 接口约定
 
-- 路径按端前缀：`/api/student/**`、`/api/worker/**`、`/api/admin/**`。
+- 路径按端前缀：`/api/student/**`、`/api/worker/**`、`/api/admin/**`、`/api/platform/**`。
+- **平台域与租户域互不越界**（ADR-012）：`/api/platform/**` 只给平台运营账号（`tenant_id = 0`、`user_type = 4`、权限码只有 `tenant:manage`）用，它**看不到任何租户的业务数据**；租户侧任何角色也进不了这个前缀。这条由 `PlatformScopeInterceptor` 强制——**不要把它降级成"给接口补权限码"**：项目里有三个接口本来就没有权限码（`/api/categories`、`/api/files/upload`、`/api/tickets/by-code/{code}`），只授一个码是挡不住的。
 - 资源用复数名词，动作用子路径：`POST /api/worker/tickets/{id}/accept`。
 - 每个接口都要有 Knife4j 注解（`@Tag` / `@Operation` / `@Parameter`）。
 - 分页统一返回 `total / pageNum / pageSize / pages / list`。

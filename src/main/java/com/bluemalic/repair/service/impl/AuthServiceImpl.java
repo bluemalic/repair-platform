@@ -11,6 +11,7 @@ import com.bluemalic.repair.config.RateLimitRule;
 import com.bluemalic.repair.dto.LoginDTO;
 import com.bluemalic.repair.dto.PasswordChangeDTO;
 import com.bluemalic.repair.interceptor.MustChangePasswordInterceptor;
+import com.bluemalic.repair.interceptor.PlatformScopeInterceptor;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
@@ -71,6 +72,9 @@ public class AuthServiceImpl implements AuthService {
         // 待改密标记也放 Session：拦截器每个请求都要读它，放这里同样省掉每请求一次查库
         boolean mustChangePassword = Integer.valueOf(1).equals(user.getMustChangePassword());
         StpUtil.getSession().set(MustChangePasswordInterceptor.SESSION_KEY, mustChangePassword);
+        // 用户类型同理：平台域收口拦截器每个请求都要判"这是不是平台账号"，
+        // 而 StpInterface 查角色/权限是每次校验都查库的（见 StpInterfaceImpl 的类注释）
+        StpUtil.getSession().set(PlatformScopeInterceptor.SESSION_USER_TYPE_KEY, user.getUserType());
         SaTokenInfo tokenInfo = StpUtil.getTokenInfo();
 
         LoginVO vo = new LoginVO();

@@ -1,31 +1,30 @@
 package com.bluemalic.repair.config;
 
-import com.bluemalic.repair.interceptor.MustChangePasswordInterceptor;
+import com.bluemalic.repair.interceptor.PlatformScopeInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * 首次登录强制改密的拦截器注册。
+ * 平台域收口拦截器的注册。
  *
- * <p>顺序排在倒数第二（order 2）：它要读 Sa-Token Session 里的标记，必须先有登录态
- * （{@code SaTokenConfigure} 的 order 0）；限流是 order 1，排在它前面问题也不大——
- * 待改密的账号照样会被限流挡住，这没有坏处。
+ * <p>顺序排在最后（order 3）：它要读 Sa-Token Session 里的用户类型，必须先有登录态（order 0）。
+ * 排在待改密（order 2）之后也是对的——平台账号首次登录同样要先改掉初始口令。
  *
  * <p><b>四个拦截器的 order 一起看：0 登录校验 → 1 限流 → 2 待改密 → 3 平台域收口。</b>
  * 改动任何一个都要回头对一遍这个顺序。
  */
 @Configuration
 @RequiredArgsConstructor
-public class MustChangePasswordConfig implements WebMvcConfigurer {
+public class PlatformScopeConfig implements WebMvcConfigurer {
 
-    private final MustChangePasswordInterceptor mustChangePasswordInterceptor;
+    private final PlatformScopeInterceptor platformScopeInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(mustChangePasswordInterceptor)
+        registry.addInterceptor(platformScopeInterceptor)
                 .addPathPatterns("/**")
-                .order(2);
+                .order(3);
     }
 }

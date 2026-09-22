@@ -60,6 +60,30 @@ public interface AccountService {
     boolean usernameExists(long tenantId, String username);
 
     /**
+     * 把某个租户**所有启用中的账号**踢下线，返回实际踢掉的人数。
+     *
+     * <p>给"停用租户"用：租户被停用后登录接口会拒绝新登录（{@code AuthServiceImpl} 要求
+     * {@code tenant.status = 1}），但已经登录的人手上的 token 还在 Redis 里、默认 7 天有效——
+     * 只改库不踢人，"停用"就只是个标签。与 {@link #changeStatus} 是同一条不变量，只是范围从一个账号
+     * 放大到一个租户。
+     *
+     * <p><b>取舍</b>：这是一次查询 + 逐个踢，人数上万时会有明显耗时（每个账号一次 Redis 往返）。
+     * 那个规模下的正解是"请求时校验租户状态"（一次缓存读，代价摊到每个请求上），本项目没有那么多
+     * 用户，就不为它引入一套缓存。这个边界写在 docs/03 的「平台运营账号的约定」里。
+     */
+    int kickoutAllOfTenant(long tenantId);
+
+    /**
+     * 引导创建平台运营账号：**只在不存在时建**，已存在则原样返回，绝不覆盖它的口令。
+     *
+     * <p>覆盖会是灾难性的：每次重启都把手改过的口令打回环境变量里的值，"首登强制改密"也白做。
+     * 忘记平台口令时的恢复路径因此是"删掉这个账号再重启"，不是改环境变量（docs/05 §4.3）。
+     *
+     * @return 新建的账号；账号已存在时返回 {@code null}（调用方据此决定打哪句日志）
+     */
+    SysUser ensurePlatformAccount(String username, String rawPassword, String realName);
+
+    /**
      * 建号入参。
      *
      * @param userType           取值见 {@code UserType}，由调用方（服务端）指定
