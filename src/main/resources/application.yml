@@ -44,6 +44,29 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+  # ============================================================
+  # 数据库迁移（Flyway）：表结构的执行真相在 src/main/resources/db/migration
+  #
+  # 在这之前用的是 docs/schema.sql：它只在 MySQL 容器首次初始化时执行一次，库里有数据之后
+  # 改表就只剩「手工进容器 ALTER」——没有版本、没有记录、换台机器要重来一遍。
+  #
+  # baseline-on-migrate 是给**已有的库**准备的：库里有表但没有迁移历史时，Flyway 把当前状态
+  # 标记成"基线已应用"，而不是报错退出或试图重新建表。空库（CI、全新部署）不受影响——
+  # 它是"非空才基线"：schema 为空时老老实实从 V1 开始建。
+  #
+  # ⚠️ baseline-version 必须与"现有库的结构"对齐。现在的库就是 V1 建出来的样子，所以基线是 1，
+  #    之后只跑 V2 及以后。将来若发现某个库的结构与 V 脚本对不上，正确做法是核对并补齐差异，
+  #    **不是**调这个数字——调它只会把差异掩盖过去（核对方法见 docs/05 的「数据库迁移」一节）。
+  #
+  # 顺带说一句：迁移脚本走 JDBC 连接执行，不经过 mysql 命令行客户端，
+  # 也就绕开了那个"客户端默认 latin1 把中文写坏"的坑。
+  # ============================================================
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}

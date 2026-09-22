@@ -2,9 +2,9 @@
 -- 开发 / 演示用账号（**不要在生产库执行**）
 -- ============================================================
 --
--- 与 docs/schema.sql 的分工：
---   schema.sql   —— 生产也需要的基础数据（租户 / 角色 / 权限点 / 楼栋 / 类别 / 报修码），
---                   任何新建的库都要有，所以它挂在 docker-entrypoint-initdb.d 上自动执行
+-- 与 Flyway 迁移脚本的分工：
+--   db/migration —— 生产也需要的基础数据（建表 + 租户 / 角色 / 权限点 / 楼栋 / 类别 / 报修码），
+--                   任何新建的库都要有，所以由应用启动时的 Flyway 自动执行
 --   dev-seed.sql —— **只有本地开发和演示才需要**的账号。它不挂在 initdb 上，
 --                   所以生产库永远不会自动获得这些账号 —— 也就不需要"上线时记得删"。
 --
@@ -36,7 +36,7 @@ INSERT INTO `sys_user` (`id`, `tenant_id`, `username`, `password`, `real_name`, 
     (2, 1, 'worker01', '$2a$10$xR./bZUlygn8gjx10szFQeInCZ55Cd5ZwHhSXJlR6dtWMzE9YD4KG', '维修工小李', '13800000002', 2, 1),
     (3, 1, '20260001', '$2a$10$xR./bZUlygn8gjx10szFQeInCZ55Cd5ZwHhSXJlR6dtWMzE9YD4KG', '学生小王',   '13800000003', 1, 1);
 
--- 角色关联（角色 ID 来自 schema.sql：1 学生、2 维修工、3 后勤管理）
+-- 角色关联（角色 ID 来自迁移脚本的种子：1 学生、2 维修工、3 后勤管理）
 INSERT INTO `sys_user_role` (`id`, `user_id`, `role_id`) VALUES
     (1, 1, 3),
     (2, 2, 2),
