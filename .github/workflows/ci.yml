@@ -59,11 +59,9 @@ jobs:
       # - name: 代码格式检查
       #   run: mvn -B spotless:check
 
-      # 建表脚本自带 CREATE DATABASE / USE，直接用客户端管道执行即可
-      - name: 初始化测试库
-        env:
-          MYSQL_PWD: ci-root-password
-        run: mysql -h 127.0.0.1 -P 3306 -uroot --default-character-set=utf8mb4 < docs/schema.sql
+      # 测试库的表结构不再手工灌：MySQL 服务已用 MYSQL_DATABASE=repair 建好库，
+      # 剩下的交给 Flyway —— 测试上下文启动时会自己把迁移脚本跑完（空库从 V1 建起）。
+      # 这一步以前是 `mysql < docs/schema.sql`，schema.sql 退役后一并删掉。
 
       # 一条命令同时跑测试和打包。测试报告会留在 target/surefire-reports/，
       # 而单独的 mvn clean package 会把上一步的测试报告一起清掉 —— 所以合成一步。

@@ -93,7 +93,14 @@ class EntityTableMappingTest {
                 rs -> {
                     Map<String, Set<String>> result = new LinkedHashMap<>();
                     while (rs.next()) {
-                        result.computeIfAbsent(rs.getString(1), k -> new LinkedHashSet<>()).add(rs.getString(2));
+                        String table = rs.getString(1);
+                        // flyway_schema_history 是 Flyway 自己维护的迁移记录表：它由工具建、由工具读写，
+                        // 既不该有实体也不该进业务代码。跳过它，否则下面那条"表建了却没有实体"的反向检查
+                        // 会把引入 Flyway 本身判成一次遗漏。
+                        if (table.startsWith("flyway_")) {
+                            continue;
+                        }
+                        result.computeIfAbsent(table, k -> new LinkedHashSet<>()).add(rs.getString(2));
                     }
                     return result;
                 });

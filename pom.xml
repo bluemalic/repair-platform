@@ -50,6 +50,23 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- ===== 数据库迁移 ===== -->
+        <!-- 表结构由迁移脚本（src/main/resources/db/migration）管理，应用启动时自动执行。
+             在这之前用的是 docs/schema.sql：它只在 MySQL 容器首次初始化时跑一次，库里有数据之后
+             改表就只剩「手工进容器 ALTER」——没有版本、没有记录，换台机器要重来一遍。
+             详见 docs/04 的 ADR-010。
+             flyway-mysql 必须单独引：MySQL 支持从 flyway-core 里拆出来了，只引 core 会在
+             启动时报 "Unsupported Database: MySQL"。
+             两个版本都由 Spring Boot 统一管理，不写版本号。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <!-- ===== ORM ===== -->
         <dependency>
             <groupId>com.baomidou</groupId>
