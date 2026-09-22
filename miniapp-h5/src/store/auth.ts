@@ -32,7 +32,7 @@ export function clearLogin(): void {
 }
 
 /**
- * 登录后按角色跳到对应首页。后勤管理（3）不走移动端，提示去管理端。
+ * 登录后按角色跳到对应首页。后勤管理与平台运营（3 / 4）不走移动端，提示去管理端。
  *
  * <p>**还在用初始口令的账号先去改密页**：管理员设的初始口令是一次性的——学生那边口令只能
  * 统一发放，而学号在班里是公开的，同学之间可以互相登录。
@@ -55,7 +55,7 @@ export function goHomeByRole(userType: number, mustChangePassword?: boolean): vo
   }
   uni.showModal({
     title: '请使用管理端',
-    content: '后勤管理账号请用电脑端管理后台（web-admin）登录，移动端只面向学生与维修工。',
+    content: '后勤管理与平台运营账号请用电脑端管理后台（web-admin）登录，移动端只面向学生与维修工。',
     showCancel: false,
   })
 }

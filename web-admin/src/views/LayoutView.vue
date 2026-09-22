@@ -10,14 +10,34 @@ const route = useRoute()
 const router = useRouter()
 const activeMenu = computed(() => route.path)
 
+/** 平台运营账号：菜单只有一项，且没有站内通知（它不属于任何租户）。 */
+const isPlatform = computed(() => auth.user?.userType === 4)
+const roleLabel = computed(() => (isPlatform.value ? '平台运营' : '后勤管理'))
+
+/**
+ * 还在用初始口令。这个标记必须在前端也认，否则用户看到的是"登录成功了，但每个页面都报无权限"，
+ * 却不知道要去哪改——**服务端才是真正的拦截**（未改密时只放行 `/api/auth/**`），
+ * 这里做的是"别让他看到一屏 10003"。
+ */
+const mustChangePassword = computed(() => auth.user?.mustChangePassword === true)
+
 /**
  * 未读数轮询（docs/03 §5.1 就是这么设计的：前端轮询 unread-count）。
  * 间隔取 60 秒：通知本身是"超时提醒/状态变更"，不需要秒级实时；太密只是白烧请求。
  * 组件卸载时清掉定时器——HMR 与来回切页面时不清会叠出一堆计时器。
+ *
+ * 平台运营不轮询：它的通知查询会带上 `receiver_id = 0`，永远是 0，白烧请求。
  */
 let timer: number | undefined
 
 onMounted(() => {
+  if (mustChangePassword.value) {
+    // 首登强制改密：直接把框弹出来
+    openPasswordDialog()
+  }
+  if (isPlatform.value) {
+    return
+  }
   refreshUnread()
   timer = window.setInterval(refreshUnread, 60_000)
 })
@@ -81,27 +101,33 @@ async function submitPassword() {
 <template>
   <el-container class="layout">
     <el-aside width="200px" class="aside">
-      <div class="brand">后勤报修 · 管理端</div>
-      <el-menu :default-active="activeMenu" router>
-        <el-menu-item index="/tickets">工单管理</el-menu-item>
-        <el-menu-item index="/notifications">
-          <el-badge :value="unread" :max="99" :hidden="unread === 0">通知</el-badge>
-        </el-menu-item>
-        <el-menu-item index="/dashboard">统计看板</el-menu-item>
-        <el-sub-menu index="base">
-          <template #title>基础数据</template>
-          <!-- 菜单项随页面一起加：指向未注册路由的菜单点了会是一片空白 -->
-          <el-menu-item index="/workers">维修工管理</el-menu-item>
-          <el-menu-item index="/students">学生管理</el-menu-item>
-          <el-menu-item index="/repair-codes">报修码管理</el-menu-item>
-          <el-menu-item index="/buildings">楼栋管理</el-menu-item>
-          <el-menu-item index="/categories">类别管理</el-menu-item>
-        </el-sub-menu>
+      <div class="brand">{{ isPlatform ? '后勤报修 · 平台运营' : '后勤报修 · 管理端' }}</div>
+      <!-- 待改密时藏起菜单：服务端此时只放行 /api/auth/**，点任何一项都只会拿到一屏 10003 -->
+      <el-menu v-if="!mustChangePassword" :default-active="activeMenu" router>
+        <template v-if="isPlatform">
+          <el-menu-item index="/platform/tenants">租户管理</el-menu-item>
+        </template>
+        <template v-else>
+          <el-menu-item index="/tickets">工单管理</el-menu-item>
+          <el-menu-item index="/notifications">
+            <el-badge :value="unread" :max="99" :hidden="unread === 0">通知</el-badge>
+          </el-menu-item>
+          <el-menu-item index="/dashboard">统计看板</el-menu-item>
+          <el-sub-menu index="base">
+            <template #title>基础数据</template>
+            <!-- 菜单项随页面一起加：指向未注册路由的菜单点了会是一片空白 -->
+            <el-menu-item index="/workers">维修工管理</el-menu-item>
+            <el-menu-item index="/students">学生管理</el-menu-item>
+            <el-menu-item index="/repair-codes">报修码管理</el-menu-item>
+            <el-menu-item index="/buildings">楼栋管理</el-menu-item>
+            <el-menu-item index="/categories">类别管理</el-menu-item>
+          </el-sub-menu>
+        </template>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header class="header">
-        <span>{{ auth.user?.realName }}（后勤管理）</span>
+        <span>{{ auth.user?.realName }}（{{ roleLabel }}）</span>
         <span class="header-actions">
           <el-button link type="primary" @click="openPasswordDialog">修改密码</el-button>
           <el-button link type="primary" @click="logout">退出登录</el-button>
@@ -112,7 +138,17 @@ async function submitPassword() {
       </el-main>
     </el-container>
 
-    <el-dialog v-model="pwdVisible" title="修改密码" width="440px">
+    <el-dialog
+      v-model="pwdVisible"
+      :title="mustChangePassword ? '首次登录，请修改初始口令' : '修改密码'"
+      width="440px"
+      :show-close="!mustChangePassword"
+      :close-on-click-modal="!mustChangePassword"
+      :close-on-press-escape="!mustChangePassword"
+    >
+      <p v-if="mustChangePassword" class="pwd-tip">
+        这是管理员（或平台运营）设的初始口令，只能使用一次。改完需要用新密码重新登录。
+      </p>
       <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
         <el-form-item label="当前密码" prop="oldPassword">
           <el-input v-model="pwdForm.oldPassword" type="password" show-password />
@@ -125,7 +161,8 @@ async function submitPassword() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="pwdVisible = false">取消</el-button>
+        <!-- 待改密时不给"取消"：服务端已经拦着其它接口了，留着这个按钮只是让人以为能跳过 -->
+        <el-button v-if="!mustChangePassword" @click="pwdVisible = false">取消</el-button>
         <el-button type="primary" @click="submitPassword">保存</el-button>
       </template>
     </el-dialog>
@@ -154,5 +191,11 @@ async function submitPassword() {
 .header-actions {
   display: flex;
   gap: 4px;
+}
+.pwd-tip {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 </style>
