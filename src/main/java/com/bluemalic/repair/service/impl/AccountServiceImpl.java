@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.entity.SysRole;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
@@ -19,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
+
 /**
  * 账号公共操作的实现。三条不变量与它们的理由见 {@link AccountService} 的类注释。
  */
@@ -28,6 +31,9 @@ import org.springframework.util.StringUtils;
 public class AccountServiceImpl implements AccountService {
 
     private static final int STATUS_ENABLED = 1;
+
+    /** 平台自身。账号挂在这个 tenant_id 上，而 {@code tenant} 表里 id = 0 那一行就是平台（见 R__seed.sql）。 */
+    private static final long PLATFORM_TENANT_ID = 0L;
 
     private final SysUserMapper sysUserMapper;
     private final SysUserRoleMapper sysUserRoleMapper;
@@ -149,6 +155,40 @@ public class AccountServiceImpl implements AccountService {
         return count != null && count > 0;
     }
 
+    @Override
+    public int kickoutAllOfTenant(long tenantId) {
+        // 只取 id：踢下线不需要账号的其它字段，少读几列在账号多时是实打实的差别
+        List<SysUser> users = sysUserMapper.selectList(Wrappers.<SysUser>lambdaQuery()
+                .select(SysUser::getId)
+                .eq(SysUser::getTenantId, tenantId)
+                .eq(SysUser::getStatus, STATUS_ENABLED));
+
+        int online = 0;
+        for (SysUser user : users) {
+            // 与 changeStatus 同一个理由：从没登录过的账号直接 kickout 会抛异常
+            if (isLogin(user.getId())) {
+                StpUtil.kickout(user.getId());
+                online++;
+            }
+        }
+        log.info("踢下线租户全部账号 tenantId={} 账号数={} 在线数={} 操作人={}",
+                tenantId, users.size(), online, operator());
+        return online;
+    }
+
+    @Override
+    @Transactional
+    public SysUser ensurePlatformAccount(String username, String rawPassword, String realName) {
+        if (usernameExists(PLATFORM_TENANT_ID, username)) {
+            return null;
+        }
+        // 这里必须走 create() 而不是自己拼两条 insert：建号必写角色关联、口令只在这一处出现，
+        // 两条不变量都在 create() 里。@Transactional 加在本方法上是必要的——create() 是被
+        // this 调用的，不会经过事务代理，少了它这两个 insert 就不在同一个事务里。
+        return create(new NewAccount(PLATFORM_TENANT_ID, username, rawPassword, realName, null,
+                UserType.PLATFORM.getCode(), UserType.PLATFORM.getRoleCode(), true, "平台账号"));
+    }
+
     private void requireUpdated(int rows, String accountLabel) {
         if (rows == 0) {
             throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, accountLabel + "不存在");
@@ -156,16 +196,9 @@ public class AccountServiceImpl implements AccountService {
     }
 
     /**
-     * 按角色码取角色 ID，**不写死数字**：写死的话角色 ID 一旦调整，就会静默造出
-     * "能登录但每个接口都 403"的账号，那种问题排查起来非常费时间。
-     *
-     * <p>当前角色是全局的（种子数据 {@code sys_role.tenant_id = 0}），所以只按码查；
-     * 将来若变成各租户自带角色，这里就是唯一需要改的地方。
-     */
-    /**
-     * 账号操作**不一定发生在请求线程里**——演示重置就跑在调度线程上，那里没有 Sa-Token 上下文，
-     * 直接调 {@code StpUtil.isLogin(id)} 或 {@code getLoginIdAsLong()} 会抛
-     * "SaTokenContext 上下文尚未初始化"。
+     * 账号操作**不一定发生在请求线程里**——演示重置与平台账号引导都跑在启动/调度线程上，
+     * 那里没有 Sa-Token 上下文，直接调 {@code StpUtil.isLogin(id)} 或 {@code getLoginIdAsLong()}
+     * 会抛 "SaTokenContext 上下文尚未初始化"。
      *
      * <p>这个坑是测试抓出来的（DemoResetTest 六条一起红），值得在这里留一句：
      * 把"读当前登录用户"这种请求上下文相关的东西随手写进公共服务，是要还的。
@@ -188,6 +221,13 @@ public class AccountServiceImpl implements AccountService {
         }
     }
 
+    /**
+     * 按角色码取角色 ID，**不写死数字**：写死的话角色 ID 一旦调整，就会静默造出
+     * "能登录但每个接口都 403"的账号，那种问题排查起来非常费时间。
+     *
+     * <p>当前角色是全局的（种子数据 {@code sys_role.tenant_id = 0}），所以只按码查；
+     * 将来若变成各租户自带角色，这里就是唯一需要改的地方。
+     */
     private long roleIdByCode(String roleCode) {
         return sysRoleMapper.selectList(Wrappers.<SysRole>lambdaQuery()
                         .eq(SysRole::getCode, roleCode))

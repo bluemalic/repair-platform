@@ -29,7 +29,12 @@
 
 -- ---------- 租户（学校 / 校区）----------
 -- 冲突时什么都不做：租户名称、联系方式是学校自己维护的，种子只负责"首次建出来"
+--
+-- `id = 0` 那一行是**平台自身**，不是学校：平台运营账号（sys_user.tenant_id = 0）靠它登录，
+-- 因为登录接口是按 tenantCode 查这张表定位租户的。与 sys_role.tenant_id = 0 表示"平台内置角色"
+-- 是同一条约定。它不出现在平台运营端的租户列表里（列表显式排除了 id = 0）。
 INSERT INTO `tenant` (`id`, `name`, `code`, `contact`, `phone`) VALUES
+    (0, '平台运营', 'platform', NULL, NULL),
     (1, '广东海洋大学', 'gdou', '后勤管理处', '0759-0000000')
 AS new ON DUPLICATE KEY UPDATE `id` = new.`id`;
 
@@ -37,7 +42,8 @@ AS new ON DUPLICATE KEY UPDATE `id` = new.`id`;
 INSERT INTO `sys_role` (`id`, `tenant_id`, `code`, `name`, `description`) VALUES
     (1, 0, 'STUDENT', '学生', '提交报修、查看进度、验收评价'),
     (2, 0, 'WORKER', '维修工', '接单、到场打卡、上报维修结果'),
-    (3, 0, 'ADMIN', '后勤管理', '派单调度、统计看板、AI 问数')
+    (3, 0, 'ADMIN', '后勤管理', '派单调度、统计看板、AI 问数'),
+    (4, 0, 'PLATFORM', '平台运营', '开通 / 停用租户、维护租户的后勤管理员')
 AS new ON DUPLICATE KEY UPDATE
     `name` = new.`name`,
     `description` = new.`description`;
@@ -65,7 +71,8 @@ INSERT INTO `sys_permission` (`id`, `code`, `name`, `type`) VALUES
     (18, 'ai:query',            'AI 数据问数',  2),
     (19, 'notification:read',   '查看通知',     2),
     (20, 'repaircode:manage',   '报修码管理',   2),
-    (21, 'student:manage',      '学生账号管理', 2)
+    (21, 'student:manage',      '学生账号管理', 2),
+    (22, 'tenant:manage',       '租户管理',     2)
 AS new ON DUPLICATE KEY UPDATE
     `code` = new.`code`,
     `name` = new.`name`;
@@ -102,15 +109,15 @@ INSERT INTO `repair_code` (`id`, `tenant_id`, `code`, `building_id`, `room`) VAL
 AS new ON DUPLICATE KEY UPDATE `id` = new.`id`;
 
 -- ---------- 角色-权限授予 ----------
--- 先删掉三个内置角色的授予，再按下面的清单重建：
+-- 先删掉内置角色的授予，再按下面的清单重建：
 --   · 这样"给某个角色加一个权限"只需在清单里加一行，不必手写 UPDATE/INSERT 语句
 --   · 脚本重跑的结果始终等于清单本身，不会越跑越乱（幂等的更强形式：不是"不重复"，而是"收敛到清单"）
---   · 只删 role_id in (1,2,3)：将来租户自建角色的授予不受影响
+--   · 只删 role_id in (1,2,3,4)：将来租户自建角色的授予不受影响
 --
 -- 注意这里用的是**两条普通语句**，不要写成存储过程：`DELIMITER` 是 mysql 命令行的指令，
 -- Flyway 是把脚本当 SQL 直接执行、并不认识它，写了会直接报语法错误。
 -- 两条语句在同一个迁移事务里执行，效果等价于原子操作。
-DELETE FROM `sys_role_permission` WHERE `role_id` IN (1, 2, 3);
+DELETE FROM `sys_role_permission` WHERE `role_id` IN (1, 2, 3, 4);
 
 INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
     -- 学生
@@ -121,5 +128,8 @@ INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
     (12, 3, 1), (13, 3, 2), (14, 3, 3), (15, 3, 4), (16, 3, 5), (17, 3, 6),
     (18, 3, 7), (19, 3, 8), (20, 3, 9), (21, 3, 10), (22, 3, 11), (23, 3, 12),
         (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18),
-        (30, 3, 19), (31, 3, 20), (32, 3, 21);
+        (30, 3, 19), (31, 3, 20), (32, 3, 21),
+    -- 平台运营：**只有租户管理这一个权限**。它看不到任何学校的业务数据，
+    -- 这一点靠两层保证：① 这里只授一个码；② PlatformScopeInterceptor 把平台账号关在 /api/platform/** 里
+    (33, 4, 22);
 
