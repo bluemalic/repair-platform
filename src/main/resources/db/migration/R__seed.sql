@@ -64,7 +64,8 @@ INSERT INTO `sys_permission` (`id`, `code`, `name`, `type`) VALUES
     (17, 'statistics:view',     '查看统计看板', 2),
     (18, 'ai:query',            'AI 数据问数',  2),
     (19, 'notification:read',   '查看通知',     2),
-    (20, 'repaircode:manage',   '报修码管理',   2)
+    (20, 'repaircode:manage',   '报修码管理',   2),
+    (21, 'student:manage',      '学生账号管理', 2)
 AS new ON DUPLICATE KEY UPDATE
     `code` = new.`code`,
     `name` = new.`name`;
@@ -119,6 +120,6 @@ INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
     -- 后勤管理：全部权限
     (12, 3, 1), (13, 3, 2), (14, 3, 3), (15, 3, 4), (16, 3, 5), (17, 3, 6),
     (18, 3, 7), (19, 3, 8), (20, 3, 9), (21, 3, 10), (22, 3, 11), (23, 3, 12),
-    (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18),
-    (30, 3, 19), (31, 3, 20);
+        (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18),
+        (30, 3, 19), (31, 3, 20), (32, 3, 21);
 
