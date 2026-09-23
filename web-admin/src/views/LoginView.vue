@@ -17,8 +17,14 @@ const form = reactive({ tenantCode: 'gdou', username: 'admin', password: '' })
  */
 const isPlatformLogin = ref(false)
 
+/**
+ * 切换登录模式时**把账号也清掉**：默认值是演示用的 `admin`，留着它就会让人在平台入口
+ * 拿学校的账号去登——现象是"用户名或密码错误"，而真正的原因是这个入口根本不认那个账号。
+ * 踩过一次，所以这里不只是清口令。
+ */
 function togglePlatformLogin() {
   isPlatformLogin.value = !isPlatformLogin.value
+  form.username = ''
   form.password = ''
 }
 
@@ -89,7 +95,13 @@ async function submit() {
       <p v-if="!isPlatformLogin" class="hint">
         忘记口令？后勤管理员请联系平台运营；学生 / 维修工请联系学校后勤。
       </p>
-      <p v-if="demoHint" class="hint">{{ demoHint }}</p>
+      <!--
+        演示账号提示只在**学校登录**模式下显示：它写的是学校那套账号（admin / 11111111），
+        摆在平台入口上等于在误导人拿它去登平台（必然"用户名或密码错误"）。
+        平台账号不对外提供，所以这里只说明"它不在这里"。
+      -->
+      <p v-if="demoHint && !isPlatformLogin" class="hint">{{ demoHint }}</p>
+      <p v-if="isPlatformLogin" class="hint">平台运营账号不对外提供：它由部署方在服务器上配置。</p>
     </el-card>
   </div>
 </template>
