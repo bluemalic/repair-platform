@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login } from '@/api/auth'
@@ -8,14 +8,27 @@ import { setLogin } from '@/store/auth'
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
-const form = reactive({ tenantCode: 'gdou', username: 'admin', password: '' })
 
 /**
  * 平台运营登录：学校编码固定填 `platform`（那是"平台自身"这个租户的编码），所以这个框直接藏起来。
  * 平台账号与学校账号走的是**同一个登录接口**，只是它挂在租户 0 上——登录契约没有任何特殊分支
  * （ADR-012）。
+ *
+ * <p><b>模式放在 URL 的 query 上（`?platform=1`），不放组件内部状态</b>：状态一卸载就没了，
+ * 而"离开登录页再回来"在这个应用里有三条路——登出、改完口令（服务端会注销会话，必须重登）、
+ * token 过期。用内部状态时，那三条路都会静默退回学校模式（学校编码默认 gdou），
+ * 于是平台账号怎么登都是"用户名或密码错误"——**踩过一次**，很难从现象倒推回来。
+ * 放 URL 上还有个附带好处：平台入口可以被收藏。
  */
-const isPlatformLogin = ref(false)
+const isPlatformLogin = computed(() => route.query.platform === '1')
+
+const form = reactive({
+  tenantCode: 'gdou',
+  // 平台模式下不预填演示账号：预填 `admin` 会引导人拿**学校**的账号去登平台入口，
+  // 现象是"用户名或密码错误"，而真正的原因是这个入口不认那个账号（踩过一次）
+  username: isPlatformLogin.value ? '' : 'admin',
+  password: '',
+})
 
 /**
  * 切换登录模式时**把账号也清掉**：默认值是演示用的 `admin`，留着它就会让人在平台入口
@@ -23,9 +36,9 @@ const isPlatformLogin = ref(false)
  * 踩过一次，所以这里不只是清口令。
  */
 function togglePlatformLogin() {
-  isPlatformLogin.value = !isPlatformLogin.value
   form.username = ''
   form.password = ''
+  router.replace(isPlatformLogin.value ? { query: {} } : { query: { platform: '1' } })
 }
 
 /**

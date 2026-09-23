@@ -50,8 +50,20 @@ onUnmounted(() => {
 
 async function logout() {
   await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
+  goLogin()
+}
+
+/**
+ * 清登录态并回登录页。**平台运营账号要带着登录模式回去**（`?platform=1`）——
+ * 否则登录页退回学校模式（学校编码默认 `gdou`），而那个租户下没有 `platform` 这个账号，
+ * 现象是"新旧口令都不对"，很难从现象倒推回来。踩过一次。
+ *
+ * 注意顺序：先读 `isPlatform`（它读的是 `auth.user`）再 `clearLogin()`。
+ */
+function goLogin() {
+  const query = isPlatform.value ? { platform: '1' } : {}
   clearLogin()
-  router.push('/login')
+  router.push({ path: '/login', query })
 }
 
 // ---------- 修改密码 ----------
@@ -93,8 +105,7 @@ async function submitPassword() {
   // 改密后所有会话都被服务端注销了（含当前这次），所以必须重新登录。
   // 这不是"顺手退出"，是设计：改密的动机之一就是怀疑账号被别人用着。
   ElMessage.success('密码已修改，请用新密码重新登录')
-  clearLogin()
-  router.push('/login')
+  goLogin()
 }
 </script>
 

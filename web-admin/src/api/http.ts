@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import { ElMessage } from 'element-plus'
-import { clearLogin, getToken } from '@/store/auth'
+import { auth, clearLogin, getToken } from '@/store/auth'
 import type { Result } from '@/types'
 
 const instance = axios.create({ baseURL: '/api', timeout: 15000 })
@@ -17,8 +17,12 @@ instance.interceptors.request.use((config) => {
 function handleError(code: number, message: string): void {
   if (code === 10002) {
     ElMessage.warning('登录已过期，请重新登录')
+    // 与 LayoutView 的 goLogin 同一条理由：平台运营账号要**带着登录模式**回登录页。
+    // 不带的后果是静默退回学校模式（学校编码默认 gdou），而那个租户下没有 platform 这个账号，
+    // 表现为"新旧口令都不对"——很难从现象倒推回来。所以这里要先读 userType 再清登录态。
+    const wasPlatform = auth.user?.userType === 4
     clearLogin()
-    location.hash = '#/login'
+    location.hash = wasPlatform ? '#/login?platform=1' : '#/login'
     return
   }
   ElMessage.error(message || '请求失败')
