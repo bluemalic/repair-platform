@@ -4,7 +4,8 @@
 
 [![CI](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/bluemalic/repair-platform/actions/workflows/ci.yml)
 
-**接口文档**：本机启动后 `http://localhost:8080/doc.html`（在线演示地址待部署阶段填）
+**在线演示**：<http://119.91.47.63:8080>（管理端；移动端在同地址的 `/h5/`）。演示账号写在登录页上，站点每天自动恢复原样。
+**接口文档**：本机启动后 `http://localhost:8080/doc.html`
 
 ---
 
@@ -29,7 +30,7 @@
 | M4 | AI 数据助手 + SQL 安全网关（只读账号 / 白名单 / 强制数据权限 / 熔断） | 🚧 未开始（ADR-003、ADR-005 已定方案） |
 | M5 | 前端 · 后勤管理端（Vue 3 + Element Plus + ECharts）：登录 / 工单（派单选人 + 详情抽屉）/ 通知（未读角标）/ 统计看板 / 维修工 · 学生 · 报修码 · 楼栋 · 类别 / 平台运营 | ✅ 已完成 |
 | M5 | 前端 · 学生与维修工端（uni-app，先编译 H5，在 `miniapp-h5/`） | ✅ 全部完成：工单闭环全通（报修/接单/到场/完工/评价）+ **摄像头扫码**（H5 用 `getUserMedia` + `jsqr`，手输兜底） |
-| M5 | 部署上线（Dockerfile / compose / nginx / CD 已就绪，公网访问未验证） | 🚧 部分完成 |
+| M5 | 部署上线（Dockerfile / compose / nginx 已就绪；**公网访问已验证**——演示站 <http://119.91.47.63:8080> 跑在 2C2G 腾讯云上；CD 的 push 自动部署未验证） | 🚧 部分完成 |
 | P1 | 工单转派 · Excel 导出 · 操作审计 · AI 问数评测集 · 压测报告 | 🚧 未开始 |
 
 > 测试与验证：`mvn -B clean package` 本地全绿（当前 130 个测试，覆盖状态机流转、幂等、数据权限、超时调度、统计口径、限流边界（报修码按用户 / 登录按账号）、接口错误契约、自助改密、首登强制改密、演示数据重置、维修工管理、学生账号管理、租户入驻与平台域收口、字典管理、报修码管理、文件上传）；
