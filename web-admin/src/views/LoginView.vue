@@ -84,7 +84,7 @@ async function submit() {
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2>{{ isPlatformLogin ? '后勤报修 · 平台运营' : '后勤报修 · 管理端' }}</h2>
+      <h2 class="title">{{ isPlatformLogin ? '后勤报修 · 平台运营' : '后勤报修 · 管理端' }}</h2>
       <el-form :model="form" label-width="72px" @submit.prevent="submit">
         <el-form-item v-if="!isPlatformLogin" label="学校编码">
           <el-input v-model="form.tenantCode" />
@@ -110,11 +110,9 @@ async function submit() {
       </p>
       <!--
         演示账号提示只在**学校登录**模式下显示：它写的是学校那套账号（admin / 11111111），
-        摆在平台入口上等于在误导人拿它去登平台（必然"用户名或密码错误"）。
-        平台账号不对外提供，所以这里只说明"它不在这里"。
+        摆在平台入口上等于在误导人拿它去登平台（必然"用户名或密码错误"）。平台模式下什么都不显示。
       -->
       <p v-if="demoHint && !isPlatformLogin" class="hint">{{ demoHint }}</p>
-      <p v-if="isPlatformLogin" class="hint">平台运营账号不对外提供：它由部署方在服务器上配置。</p>
     </el-card>
   </div>
 </template>
@@ -129,6 +127,10 @@ async function submit() {
 }
 .login-card {
   width: 380px;
+}
+/* 标题居中：卡片的宽度是定值，标题左对齐时右边会空出一大块，看着像没做完 */
+.title {
+  text-align: center;
 }
 .hint {
   color: var(--el-text-color-secondary);
