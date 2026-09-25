@@ -21,7 +21,12 @@ class SqlSafetyGatewayTest {
 
     private static final long TENANT = 7L;
 
-    private final SqlSafetyGateway gateway = new SqlSafetyGateway();
+    /** 默认：表都没有 deleted 列（于是注入的只有租户条件，断言里只出现租户条件）。 */
+    private final SqlSafetyGateway gateway = new SqlSafetyGateway((table, column) -> false);
+
+    /** 有逻辑删除列的情形，单独几条用例（见下方"逻辑删除"一节）。 */
+    private final SqlSafetyGateway gatewayWithLogicDelete = new SqlSafetyGateway(
+            (table, column) -> "deleted".equals(column));
 
     // ==================== 通过：注入租户条件 ====================
 
@@ -102,6 +107,41 @@ class SqlSafetyGatewayTest {
         SqlSafetyResult result = gateway.validateAndScope("```sql\nSELECT id FROM ticket\n```", TENANT);
 
         assertThat(result.sql()).isEqualTo("SELECT id FROM ticket WHERE ticket.tenant_id = 7");
+    }
+
+    // ==================== 逻辑删除：补上 MyBatis-Plus 会自动补的那个条件 ====================
+
+    /**
+     * AI 的 SQL 走裸 JDBC，**绕过了 MyBatis-Plus 的逻辑删除过滤**——不补 {@code deleted = 0}，
+     * 它就会把已删除的楼栋、已删除的工单一起算进去，于是"AI 说 6 栋楼、界面显示 5 栋"。
+     * 这条是实测踩出来的：本机库里有一行逻辑删除的楼栋，问"有几栋楼"真的多出来一栋。
+     */
+    @Test
+    void injectsLogicDeleteConditionWhenTableHasThatColumn() {
+        SqlSafetyResult result = gatewayWithLogicDelete.validateAndScope("SELECT id FROM ticket", TENANT);
+
+        assertThat(result.sql())
+                .isEqualTo("SELECT id FROM ticket WHERE ticket.tenant_id = 7 AND ticket.deleted = 0");
+    }
+
+    @Test
+    void everyJoinedTableGetsLogicDeleteConditionToo() {
+        SqlSafetyResult result = gatewayWithLogicDelete.validateAndScope(
+                "SELECT b.name FROM ticket t JOIN building b ON t.building_id = b.id", TENANT);
+
+        assertThat(result.sql()).contains("t.deleted = 0").contains("b.deleted = 0");
+    }
+
+    /** 没有 deleted 列的表**不能**注入——注了 SQL 直接报"未知列"，那是把好查询打死。 */
+    @Test
+    void doesNotInjectLogicDeleteForTableWithoutThatColumn() {
+        SqlSafetyGateway onlyTicketHasDeleted = new SqlSafetyGateway(
+                (table, column) -> "deleted".equals(column) && "ticket".equals(table));
+
+        SqlSafetyResult result = onlyTicketHasDeleted.validateAndScope(
+                "SELECT b.name FROM ticket t JOIN building b ON t.building_id = b.id", TENANT);
+
+        assertThat(result.sql()).contains("t.deleted = 0").doesNotContain("b.deleted");
     }
 
     @Test
