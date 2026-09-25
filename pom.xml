@@ -26,6 +26,8 @@
         <!-- OpenAPI 描述生成器。Knife4j 的 starter 需配 2.3.0（Spring Boot 3.2 时代），
              而 Spring Boot 3.5 必须用 2.8.x —— 所以这里走「springdoc 生成 + Knife4j 静态 UI」。 -->
         <springdoc.version>2.8.17</springdoc.version>
+        <!-- AI 框架（ADR-005）。只引稳定核心，不引它的 Spring Boot starter（那个还是 beta） -->
+        <langchain4j.version>1.20.0</langchain4j.version>
     </properties>
 
     <dependencies>
@@ -142,6 +144,23 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- ===== AI（M4）===== -->
+        <!--
+            用 LangChain4j 的 open-ai 模块对接 DeepSeek：DeepSeek 没有专用模块，官方推荐就是
+            「open-ai 模块 + 自定义 baseUrl」（ADR-005）。
+
+            ⚠️ **不引它的 Spring Boot starter**：核心是稳定版，而 starter 到 1.20.0 还是 beta；
+            这里只需要一个 ChatModel Bean，自己写二十行配置类就能替代。见 ADR-005。
+
+            只用 open-ai 一个模块（它会带进 core）：不需要 embedding、不需要 pgvector 之类的
+            额外模块——Schema 注入是全量拼提示词，没用到向量检索。
+        -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
 
         <!-- ===== 测试 ===== -->

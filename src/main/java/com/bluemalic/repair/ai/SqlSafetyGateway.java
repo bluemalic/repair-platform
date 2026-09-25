@@ -58,8 +58,17 @@ public class SqlSafetyGateway {
     /** 每张白名单表都有的列（{@link SchemaWhitelist} 的类注释里写明了这条约束）。 */
     private static final String TENANT_COLUMN = "tenant_id";
 
+    /** 逻辑删除列：本项目的约定是 {@code deleted = 1} 表示"已删除"。 */
+    private static final String DELETED_COLUMN = "deleted";
+
     /** 从 SQL 文本里切出标识符，用于敏感列检查（理由见 {@link #firstSensitiveToken}）。 */
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+    private final ColumnLookup columnLookup;
+
+    public SqlSafetyGateway(ColumnLookup columnLookup) {
+        this.columnLookup = columnLookup;
+    }
 
     /**
      * 校验 + 注入租户条件。通过则返回可直接执行的 SQL；不通过抛 {@code 40002}（带具体原因）。
@@ -99,7 +108,7 @@ public class SqlSafetyGateway {
         }
 
         List<Table> sources = outerTables(select, sql);
-        injectTenant(select, sources, tenantId);
+        injectScope(select, sources, tenantId);
 
         String scoped = select.toString();
         log.info("AI 生成的 SQL 通过安全网关 tenantId={} tables={} sql={}", tenantId, tables, scoped);
@@ -206,19 +215,25 @@ public class SqlSafetyGateway {
     }
 
     /**
-     * 给每张表注入 {@code tenant_id = ?}，与原有 WHERE 用 AND 连接。
+     * 给每张表注入 {@code tenant_id = ?}（以及有逻辑删除列时的 {@code deleted = 0}），
+     * 与原有 WHERE 用 AND 连接。
+     *
+     * <p><b>为什么要注入 {@code deleted = 0}</b>：项目里所有查询都走 MyBatis-Plus，而它的逻辑删除
+     * 会自动补上这个条件——AI 的 SQL 走的是裸 JDBC，**绕过了那层**。不补的话它会把已删除的楼栋、
+     * 已删除的工单一起算进去，于是"AI 说 6 栋楼、界面显示 5 栋"这种矛盾立刻出现（而口径不一致
+     * 是最伤信任的一类问题）。是否注入取决于那张表有没有这一列，所以要看 {@link ColumnLookup}。
      *
      * <p><b>原有 WHERE 必须加括号</b>：否则 {@code a OR b} 拼上 AND 会渲染成
      * {@code a OR b AND tenant}，按优先级读成 {@code a OR (b AND tenant)}——语义被悄悄改掉，
      * 而且改的方向是"多返回数据"。这是拼接条件时最容易踩的一个坑，测试里有专门一条盯着它。
      */
-    private void injectTenant(PlainSelect select, List<Table> tables, long tenantId) {
+    private void injectScope(PlainSelect select, List<Table> tables, long tenantId) {
         Expression injected = null;
         for (Table table : tables) {
-            EqualsTo condition = new EqualsTo();
-            condition.setLeftExpression(new Column(qualified(table, TENANT_COLUMN)));
-            condition.setRightExpression(new LongValue(tenantId));
-            injected = injected == null ? condition : new AndExpression(injected, condition);
+            injected = and(injected, columnEquals(table, TENANT_COLUMN, tenantId));
+            if (columnLookup.has(table.getName().replace("`", "").toLowerCase(), DELETED_COLUMN)) {
+                injected = and(injected, columnEquals(table, DELETED_COLUMN, 0L));
+            }
         }
         Expression existing = select.getWhere();
         if (existing == null) {
@@ -230,6 +245,17 @@ public class SqlSafetyGateway {
         Parenthesis parenthesis = new Parenthesis();
         parenthesis.add(existing);
         select.setWhere(new AndExpression(parenthesis, injected));
+    }
+
+    private Expression and(Expression left, Expression right) {
+        return left == null ? right : new AndExpression(left, right);
+    }
+
+    private Expression columnEquals(Table table, String column, long value) {
+        EqualsTo condition = new EqualsTo();
+        condition.setLeftExpression(new Column(qualified(table, column)));
+        condition.setRightExpression(new LongValue(value));
+        return condition;
     }
 
     /**
