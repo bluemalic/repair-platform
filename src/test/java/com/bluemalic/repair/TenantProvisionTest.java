@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -227,11 +228,15 @@ class TenantProvisionTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
         JsonNode list = readJson(result).path("data").path("list");
-        // 种子数据只有一所学校（gdou）
-        assertThat(list.size()).isEqualTo(1);
-        assertThat(list.get(0).path("code").asText()).isEqualTo(TENANT_CODE);
+        // 断言的是"平台自身不在列表里"，**不是"列表恰好有几条"**：后者会让这条测试因为
+        // 本地库里多了一所学校（比如演示时手工开的）而失败，而那与这条不变量毫无关系。
+        // （实测踩过：本机留着验证时开的「演示学校B」，这条断言就红了，而线上 CI 是绿的）
+        List<String> codes = new ArrayList<>();
+        list.forEach(row -> codes.add(row.path("code").asText()));
+        assertThat(codes).as("平台自身不该出现在学校列表里").doesNotContain("platform");
+        assertThat(codes).contains(TENANT_CODE);
 
-        // 按名字搜也搜不到它：平台自身不该出现在租户列表里
+        // 按名字搜也搜不到它
         mockMvc.perform(get("/api/platform/tenants?keyword=platform")
                         .header("Authorization", "Bearer " + platform))
                 .andExpect(jsonPath("$.data.total").value(0));
