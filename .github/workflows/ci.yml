@@ -68,26 +68,37 @@ jobs:
       # 变量名与 docker-compose.yml 的 app.environment 对齐，配置读取方式见 application.yml。
       # 对象存储（MinIO）为什么不用 services 起：Actions 的 service 不支持覆盖容器启动命令，
       # 而这个镜像不带 `server /data` 参数会直接退出（表现为 job 卡在 "Initialize containers"）。
-      # 镜像走 quay.io：minio/minio 在 Docker Hub 上已拉不到（pull access denied），
-      # 本地因为早就缓存过才没暴露——`docker-compose.yml` 里也是同样的坑，一并改了。
-      # 这里显式 docker run + 等健康检查，失败时的报错也清楚。
+      #
+      # 为什么用 `docker compose up -d minio` 而不是手写 docker run：
+      # **镜像与参数只维护一处**（docker-compose.yml 的 minio 服务），CI 顺带验证了那份配置是对的。
+      # 这一点不是洁癖——镜像源已经换过两次（Docker Hub → quay.io → Bitnami legacy，两次都是
+      # MinIO 自己收紧分发），手写的那份 docker run 每次都要跟着改一遍，漏一次就是 job 红。
+      #
       # 只有"真上传"的用例需要它：类型 / 大小 / 魔数这些校验用例不依赖 MinIO。
       - name: 启动 MinIO（对象存储）
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=ci-minio-user \
-            -e MINIO_ROOT_PASSWORD=ci-minio-password \
-            quay.io/minio/minio server /data
+          cat > .env <<'EOF'
+          MINIO_ROOT_USER=ci-minio-user
+          MINIO_ROOT_PASSWORD=ci-minio-password
+          MINIO_MEM_LIMIT=512M
+          EOF
+          docker compose up -d minio
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live; then
               echo "MinIO 已就绪"
-              exit 0
+              break
             fi
             sleep 2
           done
-          echo "MinIO 未在 60 秒内就绪" >&2
-          docker logs minio
-          exit 1
+          # 断言数据目录确实是那个挂载目录：Bitnami 镜像的数据目录由 MINIO_DATA_DIR 决定，
+          # 名字写错不会报错，只会安静地把数据放进容器内层（新机器上等于"重启就丢数据"）。
+          # MinIO 启动时会在数据目录建 .minio.sys，用它当证据。
+          test -d ./data/minio/.minio.sys || {
+            echo "数据目录没落在挂载卷里（检查 MINIO_DATA_DIR）" >&2
+            docker compose logs minio
+            exit 1
+          }
+          docker compose ps minio
 
       - name: 运行单元测试并打包
         env:

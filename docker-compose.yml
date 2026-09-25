@@ -75,15 +75,26 @@ services:
           memory: ${REDIS_MEM_LIMIT:-384M}
 
   minio:
-    # 镜像在 quay.io：minio/minio 在 Docker Hub 上已拉不到（pull access denied）。
-    # 本机因为早就缓存过 Docker Hub 的镜像，一直没暴露这个坑——新机器上会直接拉取失败。
-    image: quay.io/minio/minio:latest
+    # ⚠️ 这个镜像源已经换过两次，**两次都是 MinIO 自己收紧了分发**，不是我们配错：
+    #   1) Docker Hub 的 `minio/minio` 拉不到（pull access denied）→ 改用 quay.io
+    #   2) 2026-09-25：quay.io/minio/minio 变成 401（要认证），而 Docker Hub 上那个仓库
+    #      已经**不存在**了 → 改用 Bitnami 的 legacy 镜像（同一个 MinIO 二进制，社区镜像下架后它还在）
+    # 顺带把标签**钉死**：之前用 `:latest`，结果镜像一消失就无从追溯该用哪个版本。
+    #
+    # 与官方镜像的用法有两处不同（Bitnami 的 entrypoint 按环境变量组装命令，不认 `command:`）：
+    #   · 数据目录要用 MINIO_DATA_DIR 指定。默认是 /bitnami/minio/data，**不指定的话数据不会落进挂载卷**
+    #     （这种错不会报错、只会安静地把数据放进容器内层——CI 里专门断言了挂载目录下有 .minio.sys 来防它）
+    #   · 容器默认以非 root 运行，而挂载目录属于 root → 显式 user: root（官方镜像本来也是 root 跑的）
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
     container_name: repair-minio
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    user: root
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DATA_DIR: /data
+      # 管理台端口，对应官方镜像那个 `--console-address ":9001"`
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
     volumes:
       - ./data/minio:/data
     # 同时挂 frontend：nginx 要反代 /files/ 到它（见 nginx.conf）。
