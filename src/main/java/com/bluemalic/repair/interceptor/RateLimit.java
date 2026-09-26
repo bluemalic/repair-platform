@@ -26,6 +26,10 @@ public @interface RateLimit {
      * <p>目前只有 {@code "ai"} 一档：问数每次调用都要花钱，需要比默认档严得多
      * （{@code repair.ai.rate-limit-max-requests}）。**档位名拼错不会报错、会静默回落到默认档**，
      * 所以认不出的档位在 {@code RateLimitRule} 里只回默认值，不猜。
+     *
+     * <p>档位还决定**计数维度**：写了档位的接口按档位计数（同一个档位下的所有接口共用一份计数），
+     * 所以 AI 的同步接口与流式接口合计也只有那么多次——它们花的是同一笔钱。留空则按接口计数
+     * （理由见 {@code RateLimitInterceptor} 的类注释）。
      */
     String key() default "";
 }
