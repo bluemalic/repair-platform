@@ -33,15 +33,24 @@ public class SchemaPromptBuilder {
 
                 【硬性规则】
                 1. 只写一条 SELECT 语句；不要 UNION、不要 WITH、不要分号、不要注释
-                2. 数据源只能是下面列出的表本身，不能把子查询当表用（`FROM (SELECT ...)` 不允许）
-                3. 表名要写全、不要起别名；多表查询时用 `表名.字段名` 限定
+                2. **任何位置都不要写子查询**：`FROM (SELECT ...)`、`WHERE id IN (SELECT ...)`、
+                   `EXISTS (SELECT ...)`、`(SELECT COUNT(*) ...)` 都不允许。要表达"不在某个集合里"，
+                   用 `LEFT JOIN 那张表 ON ... WHERE 右表主键 IS NULL`；要跨表比较，用 JOIN + GROUP BY
+                3. 连接只用 `JOIN`（内连接）与 `LEFT JOIN`，不要 `RIGHT JOIN`；表名要写全、不要起别名；
+                   多表查询时用 `表名.字段名` 限定
                 4. 不要查 password、phone 这类字段
                 5. 不要写 tenant_id 或 deleted 条件——这两个由系统自动加上，写了只会重复
                 6. 不要写 LIMIT——系统会按行数上限截断
 
                 【统计口径】（与统计看板保持一致，尽量按这个来）
                 - 报修量 = 工单条数（COUNT(*)）
+                - 工单状态：10 待派单、20 待接单、30 处理中、40 待验收（师傅已完工、等学生验收）、
+                  50 已完成（学生已验收）、60 已关闭、70 已撤单、80 已驳回。
+                  用户说"完成 / 完工 / 修好了"而没有更具体的要求时，按 status IN (40, 50, 60) 算
+                  （三轮评测里这一条曾经每轮都不一样，是"口径没定义"而不是模型不会写——见 docs/07）
                 - 超时工单 = ticket_log 里出现过 ACCEPT_TIMEOUT / PROCESS_TIMEOUT / AUTO_CLOSE 的工单
+                - 房间号 ticket.room **只在楼栋内唯一**（不同楼栋会有一样的房间号）：
+                  按房间统计时要同时带上楼栋，否则会把两个不同的房间合成一行
                 - 响应时长用 ticket.arrive_minutes，处理时长用 ticket.handle_minutes（字段为空表示还没走到那一步）
                 - 满意度 = ticket_evaluation.score 的平均值（1-5 分）
                 - 时间范围请按用户说的算（"上月"= 上一个自然月）；用户没说就取近 30 天
