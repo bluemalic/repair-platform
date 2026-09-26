@@ -64,6 +64,9 @@ public class SqlSafetyGateway {
     /** 从 SQL 文本里切出标识符，用于敏感列检查（理由见 {@link #firstSensitiveToken}）。 */
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
+    /** 数 {@code SELECT} 关键字用（理由见 {@link #rejectSubqueries}）。 */
+    private static final Pattern SELECT_KEYWORD = Pattern.compile("\\bselect\\b", Pattern.CASE_INSENSITIVE);
+
     private final ColumnLookup columnLookup;
 
     public SqlSafetyGateway(ColumnLookup columnLookup) {
@@ -92,6 +95,7 @@ public class SqlSafetyGateway {
             throw reject("不支持 WITH（公共表表达式），请直接用 JOIN 或子查询", sql);
         }
         rejectFileWrite(select, sql);
+        rejectSubqueries(sql);
 
         // 表白名单：TablesNamesFinder 会连子查询里的表一起找出来，所以 WHERE 里的子查询同样受约束
         // （用接收已解析语句的实例方法：不用再解析一遍，也不抛受检异常）
@@ -180,18 +184,51 @@ public class SqlSafetyGateway {
     }
 
     /**
+     * 拒绝**任何位置**的子查询（WHERE 里的 {@code IN (SELECT ...)}、投影里的标量子查询、
+     * {@code EXISTS (...)}、以及被当作表用的 {@code FROM (SELECT ...)}）。
+     *
+     * <p><b>为什么一刀切</b>：租户条件是**按外层 FROM/JOIN 的每一张表**注入的（{@link #injectScope}），
+     * 子查询里的表拿不到这个条件。于是下面这种形状会把别家租户的数据直接算进结果：
+     * <pre>SELECT (SELECT COUNT(*) FROM sys_user WHERE tenant_id &lt;&gt; 1) AS x FROM building WHERE ...</pre>
+     * 外层的 {@code building} 被注入成了本租户，但括号里那个子查询**一个字都没改**——
+     * 后勤管理员问一句就能读到别家学校的用户数（本机实测：这条返回 2）。
+     * WHERE 里的子查询同样是通道：{@code WHERE (SELECT COUNT(*) FROM ticket WHERE tenant_id = 2) > 0}
+     * 是一个逐位提取信息的布尔预言机。
+     *
+     * <p>另一条路（递归进每个子查询再注入）被否掉，理由与"不许 UNION、不许 CTE、不许派生表"一致：
+     * 每多一种要递归处理的形状，就多一处漏注入的可能，而漏注入是**静默**的——错了不会报错，
+     * 只会安静地多返回数据。宁可用一刀切的方式 fail-closed：要表达"不在某集合里"用
+     * {@code LEFT JOIN ... WHERE 右表.id IS NULL}，要比较用 JOIN + GROUP BY（提示词里写了）。
+     *
+     * <p>实现上用**词法**数 {@code SELECT} 关键字，不走 AST 遍历：AST 遍历同样可能漏掉某种嵌套形状
+     * （漏掉就是放行），而"多一个 SELECT 关键字"是任何子查询都绕不过去的硬事实。代价是
+     * 字符串字面量里出现 {@code select} 会被误拒（如 {@code LIKE '%select%'}）——这与敏感列检查
+     * 是同一个取舍：**宁可偶尔误拒（模型换个说法即可），也不漏放**。
+     */
+    private void rejectSubqueries(String sql) {
+        Matcher matcher = SELECT_KEYWORD.matcher(sql);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+            if (count > 1) {
+                throw reject("不支持子查询（含 WHERE 里的 IN (SELECT ...)）："
+                        + "要表达「不在某个集合里」请改用 LEFT JOIN 后判断右表主键为空", sql);
+            }
+        }
+    }
+
+    /**
      * 外层数据源：必须是**白名单表本身**，不能是子查询，且至少一张。
      *
      * <p>两条限制各有理由：
      * <ul>
      *   <li><b>不能是子查询</b>（{@code FROM (SELECT ...) x}）：那等于把真正的数据源藏进嵌套里，
      *       而"注入租户条件"是按外层 FROM/JOIN 逐表做的。要支持它就得递归改写每个嵌套查询——
-     *       多一处递归就多一处漏注入的可能，而模型完全可以用 JOIN 表达同样的意思</li>
+     *       多一处递归就多一处漏注入的可能，而模型完全可以用 JOIN 表达同样的意思
+     *       （子查询整体也已被 {@link #rejectSubqueries} 拦下，这里是它之后更细的一道）</li>
      *   <li><b>至少一张表</b>：没有 FROM 的 {@code SELECT @@version} / {@code SELECT SLEEP(10)}
      *       既能探测服务器信息又能拖住连接，而它们对"问数据"毫无用处</li>
      * </ul>
-     * 注意 WHERE / SELECT 列表里的子查询是**允许**的（{@code WHERE building_id IN (SELECT id FROM building ...)}）：
-     * 它们只作为过滤条件或取值，返回的行仍然来自外层那几张已被注入的表，所以不会泄露别家数据。
      */
     private List<Table> outerTables(PlainSelect select, String sql) {
         FromItem from = select.getFromItem();
@@ -208,6 +245,13 @@ public class SqlSafetyGateway {
                 if (!(join.getRightItem() instanceof Table joined)) {
                     throw reject("JOIN 的对象只能是白名单里的表", sql);
                 }
+                if (join.isRight() || join.isFull()) {
+                    // RIGHT / FULL JOIN 的"可空一侧"是**左边**，而左边那些表的条件只能进 WHERE
+                    // ——那会多滤掉一批行（与 LEFT JOIN 在 WHERE 上踩的是同一个坑，方向相反）。
+                    // 模型没有理由写它（把两张表换个位置用 LEFT JOIN 就能表达），所以直接拒绝，
+                    // 不去做半懂的改写：**宁可拒，不可错**。
+                    throw reject("不支持 RIGHT / FULL JOIN，请改用 LEFT JOIN", sql);
+                }
                 tables.add(joined);
             }
         }
@@ -215,36 +259,76 @@ public class SqlSafetyGateway {
     }
 
     /**
-     * 给每张表注入 {@code tenant_id = ?}（以及有逻辑删除列时的 {@code deleted = 0}），
-     * 与原有 WHERE 用 AND 连接。
+     * 给每张表注入 {@code tenant_id = ?}（以及有逻辑删除列时的 {@code deleted = 0}）。
+     *
+     * <p><b>落点分两处：FROM 那张表进 WHERE，JOIN 进来的表进它自己的 ON。</b>
+     * 这不是风格问题——{@code LEFT JOIN} 的右表条件放进 WHERE，会把"没匹配上"的行一起滤掉，
+     * LEFT JOIN 悄悄退化成 INNER JOIN。评测集（docs/07）里就踩到了：模型写
+     * {@code LEFT JOIN ticket_evaluation ON ... WHERE ticket_evaluation.id IS NULL}
+     * （"还有多少工单没有评价"的标准反连接写法），注入的
+     * {@code ticket_evaluation.tenant_id = 1} 在 WHERE 里把空匹配那些行全滤掉，
+     * **答案从 6 变成 0**（本机实测）。注到 ON 上就对了：右表仍然只匹配本租户的行，
+     * 但"没匹配上"的行被 LEFT JOIN 保留下来。
+     *
+     * <p>INNER JOIN 两处等价，CROSS JOIN / 逗号连接没有"未匹配也保留"的一侧（两处也等价），
+     * 所以只有带 ON 的 JOIN 要挪进 ON。**收窄性质不变**：条件仍是 AND 上去的，
+     * 原来 ON 里的表达式会被加括号（{@code ON a OR b} 拼成 {@code ON (a OR b) AND tenant = 1}），
+     * 模型写不出"放宽"。
      *
      * <p><b>为什么要注入 {@code deleted = 0}</b>：项目里所有查询都走 MyBatis-Plus，而它的逻辑删除
      * 会自动补上这个条件——AI 的 SQL 走的是裸 JDBC，**绕过了那层**。不补的话它会把已删除的楼栋、
      * 已删除的工单一起算进去，于是"AI 说 6 栋楼、界面显示 5 栋"这种矛盾立刻出现（而口径不一致
      * 是最伤信任的一类问题）。是否注入取决于那张表有没有这一列，所以要看 {@link ColumnLookup}。
      *
-     * <p><b>原有 WHERE 必须加括号</b>：否则 {@code a OR b} 拼上 AND 会渲染成
+     * <p><b>原有 WHERE 与 ON 都要加括号</b>：否则 {@code a OR b} 拼上 AND 会渲染成
      * {@code a OR b AND tenant}，按优先级读成 {@code a OR (b AND tenant)}——语义被悄悄改掉，
      * 而且改的方向是"多返回数据"。这是拼接条件时最容易踩的一个坑，测试里有专门一条盯着它。
      */
     private void injectScope(PlainSelect select, List<Table> tables, long tenantId) {
-        Expression injected = null;
-        for (Table table : tables) {
-            injected = and(injected, columnEquals(table, TENANT_COLUMN, tenantId));
-            if (columnLookup.has(table.getName().replace("`", "").toLowerCase(), DELETED_COLUMN)) {
-                injected = and(injected, columnEquals(table, DELETED_COLUMN, 0L));
+        // FROM 那张表的条件：没有"外层连接"会把它变成可空的一侧（除非是 RIGHT JOIN，见下）
+        Expression whereScope = scopeOf(tables.get(0), tenantId);
+
+        List<Join> joins = select.getJoins();
+        for (int i = 0; joins != null && i < joins.size(); i++) {
+            Join join = joins.get(i);
+            Expression scope = scopeOf(tables.get(i + 1), tenantId);
+            if (join.isCross() || join.getOnExpressions().isEmpty()) {
+                // 没有 ON 的连接（CROSS JOIN / 不带条件的 JOIN）：不存在"未匹配也保留"的一侧，
+                // WHERE 与 ON 等价
+                whereScope = and(whereScope, scope);
+            } else {
+                // 多个 ON 子句（jsqlparser 支持、MySQL 少见）合成一个再把条件 AND 上去，语义不变
+                Expression on = null;
+                for (Expression expression : join.getOnExpressions()) {
+                    on = and(on, expression);
+                }
+                join.setOnExpressions(List.of(and(parenthesized(on), scope)));
             }
         }
+
         Expression existing = select.getWhere();
-        if (existing == null) {
-            select.setWhere(injected);
-            return;
+        select.setWhere(existing == null ? whereScope
+                : new AndExpression(parenthesized(existing), whereScope));
+    }
+
+    /** 单张表的范围条件：租户一定有，逻辑删除列按表结构决定。 */
+    private Expression scopeOf(Table table, long tenantId) {
+        Expression scope = columnEquals(table, TENANT_COLUMN, tenantId);
+        if (columnLookup.has(table.getName().replace("`", "").toLowerCase(), DELETED_COLUMN)) {
+            scope = and(scope, columnEquals(table, DELETED_COLUMN, 0L));
         }
-        // jsqlparser 5.x 的 Parenthesis 没有"接收表达式"的构造器（withExpression 是"替换第 0 个元素"，
-        // 空列表上会 IndexOutOfBounds），所以先建空括号再把条件放进去
+        return scope;
+    }
+
+    /**
+     * 加一层括号。jsqlparser 5.x 的 {@code Parenthesis} 没有"接收表达式"的构造器
+     * （{@code withExpression} 是"替换第 0 个元素"，空列表上会 IndexOutOfBounds），
+     * 所以先建空括号再把条件放进去。
+     */
+    private Expression parenthesized(Expression expression) {
         Parenthesis parenthesis = new Parenthesis();
-        parenthesis.add(existing);
-        select.setWhere(new AndExpression(parenthesis, injected));
+        parenthesis.add(expression);
+        return parenthesis;
     }
 
     private Expression and(Expression left, Expression right) {
