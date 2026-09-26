@@ -124,6 +124,7 @@ async function submitPassword() {
             <el-badge :value="unread" :max="99" :hidden="unread === 0">通知</el-badge>
           </el-menu-item>
           <el-menu-item index="/dashboard">统计看板</el-menu-item>
+          <el-menu-item index="/ai-query">AI 问数</el-menu-item>
           <el-sub-menu index="base">
             <template #title>基础数据</template>
             <!-- 菜单项随页面一起加：指向未注册路由的菜单点了会是一片空白 -->

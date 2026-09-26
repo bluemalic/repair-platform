@@ -222,3 +222,29 @@ export interface TenantAdminVO {
   /** true = 还在用初始口令，说明这个账号还没被激活过 */
   mustChangePassword: boolean
 }
+
+/**
+ * AI 问数结果（docs/03 §5.6）。
+ *
+ * `rows` 是**与 columns 一一对应的二维数组**（不是对象数组）：列是模型生成的（中文别名），
+ * 事先不知道有哪几列，所以只能按位置取值。数字是 number 不是 string——后端专门做了处理，
+ * 否则全局的 `Long → 字符串` 规则会让图表画不出来。
+ */
+export interface AiQueryResult {
+  question: string
+  /** 实际执行的 SQL（已注入租户条件、已过安全网关），供人工复核 */
+  sql: string
+  columns: string[]
+  rows: (string | number | null)[][]
+  chart: {
+    /** bar / line / pie / none */
+    type: string
+    x: string | null
+    y: string | null
+  }
+  conclusion: string
+  /** true = 结果超过行数上限被截断 */
+  rowLimited: boolean
+  /** 总耗时（毫秒），含两次模型调用 */
+  elapsedMs: number
+}

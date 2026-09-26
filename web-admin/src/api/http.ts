@@ -3,7 +3,8 @@ import { ElMessage } from 'element-plus'
 import { auth, clearLogin, getToken } from '@/store/auth'
 import type { Result } from '@/types'
 
-const instance = axios.create({ baseURL: '/api', timeout: 15000 })
+const DEFAULT_TIMEOUT = 15000
+const instance = axios.create({ baseURL: '/api', timeout: DEFAULT_TIMEOUT })
 
 instance.interceptors.request.use((config) => {
   const token = getToken()
@@ -32,9 +33,16 @@ async function request<T>(
   method: 'get' | 'post' | 'put' | 'delete',
   url: string,
   payload?: unknown,
+  options?: RequestOptions,
 ): Promise<T> {
   try {
-    const resp = await instance.request<Result<T>>({ method, url, data: payload })
+    const resp = await instance.request<Result<T>>({
+      method,
+      url,
+      data: payload,
+      // 默认 15 秒；AI 问数要等两次模型调用，单独放宽（见 RequestOptions 的说明）
+      timeout: options?.timeout ?? DEFAULT_TIMEOUT,
+    })
     const body = resp.data
     if (body.code !== 0) {
       handleError(body.code, body.message)
@@ -55,11 +63,22 @@ async function request<T>(
   }
 }
 
+/**
+ * 单请求覆盖项。
+ *
+ * <p>为什么需要：全局超时是 15 秒，而 AI 问数要等"生成 SQL + 执行 + 生成结论"三次往返
+ * （两次模型调用），十几秒很正常——不单独放宽的话，请求会在 axios 层被判超时，
+ * 而那时后端其实还在跑，用户看到的是"网络异常"而不是"稍等"。
+ */
+export interface RequestOptions {
+  timeout?: number
+}
+
 export const http = {
   get: <T>(url: string, params?: Record<string, unknown>) =>
     request<T>('get', url + toQuery(params)),
-  post: <T>(url: string, data?: unknown) => request<T>('post', url, data),
-  put: <T>(url: string, data?: unknown) => request<T>('put', url, data),
+  post: <T>(url: string, data?: unknown, options?: RequestOptions) => request<T>('post', url, data, options),
+  put: <T>(url: string, data?: unknown, options?: RequestOptions) => request<T>('put', url, data, options),
   // 命名用 del 不用 delete：delete 是保留字，写成对象方法虽然合法，但读起来容易被当成操作符
   del: <T>(url: string) => request<T>('delete', url),
 }
