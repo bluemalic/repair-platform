@@ -36,7 +36,13 @@ import java.lang.annotation.Target;
         // 演示模式的开关**保持默认的 false**：这样测试里 DemoResetJob 根本不会被装配，
         // 后台线程也就不会跑去重置数据。这里只给一个演示口令，供 DemoResetTest 验证
         // "重置后演示账号能登录"——口令为空时登录接口过不了 @NotBlank 校验。
-        "repair.demo.password=Demo@123456"
+        "repair.demo.password=Demo@123456",
+        // AI 的只读账号：给测试一个固定账号名，**账号本身由用例按需创建**（CREATE USER 是 DDL，
+        // 不参与事务回滚，所以不能指望启动引导在测试里替我们建——这里只保证"配置是齐的"，
+        // 让问数链路能走到真正连库那一步。模型那一侧由测试作用域的 TestAiAssistant 顶替，
+        // 所以 CI 既不调模型也不花钱。
+        "AI_DB_USERNAME=test_ai_ci",
+        "AI_DB_PASSWORD=Test@123456"
 })
 @AutoConfigureMockMvc
 @Transactional

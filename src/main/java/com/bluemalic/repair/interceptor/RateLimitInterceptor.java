@@ -49,8 +49,11 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!(handler instanceof HandlerMethod handlerMethod)
-                || handlerMethod.getMethodAnnotation(RateLimit.class) == null) {
+        if (!(handler instanceof HandlerMethod handlerMethod)) {
+            return true;
+        }
+        RateLimit annotated = handlerMethod.getMethodAnnotation(RateLimit.class);
+        if (annotated == null) {
             return true;
         }
         Object loginId;
@@ -65,6 +68,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return true;
         }
 
+        // 阈值按注解上的档位取（认不出的档位回落默认档）；计数键是「用户 + 接口方法」，与档位无关
+        int maxRequests = rule.maxRequestsFor(annotated.key());
         String key = RateLimiter.KEY_PREFIX + loginId + ":" + handlerMethod.getBeanType().getSimpleName()
                 + "." + handlerMethod.getMethod().getName();
         Long count = rateLimiter.increment(key, rule.getWindowSeconds());
@@ -72,10 +77,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             // 拿不到计数就别拦人（Redis 挂了，或管道/事务模式下脚本返回空）
             return true;
         }
-        if (count > rule.getMaxRequests()) {
+        if (count > maxRequests) {
             // 只记键与计数：键里有用户 ID 便于排查，但绝不能记 requestURI——它带着用户这次尝试的报修码
-            log.warn("触发限流 key={} 第 {} 次请求，阈值 {}/{}s",
-                    key, count, rule.getMaxRequests(), rule.getWindowSeconds());
+            log.warn("触发限流 key={} 档位={} 第 {} 次请求，阈值 {}/{}s",
+                    key, annotated.key(), count, maxRequests, rule.getWindowSeconds());
             throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
         }
         return true;

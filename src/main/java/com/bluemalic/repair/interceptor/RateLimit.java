@@ -13,10 +13,19 @@ import java.lang.annotation.Target;
  * 写进注解就变成编译期常量，改一次要重新打包；而且注解上的数字散落在各个 Controller 上，
  * 想回答"这套接口限流多少"得全仓库翻。
  *
- * <p>将来某条接口需要独立阈值时，在这里加一个 {@code key()} 属性、并在 {@code RateLimitRule}
- * 里加对应配置——现在的计数键已经是「用户 + 接口方法」，加维度不会影响已有接口。
+ * <p>注解上只写**档位**（{@link #key()}），具体数值仍然在配置里——这样"哪条接口用哪个档"
+ * 在代码里一眼可见，而"每档多少"仍然可调。
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface RateLimit {
+
+    /**
+     * 阈值档位，留空表示默认档（{@code repair.rate-limit.max-requests}）。
+     *
+     * <p>目前只有 {@code "ai"} 一档：问数每次调用都要花钱，需要比默认档严得多
+     * （{@code repair.ai.rate-limit-max-requests}）。**档位名拼错不会报错、会静默回落到默认档**，
+     * 所以认不出的档位在 {@code RateLimitRule} 里只回默认值，不猜。
+     */
+    String key() default "";
 }

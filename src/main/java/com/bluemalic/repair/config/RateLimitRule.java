@@ -29,17 +29,32 @@ import org.springframework.stereotype.Component;
 @Component
 public class RateLimitRule {
 
+    /** AI 问数这一档的档位名（`@RateLimit(key = "ai")`）。 */
+    public static final String KEY_AI = "ai";
+
     private final int maxRequests;
 
     private final int loginMaxRequests;
 
     private final int windowSeconds;
 
+    private final int aiMaxRequests;
+
     public RateLimitRule(@Value("${repair.rate-limit.max-requests:60}") int maxRequests,
                          @Value("${repair.rate-limit.login-max-requests:10}") int loginMaxRequests,
-                         @Value("${repair.rate-limit.window-seconds:60}") int windowSeconds) {
+                         @Value("${repair.rate-limit.window-seconds:60}") int windowSeconds,
+                         @Value("${repair.ai.rate-limit-max-requests:10}") int aiMaxRequests) {
         this.maxRequests = maxRequests;
         this.loginMaxRequests = loginMaxRequests;
         this.windowSeconds = windowSeconds;
+        this.aiMaxRequests = aiMaxRequests;
+    }
+
+    /**
+     * 按档位取阈值。**认不出的档位回默认档**，不猜也不放宽——注解上的档位名写错了
+     * 就应该退回"普通接口"的待遇，而不是意外拿到一个更松或更严的值。
+     */
+    public int maxRequestsFor(String key) {
+        return KEY_AI.equals(key) ? aiMaxRequests : maxRequests;
     }
 }
