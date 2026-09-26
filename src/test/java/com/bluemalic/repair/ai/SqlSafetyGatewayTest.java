@@ -89,17 +89,66 @@ class SqlSafetyGatewayTest {
     }
 
     /**
-     * WHERE 里的子查询是允许的：它只作为过滤条件，返回的行仍来自外层那几张已被注入的表，
-     * 所以不会泄露别家数据（但子查询里的表名一样要过白名单，见拒绝组）。
+     * JOIN 是跨表查询的**唯一**形态：两张表都在外层 FROM/JOIN 上，各自被注入租户条件。
+     * （子查询整体不允许，见拒绝组的 {@code rejectsSubqueryAnywhere}——那是
+     * "还有多少工单没有评价"这类问题的标准写法，模型很容易写成 {@code NOT IN (SELECT ...)}。）
      */
     @Test
-    void subqueryInWhereIsAllowed() {
+    void joinsGetTenantConditionOnEveryTable() {
         SqlSafetyResult result = gateway.validateAndScope(
-                "SELECT id FROM ticket WHERE building_id IN (SELECT id FROM building WHERE area = '东区')",
+                "SELECT building.name, COUNT(*) FROM ticket "
+                        + "JOIN building ON ticket.building_id = building.id GROUP BY building.name",
                 TENANT);
 
-        assertThat(result.sql()).contains("ticket.tenant_id = 7");
+        assertThat(result.sql()).contains("ticket.tenant_id = 7").contains("building.tenant_id = 7");
         assertThat(result.tables()).containsExactlyInAnyOrder("ticket", "building");
+    }
+
+    /**
+     * <b>LEFT JOIN 的条件必须注到 ON 上，不能注到 WHERE 上</b>——这是评测集发现的第二个坑
+     * （docs/07 记了整条链路）：反连接写法 {@code LEFT JOIN e ON ... WHERE e.id IS NULL} 里，
+     * 如果 {@code e.tenant_id = 7} 被放进 WHERE，"没匹配上"的行（{@code e.*} 全是 NULL）
+     * 会被 {code NULL = 7} 判假而滤掉，LEFT JOIN 悄悄退化成 INNER JOIN。
+     * 实测："还有多少工单没有评价"的答案从 6 变成 0，**而且是安静地错**。
+     */
+    @Test
+    void leftJoinConditionGoesIntoOnClause() {
+        SqlSafetyResult result = gateway.validateAndScope(
+                "SELECT ticket.id FROM ticket LEFT JOIN ticket_evaluation "
+                        + "ON ticket.id = ticket_evaluation.ticket_id WHERE ticket_evaluation.id IS NULL",
+                TENANT);
+
+        // 右表（ticket_evaluation）的条件在 ON 里 —— 落在 WHERE 之前；左表的条件仍在 WHERE 里
+        String sql = compact(result.sql());
+        assertThat(sql).contains("LEFT JOIN ticket_evaluation ON (ticket.id = ticket_evaluation.ticket_id)"
+                + " AND ticket_evaluation.tenant_id = 7");
+        assertThat(sql.indexOf("ticket_evaluation.tenant_id = 7")).isLessThan(sql.indexOf("WHERE"));
+        assertThat(sql.indexOf("ticket.tenant_id = 7")).isGreaterThan(sql.indexOf("WHERE"));
+    }
+
+    /** 原来 ON 里的 OR 也要加括号，否则条件会从"收窄"变成"放宽"。 */
+    @Test
+    void orInsideOnClauseIsParenthesizedSoSemanticsAreKept() {
+        SqlSafetyResult result = gateway.validateAndScope(
+                "SELECT ticket.id FROM ticket LEFT JOIN building "
+                        + "ON ticket.building_id = building.id OR building.id = 1",
+                TENANT);
+
+        assertThat(result.sql()).contains(
+                "ON (ticket.building_id = building.id OR building.id = 1) AND building.tenant_id = 7");
+    }
+
+    /** 逻辑删除列同样要进 ON：它是同一条理由（右表被过滤掉，反连接就失效）。 */
+    @Test
+    void leftJoinAlsoGetsLogicDeleteConditionInOnClause() {
+        SqlSafetyResult result = gatewayWithLogicDelete.validateAndScope(
+                "SELECT ticket.id FROM ticket LEFT JOIN ticket_evaluation "
+                        + "ON ticket.id = ticket_evaluation.ticket_id",
+                TENANT);
+
+        assertThat(result.sql()).contains("ticket_evaluation.tenant_id = 7")
+                .contains("ticket_evaluation.deleted = 0")
+                .contains("ticket.tenant_id = 7");
     }
 
     @Test
@@ -167,10 +216,40 @@ class SqlSafetyGatewayTest {
         assertRejected("SELECT id FROM notification", "表不在可查询范围内");
     }
 
+    /**
+     * 子查询一律拒绝——**这是评测集发现的真实漏洞**（docs/07 记了整条链路）。
+     *
+     * <p>租户条件只注入在外层 FROM/JOIN 的每一张表上，子查询里的表拿不到。所以
+     * {@code SELECT (SELECT COUNT(*) FROM sys_user WHERE tenant_id <> 1) FROM building ...}
+     * 里那个子查询**一个字都不会被改**：后勤管理员问一句就读到了别家学校的用户数（本机实测返回 2）。
+     * {@code WHERE} 里的子查询同样能用 {@code > 0} 这种写法当布尔预言机逐位取数。
+     *
+     * <p>第二种写法是"还有多少工单没有评价"的标准答案，被这条规则挡下后模型会改用
+     * {@code LEFT JOIN ... IS NULL}（提示词里写了），代价是偶尔要重问一次——
+     * 比"安静地多返回别家数据"值得。
+     */
+    @Test
+    void rejectsSubqueryAnywhere() {
+        // 投影里的标量子查询：真正的数据泄露形态
+        assertRejected("SELECT (SELECT COUNT(*) FROM sys_user WHERE tenant_id <> 1) AS x FROM building",
+                "不支持子查询");
+        // WHERE 里的 IN 子查询：过滤条件也不允许（布尔预言机）
+        assertRejected("SELECT id FROM ticket WHERE building_id IN (SELECT id FROM building)",
+                "不支持子查询");
+        // EXISTS
+        assertRejected("SELECT id FROM ticket WHERE EXISTS (SELECT 1 FROM building)", "不支持子查询");
+        // 右表被当成数据源（本来就被 FROM 那条挡下，这里确认它在子查询规则下也过不去）
+        assertRejected("SELECT t.id FROM ticket t JOIN (SELECT id FROM building) b ON t.building_id = b.id",
+                "不支持子查询");
+    }
+
+    /**
+     * 子查询里的表**连白名单都到不了**：子查询规则在更前面，先把它整条拒掉。
+     * 白名单那道仍然在（挡住直接写 {@code FROM tenant}），两道闸门是叠加的。
+     */
     @Test
     void rejectsTableHiddenInSubquery() {
-        // 子查询里的表同样要过白名单：否则可以借子查询读任意表
-        assertRejected("SELECT id FROM ticket WHERE building_id IN (SELECT id FROM tenant)", "表不在可查询范围内");
+        assertRejected("SELECT id FROM ticket WHERE building_id IN (SELECT id FROM tenant)", "不支持子查询");
     }
 
     @Test
@@ -215,14 +294,9 @@ class SqlSafetyGatewayTest {
 
     @Test
     void rejectsDerivedTableInFrom() {
-        // 数据源藏在嵌套里就没法逐表注入租户条件
-        assertRejected("SELECT * FROM (SELECT id FROM ticket) x", "数据源只能是白名单里的表");
-    }
-
-    @Test
-    void rejectsJoinOnSubquery() {
-        assertRejected("SELECT * FROM ticket t JOIN (SELECT id FROM building) b ON t.building_id = b.id",
-                "JOIN 的对象只能是白名单里的表");
+        // 数据源藏在嵌套里就没法逐表注入租户条件。
+        // 现在先被子查询规则挡下（更早、更宽），FROM 那道仍然在（见 outerTables），两道是叠加的
+        assertRejected("SELECT * FROM (SELECT id FROM ticket) x", "不支持子查询");
     }
 
     @Test
@@ -264,6 +338,15 @@ class SqlSafetyGatewayTest {
         // 实测：jsqlparser 5.2 解析不了 INTO OUTFILE，所以走的是"无法解析"这条路径；
         // 网关里另有一道 getIntoTables 检查留着（不依赖解析器的这个行为），只是当前不可达
         assertRejected("SELECT id FROM ticket INTO OUTFILE '/tmp/x'", "无法解析");
+    }
+
+    /**
+     * 断言"注入的 SQL 长什么样"时把空白压平：jsqlparser 的 {@code toString()} 会自己决定
+     * 换行与空格（例如 JOIN 前后换行），锁死空白的断言会在升级解析器时莫名其妙地红，
+     * 而它想表达的其实是"条件在不在 ON 里"。
+     */
+    private String compact(String sql) {
+        return sql.replaceAll("\\s+", " ").trim();
     }
 
     private void assertRejected(String sql, String messagePart) {

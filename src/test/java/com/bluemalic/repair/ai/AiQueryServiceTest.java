@@ -4,9 +4,11 @@ import com.bluemalic.repair.IntegrationTest;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.config.AiProperties;
+import com.bluemalic.repair.service.AiQueryProgress;
 import com.bluemalic.repair.service.AiQueryService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.impl.AiQueryServiceImpl;
+import com.bluemalic.repair.vo.AiChartVO;
 import com.bluemalic.repair.vo.AiQueryVO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,8 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -173,7 +177,67 @@ class AiQueryServiceTest {
         assertThat(vo.getConclusion()).isEqualTo("共 1 行结果。");
     }
 
+    // ==================== 流式：中间结果分阶段回调 ====================
+
+    @Test
+    void streamsSqlThenDataBeforeTheConclusion() {
+        assistant.plan = new QueryPlan("SELECT name AS 楼栋 FROM building", "bar", "楼栋", null);
+        assistant.conclusion = "目前共有 5 栋。";
+        RecordingProgress progress = new RecordingProgress();
+
+        AiQueryVO vo = service.askStreaming("有哪些楼", TENANT, progress);
+
+        // 两段的先后由编排保证：一定是 sql 先、data 后（前端照着这个顺序渲染）
+        assertThat(progress.stages).containsExactly("sql", "data");
+        // 推出去的是**注入过租户条件、真正执行**的那条 SQL，不是模型的原话
+        assertThat(progress.sql).contains("building.tenant_id = " + TENANT);
+        assertThat(progress.chartType).isEqualTo("bar");
+        assertThat(progress.columns).containsExactly("楼栋");
+        assertThat(progress.rows).isNotEmpty();
+        // 最后返回的还是完整的 VO：流式与非流式的差别只在"中间结果推不推"，不是两套逻辑
+        assertThat(vo.getConclusion()).isEqualTo("目前共有 5 栋。");
+        assertThat(vo.getSql()).isEqualTo(progress.sql);
+    }
+
+    @Test
+    void streamsNothingWhenTheGatewayRejectsTheSql() {
+        assistant.plan = new QueryPlan("DELETE FROM ticket", "none", null, null);
+        RecordingProgress progress = new RecordingProgress();
+
+        assertThatThrownBy(() -> service.askStreaming("把工单都删了", TENANT, progress))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.AI_SQL_REJECTED);
+
+        // 没过闸门的 SQL 一个字都不该出去：第一段回调的前提是"网关放行"
+        assertThat(progress.stages).isEmpty();
+    }
+
     // ==================== 工具 ====================
+
+    /** 记录分阶段回调（断言"推出去的到底是哪条 SQL、哪几列"）。 */
+    private static class RecordingProgress implements AiQueryProgress {
+
+        private final List<String> stages = new ArrayList<>();
+        private String sql;
+        private String chartType;
+        private List<String> columns;
+        private List<List<Object>> rows;
+
+        @Override
+        public void sqlReady(String sql, AiChartVO chart) {
+            stages.add("sql");
+            this.sql = sql;
+            this.chartType = chart.getType();
+        }
+
+        @Override
+        public void dataReady(AiQueryResult data) {
+            stages.add("data");
+            this.columns = data.columns();
+            this.rows = data.rows();
+        }
+    }
 
     /** 租户从登录态取；这个用例不经过 HTTP，所以给一个固定值（值本身不影响被测逻辑）。 */
     private CurrentTenantService fixedTenant() {

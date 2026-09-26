@@ -1,6 +1,7 @@
 package com.bluemalic.repair;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
 import com.bluemalic.repair.entity.Tenant;
@@ -96,8 +97,13 @@ class TenantIsolationTest {
         String adminA = login("gdou", "test-ti-admin-a", 3);
         String adminB = login("test-tenant-b", "test-ti-admin-b", 3);
 
-        assertThat(listIds(adminA, "/api/admin/tickets")).contains(ticketA).doesNotContain(ticketB);
-        assertThat(listIds(adminB, "/api/admin/tickets")).contains(ticketB).doesNotContain(ticketA);
+        // ⚠️ **必须显式放大 pageSize**：这两条断言要证明的是"租户隔离"，不是分页。
+        // 用默认档（10 条）时它会跟着**库里有多少工单**变红——本机库里有十来张演示工单，
+        // 而本用例造的工单提交时间是 2020 年（排在最后），于是它掉出首页 → 本地红、CI 绿。
+        // 这类"本地红 CI 绿"的假象比真失败更费时间，所以这里把话说死：把这一页要满。
+        String url = "/api/admin/tickets?pageNum=1&pageSize=" + Paging.MAX_PAGE_SIZE;
+        assertThat(listIds(adminA, url)).contains(ticketA).doesNotContain(ticketB);
+        assertThat(listIds(adminB, url)).contains(ticketB).doesNotContain(ticketA);
 
         // 详情：跨租户的工单对外表现为"不存在"，不泄露"这条单存在但属于别人"
         getJson(adminA, "/api/admin/tickets/" + ticketB)
