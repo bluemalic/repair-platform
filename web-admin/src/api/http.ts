@@ -14,8 +14,14 @@ instance.interceptors.request.use((config) => {
   return config
 })
 
-/** 401（未登录/过期）与 403（无权限）都由这里统一处理，业务层不用各写一遍。 */
-function handleError(code: number, message: string): void {
+/**
+ * 401（未登录/过期）与 403（无权限）都由这里统一处理，业务层不用各写一遍。
+ *
+ * <p>导出是因为**流式接口绕开了 axios**（见 `api/ai.ts`：`EventSource` 带不了 Authorization 头，
+ * 所以用 fetch 手动读流），但"错误长什么样"必须与其它接口完全一致——尤其是 10002 要回登录页
+ * 这一条，两套提示会让用户以为出了两种问题。
+ */
+export function handleError(code: number, message: string): void {
   if (code === 10002) {
     ElMessage.warning('登录已过期，请重新登录')
     // 与 LayoutView 的 goLogin 同一条理由：平台运营账号要**带着登录模式**回登录页。

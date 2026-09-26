@@ -248,3 +248,16 @@ export interface AiQueryResult {
   /** 总耗时（毫秒），含两次模型调用 */
   elapsedMs: number
 }
+
+/**
+ * 流式问数的三段载荷（`GET /api/ai/query/stream` 的 SSE 帧，见 docs/03 §5.6）。
+ *
+ * 字段与 `AiQueryResult` **同名同形**——流式只是把它拆成三帧按到达顺序送来：
+ * sql（SQL + 图表建议）→ data（数据）→ done（结论 + 耗时）。所以这里用 `Omit` 复用定义，
+ * 而不是再抄一遍字段名。
+ */
+export type AiSqlFrame = Pick<AiQueryResult, 'sql' | 'chart'>
+
+export type AiDataFrame = Pick<AiQueryResult, 'columns' | 'rows' | 'rowLimited'>
+
+export type AiDoneFrame = Pick<AiQueryResult, 'conclusion' | 'elapsedMs'>
