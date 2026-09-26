@@ -50,6 +50,7 @@ public class LangChainAiAssistant implements AiAssistant {
 
     @Override
     public QueryPlan plan(String question) {
+        requireModelConfigured();
         String reply = chat(aiProperties.getModelName(), prompts.systemPrompt(), prompts.userMessage(question),
                 "生成 SQL");
         QueryPlan plan = parsePlan(reply);
@@ -63,6 +64,7 @@ public class LangChainAiAssistant implements AiAssistant {
 
     @Override
     public String summarize(String question, AiQueryResult result) {
+        requireModelConfigured();
         AiQueryResult trimmed = result.rows().size() > MAX_ROWS_FOR_CONCLUSION
                 ? new AiQueryResult(result.columns(),
                         List.copyOf(result.rows().subList(0, MAX_ROWS_FOR_CONCLUSION)), true)
@@ -71,6 +73,18 @@ public class LangChainAiAssistant implements AiAssistant {
         String reply = chat(aiProperties.getModelName(), prompts.conclusionSystemPrompt(),
                 prompts.conclusionUserMessage(question, rowsJson, trimmed.rowLimited()), "生成结论");
         return reply.trim();
+    }
+
+    /**
+     * 没配 Key 就别往下走了。
+     *
+     * <p>放在最前面是有意的：拼提示词要先读数据库里的表结构，而"没配 Key"这个原因更靠前、
+     * 也更好修——先报它，用户才不会被一个数据库错误引到错误的方向上。
+     */
+    private void requireModelConfigured() {
+        if (!aiProperties.modelConfigured()) {
+            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 问数未启用（服务器上没配 AI_MODEL_API_KEY）");
+        }
     }
 
     private String chat(String modelName, String systemPrompt, String userMessage, String what) {
