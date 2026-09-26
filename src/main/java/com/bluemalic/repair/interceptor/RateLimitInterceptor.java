@@ -68,10 +68,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // 阈值按注解上的档位取（认不出的档位回落默认档）；计数键是「用户 + 接口方法」，与档位无关
+        // 阈值按注解上的档位取（认不出的档位回落默认档）
         int maxRequests = rule.maxRequestsFor(annotated.key());
-        String key = RateLimiter.KEY_PREFIX + loginId + ":" + handlerMethod.getBeanType().getSimpleName()
-                + "." + handlerMethod.getMethod().getName();
+        // 计数键：有档位名的**按档位**计（AI 问数的 GET 流式与 POST 是同一笔开销，
+        // 各自一份计数等于把成本上限翻倍）；没有档位名的按「用户 + 接口方法」——
+        // 不取请求路径是类注释第 1 条讲的那个坑。
+        String counted = annotated.key().isEmpty()
+                ? handlerMethod.getBeanType().getSimpleName() + "." + handlerMethod.getMethod().getName()
+                : "tier:" + annotated.key();
+        String key = RateLimiter.KEY_PREFIX + loginId + ":" + counted;
         Long count = rateLimiter.increment(key, rule.getWindowSeconds());
         if (count == null) {
             // 拿不到计数就别拦人（Redis 挂了，或管道/事务模式下脚本返回空）
