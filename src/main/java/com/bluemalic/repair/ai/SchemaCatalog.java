@@ -31,6 +31,18 @@ public class SchemaCatalog implements ColumnLookup {
 
     private final AiQueryExecutor executor;
 
+    /**
+     * **不进提示词**的列。
+     *
+     * <p>{@code deleted} 由安全网关注入，模型自己写一遍就会与注入的条件重复（实测模型确实会写，
+     * 因为表结构里给了这一列）。重复无害但让返回的 SQL 显得啰嗦、也让人怀疑哪里出了问题。
+     *
+     * <p>⚠️ **只在描述里隐藏，列清单里必须留着**：安全网关靠 {@code has(table, "deleted")}
+     * 决定要不要注入那个条件（见 {@code SqlSafetyGateway}）。从列清单里也去掉的话，
+     * 注入会静默消失，已删除的数据就会重新被算进来。
+     */
+    private static final Set<String> HIDDEN_FROM_PROMPT = Set.of("deleted");
+
     private volatile Entry cached;
 
     /**
@@ -77,9 +89,13 @@ public class SchemaCatalog implements ColumnLookup {
                 continue;
             }
             commentsByTable.putIfAbsent(table, tableComment);
-            partsByTable.computeIfAbsent(table, key -> new ArrayList<>())
-                    .add(columnComment.isBlank() ? column : column + " " + columnComment);
+            // 列清单：全部留着（含 deleted），网关问的就是它
             columnsByTable.computeIfAbsent(table, key -> new java.util.HashSet<>()).add(column);
+            // 描述：隐藏"由系统处理"的列（见 HIDDEN_FROM_PROMPT）
+            if (!HIDDEN_FROM_PROMPT.contains(column)) {
+                partsByTable.computeIfAbsent(table, key -> new ArrayList<>())
+                        .add(columnComment.isBlank() ? column : column + " " + columnComment);
+            }
         }
 
         String description = partsByTable.entrySet().stream()
