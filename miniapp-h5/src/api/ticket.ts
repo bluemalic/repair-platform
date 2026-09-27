@@ -102,3 +102,17 @@ export function evaluateTicket(id: string, score: number, content?: string) {
     data: { score, content },
   })
 }
+
+/**
+ * 验收不通过：打回重做（40 → 30），`docs/01` §4.1。
+ *
+ * 与「驳回」不是一回事：驳回清空派单、退回调度池；这里是**还是这位师傅返工**（保留 worker_id）。
+ * 理由必填——不写理由，师傅只能猜哪里没做好。
+ */
+export function reworkTicket(id: string, reason: string) {
+  return request<void>({
+    url: `/student/tickets/${id}/rework`,
+    method: 'POST',
+    data: { reason },
+  })
+}
