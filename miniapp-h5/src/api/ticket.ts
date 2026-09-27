@@ -10,10 +10,24 @@ export function pageMyTickets(pageNum: number, pageSize = 10) {
 }
 
 /** 维修工：我的任务（可见范围按"负责楼栋"注入，与接单列表是同一份数据） */
-export function pageMyTasks(pageNum: number, pageSize = 10) {
+/**
+ * 维修工的任务列表。
+ *
+ * `scope` 是两个**业务视图**（`docs/01` §4.2）：`mine`（默认）只给派给我的单、
+ * 默认状态为进行中；`building` 给我负责楼栋的全部工单（含终态与别人负责的）。
+ * 真正的可见范围由后端的数据权限拦截器保证，前端传什么都越不过它。
+ *
+ * `status` 显式传时会覆盖视图的默认状态过滤（用来看历史）。
+ */
+export function pageMyTasks(
+  pageNum: number,
+  pageSize = 10,
+  scope: 'mine' | 'building' = 'mine',
+  status?: number,
+) {
   return request<PageResult<TicketVO>>({
     url: '/worker/tickets',
-    data: { pageNum, pageSize },
+    data: { pageNum, pageSize, scope, status },
   })
 }
 

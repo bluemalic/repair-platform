@@ -38,6 +38,8 @@ export interface TicketVO {
   status: number
   /** 1普通 2紧急 3特急 */
   urgency: number
+  /** 后端一直返回它（`TicketVO.buildingId`）：派单时要用它判断"选中的师傅负不负责这栋楼" */
+  buildingId: string
   buildingName: string
   room: string
   categoryName: string

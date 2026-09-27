@@ -1,6 +1,7 @@
 package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -9,6 +10,7 @@ import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketArriveDTO;
@@ -23,6 +25,7 @@ import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketCategory;
 import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
+import com.bluemalic.repair.entity.WorkerBuilding;
 import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.RepairCodeMapper;
@@ -31,6 +34,7 @@ import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.NotificationService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.service.TimeoutService;
@@ -77,6 +81,13 @@ public class TicketServiceImpl implements TicketService {
     /** ticket_log.operator_id 用 0 表示"系统"（超时调度等无登录态动作），与真人操作区分。 */
     private static final long SYSTEM_OPERATOR = 0L;
 
+    /**
+     * 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待验收）。
+     * 终态不进默认视图——工作台回答"我现在该干什么"，历史去「本楼栋」或显式筛状态看（docs/01 §4.2）。
+     */
+    private static final List<Integer> ACTIVE_STATUSES = List.of(
+            TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode(), TicketStatus.TO_VERIFY.getCode());
+
     /** 超时提醒类通知（不是状态跃迁，所以不进 TRANSITION_NOTICE 表）：类型与标题放一处。 */
     private static final String NOTICE_ACCEPT_TIMEOUT = "TICKET_ACCEPT_TIMEOUT";
     private static final String TITLE_ACCEPT_TIMEOUT = "工单超时未接单";
@@ -90,6 +101,7 @@ public class TicketServiceImpl implements TicketService {
     private final BuildingMapper buildingMapper;
     private final RepairCodeMapper repairCodeMapper;
     private final SysUserMapper sysUserMapper;
+    private final WorkerBuildingMapper workerBuildingMapper;
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
@@ -172,6 +184,49 @@ public class TicketServiceImpl implements TicketService {
                         .eq(buildingId != null, Ticket::getBuildingId, buildingId)
                         .eq(categoryId != null, Ticket::getCategoryId, categoryId)
                         .orderByDesc(Ticket::getSubmitTime));
+
+        Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+
+        Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream()
+                .map(t -> TicketConverter.toVO(t, buildings, categories)).toList());
+        return PageResult.of(voPage);
+    }
+
+    @Override
+    public PageResult<TicketVO> pageWorkerTasks(long pageNum, long pageSize, Integer status, WorkerTaskScope scope) {
+        long workerId = StpUtil.getLoginIdAsLong();
+
+        // 「本楼栋」要先知道"我的楼栋";一个都不负责时这个视图就是空的，**不必查库**
+        // （也不能靠 `in(空集合)`——那会退化成"不加条件"，反而把全部单放出来）
+        List<Long> myBuildings = List.of();
+        if (scope == WorkerTaskScope.BUILDING) {
+            myBuildings = workerBuildingMapper.selectList(
+                            Wrappers.<WorkerBuilding>lambdaQuery().eq(WorkerBuilding::getWorkerId, workerId))
+                    .stream().map(WorkerBuilding::getBuildingId).distinct().toList();
+            if (myBuildings.isEmpty()) {
+                return PageResult.of(new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize), 0));
+            }
+        }
+
+        // 可见范围仍由拦截器注入（负责楼栋 或 派给我的单）；下面的条件是**这个视图要看什么**，
+        // 属于业务筛选不属于权限：mine → worker_id = 我（含跨楼栋强制派单的单），building → 我负责的楼栋
+        LambdaQueryWrapper<Ticket> query = Wrappers.<Ticket>lambdaQuery()
+                .eq(scope == WorkerTaskScope.MINE, Ticket::getWorkerId, workerId)
+                .in(scope == WorkerTaskScope.BUILDING, Ticket::getBuildingId, myBuildings)
+                // 紧急度高的置顶；同一档内先来的在前（先提交/先派单的先做）——docs/01 §4.2
+                .orderByDesc(Ticket::getUrgency)
+                .orderByAsc(Ticket::getSubmitTime);
+        if (status != null) {
+            query.eq(Ticket::getStatus, status);
+        } else if (scope == WorkerTaskScope.MINE) {
+            // 「我的任务」默认只给进行中：待接单 / 处理中 / 待验收。
+            // 终态（已完成/已关闭/已驳回/已撤单）要看就显式传 status，或者去「本楼栋」视图看
+            query.in(Ticket::getStatus, ACTIVE_STATUSES);
+        }
+
+        Page<Ticket> page = ticketMapper.selectPage(new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)), query);
 
         Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
         Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
@@ -395,6 +450,10 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.PARAM_INVALID, "维修工不存在或已停用");
         }
 
+        // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
+        // 为的是不让"派错楼栋"变成一张没人能操作的单（被派的人按『派给我的单』看得到、能处理）
+        String crossBuilding = crossBuildingTrace(ticket.getBuildingId(), worker.getId());
+
         conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
@@ -402,11 +461,29 @@ public class TicketServiceImpl implements TicketService {
                     entity.setWorkerId(dto.getWorkerId());
                     entity.setDispatchType(1);
                     entity.setDispatchTime(LocalDateTime.now());
-                });
+                },
+                crossBuilding);
         notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
         timeoutService.registerAccept(id);
-        log.info("派单 ticketId={} workerId={} operator={}", id, dto.getWorkerId(), adminId);
+        log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
+                crossBuilding == null ? "" : crossBuilding);
+    }
+
+    /**
+     * 跨楼栋强制派单的留痕文案；师傅负责这栋楼时返回 {@code null}（正常的派单不写多余备注）。
+     *
+     * <p>它进 `ticket_log.remark`，所以在管理端的工单时间线上看得见"这一单是被谁强行跨楼栋派下来的"。
+     */
+    private String crossBuildingTrace(long buildingId, long workerId) {
+        boolean covered = workerBuildingMapper.selectCount(Wrappers.<WorkerBuilding>lambdaQuery()
+                .eq(WorkerBuilding::getWorkerId, workerId)
+                .eq(WorkerBuilding::getBuildingId, buildingId)) > 0;
+        if (covered) {
+            return null;
+        }
+        log.warn("跨楼栋强制派单 buildingId={} workerId={}（该师傅不负责这栋楼）", buildingId, workerId);
+        return "跨楼栋强制派单（该师傅不负责本单楼栋）";
     }
 
     @Override
@@ -525,11 +602,27 @@ public class TicketServiceImpl implements TicketService {
      * 条件更新：SET 来自 entitySetter 对实体的赋值（null 字段被 MP 跳过），
      * WHERE 来自 wrapper（含当前状态）。rows = 0 → 状态已被并发改动 → 20002。
      * 全部状态流转都从这里落库，顺带写 ticket_log。
+     *
+     * <p>不需要额外备注的流转用这个重载：日志备注取 {@code entity.rejectReason}（目前只有驳回会设它）。
      */
     private void conditionalUpdate(long id, int toStatus, TicketAction action, long operatorId,
                                    Long tenantId, int fromStatus,
                                    Consumer<LambdaUpdateWrapper<Ticket>> where,
                                    Consumer<Ticket> entitySetter) {
+        conditionalUpdate(id, toStatus, action, operatorId, tenantId, fromStatus, where, entitySetter, null);
+    }
+
+    /**
+     * 带显式日志备注的重载。
+     *
+     * @param logRemark 写进 {@code ticket_log.remark} 的说明（如"跨楼栋强制派单"）；为 null 时按
+     *                  {@code entity.rejectReason} 兜底——这样驳回那条路径不用改，也不会因为
+     *                  "备注从实体上取"而对别的动作产生副作用
+     */
+    private void conditionalUpdate(long id, int toStatus, TicketAction action, long operatorId,
+                                   Long tenantId, int fromStatus,
+                                   Consumer<LambdaUpdateWrapper<Ticket>> where,
+                                   Consumer<Ticket> entitySetter, String logRemark) {
         Ticket entity = new Ticket();
         entity.setStatus(toStatus);
         entitySetter.accept(entity);
@@ -540,7 +633,8 @@ public class TicketServiceImpl implements TicketService {
         if (rows == 0) {
             throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED);
         }
-        writeLog(tenantId, id, fromStatus, toStatus, action, operatorId, entity.getRejectReason());
+        writeLog(tenantId, id, fromStatus, toStatus, action, operatorId,
+                logRemark != null ? logRemark : entity.getRejectReason());
     }
 
     private void writeLog(Long tenantId, long ticketId, Integer fromStatus, int toStatus,

@@ -17,6 +17,22 @@ const STATUS: Record<number, { label: string; color: string }> = {
   80: { label: '已驳回', color: '#f56c6c' },
 }
 
+/**
+ * 两个视图（`docs/01` §4.2）：**我的任务**回答"我现在该干什么"，只给派给我的单、默认进行中；
+ * **本楼栋**回答"这栋楼在修什么"，含终态与别人负责的。可见范围由后端保证，这里只是切换筛选。
+ */
+const SCOPES = [
+  { key: 'mine' as const, label: '我的任务', empty: '暂时没有派给你的工单', tip: '派单后会出现在这里' },
+  { key: 'building' as const, label: '本楼栋', empty: '你负责的楼栋里还没有工单', tip: '负责楼栋由后勤分配' },
+]
+const scope = ref<(typeof SCOPES)[number]>(SCOPES[0])
+
+/** 紧急度字典：与后端 urgency 1/2/3 对应。普通不显示角标，免得每张卡片都在喊。 */
+const URGENCY: Record<number, { label: string; color: string }> = {
+  2: { label: '紧急', color: '#e6a23c' },
+  3: { label: '特急', color: '#f56c6c' },
+}
+
 const rows = ref<TicketVO[]>([])
 const pageNum = ref(1)
 const loading = ref(false)
@@ -36,7 +52,7 @@ async function load(reset = false) {
   }
   loading.value = true
   try {
-    const page = await pageMyTasks(reset ? 1 : pageNum.value)
+    const page = await pageMyTasks(reset ? 1 : pageNum.value, 10, scope.value.key)
     rows.value = reset ? page.list : [...rows.value, ...page.list]
     pageNum.value = page.pageNum + 1
     hasMore.value = page.pageNum < page.pages
@@ -48,6 +64,18 @@ async function load(reset = false) {
 }
 
 onShow(() => load(true))
+
+/** 切换视图：**必须重置分页**，否则会把上一个视图的第二页接在新列表后面。 */
+function switchScope(next: (typeof SCOPES)[number]) {
+  if (next.key === scope.value.key) {
+    return
+  }
+  scope.value = next
+  rows.value = []
+  pageNum.value = 1
+  hasMore.value = true
+  load(true)
+}
 
 onPullDownRefresh(async () => {
   await load(true)
@@ -80,14 +108,31 @@ function openDetail(row: TicketVO) {
       </view>
     </view>
 
+    <view class="tabs">
+      <text
+        v-for="item in SCOPES"
+        :key="item.key"
+        class="tab"
+        :class="{ active: item.key === scope.key }"
+        @click="switchScope(item)"
+      >{{ item.label }}</text>
+    </view>
+
     <view v-if="rows.length === 0 && !loading" class="empty">
-      <text>暂时没有派给你的工单</text>
-      <text class="empty-tip">这里只显示你负责楼栋的工单；有派单后会出现在这里</text>
+      <text>{{ scope.empty }}</text>
+      <text class="empty-tip">{{ scope.tip }}</text>
     </view>
 
     <view v-for="row in rows" :key="row.id" class="card" @click="() => openDetail(row)">
       <view class="card-head">
-        <text class="position">{{ row.buildingName }} {{ row.room }}</text>
+        <view class="position-line">
+          <text class="position">{{ row.buildingName }} {{ row.room }}</text>
+          <text
+            v-if="URGENCY[row.urgency]"
+            class="urgency"
+            :style="{ color: URGENCY[row.urgency].color, borderColor: URGENCY[row.urgency].color }"
+          >{{ URGENCY[row.urgency].label }}</text>
+        </view>
         <text class="status" :style="{ color: STATUS[row.status]?.color }">
           {{ STATUS[row.status]?.label ?? row.status }}
         </text>
@@ -110,6 +155,35 @@ function openDetail(row: TicketVO) {
 </template>
 
 <style scoped>
+.tabs {
+  display: flex;
+  gap: 32rpx;
+  margin-bottom: 16rpx;
+  padding: 0 8rpx;
+}
+.tab {
+  padding: 8rpx 0;
+  font-size: 30rpx;
+  color: #909399;
+  border-bottom: 4rpx solid transparent;
+}
+.tab.active {
+  color: #2c6cf6;
+  font-weight: 600;
+  border-bottom-color: #2c6cf6;
+}
+.position-line {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.urgency {
+  padding: 0 10rpx;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  border: 2rpx solid;
+  border-radius: 6rpx;
+}
 .page {
   min-height: 100vh;
   padding: 24rpx;
