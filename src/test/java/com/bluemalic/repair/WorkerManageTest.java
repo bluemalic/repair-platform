@@ -236,8 +236,15 @@ class WorkerManageTest {
     }
 
     /** 维修工"我的派单"里的工单 ID 列表。可见范围由数据权限拦截器按负责楼栋注入。 */
+    /**
+     * 维修工看得到的工单。
+     *
+     * 用 `scope=building`（「本楼栋」视图）而不是默认的「我的任务」：本用例验证的是**负责楼栋**这条
+     * 数据权限依据，而默认视图是业务筛选（只给派给我的、只看进行中），待派单的工单本来就不在里面。
+     */
     private List<String> ticketIds(String workerToken) throws Exception {
-        JsonNode list = getJson(workerToken, "/api/worker/tickets").path("data").path("list");
+        JsonNode list = getJson(workerToken, "/api/worker/tickets?scope=building&pageSize=100")
+                .path("data").path("list");
         return StreamSupport.stream(list.spliterator(), false)
                 .map(node -> node.path("id").asText())
                 .toList();

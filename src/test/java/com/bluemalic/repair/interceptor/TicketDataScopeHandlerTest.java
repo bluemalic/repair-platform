@@ -45,16 +45,30 @@ class TicketDataScopeHandlerTest {
         assertThat(handler.buildScopedExpression(ticketTable(), 3L, TENANT, List.of("STUDENT"), List.of()).toString())
                 .isEqualTo("ticket.tenant_id = 1 AND ticket.student_id = 3");
 
-        // 维修工：租户 + 负责楼栋；带别名 JOIN 时列限定到别名
+        // 维修工：租户 + （负责楼栋 **或** 派给我的单）；带别名 JOIN 时列限定到别名
         assertThat(handler.buildScopedExpression(ticketAliased("t"), 2L, TENANT, List.of("WORKER"), List.of(1L, 3L))
                 .toString())
-                .isEqualTo("t.tenant_id = 1 AND t.building_id IN (1, 3)");
+                .isEqualTo("t.tenant_id = 1 AND (t.building_id IN (1, 3) OR t.worker_id = 2)");
+    }
+
+    /**
+     * **这个括号是有分量的**：不包住 OR 的话，拼上租户条件会渲染成
+     * {@code 租户 AND 楼栋 OR 派给我}——按优先级读成 {@code (租户 AND 楼栋) OR 派给我}，
+     * 后面那个分支把租户条件整个绕过去了。所以断言里连括号一起钉住。
+     */
+    @Test
+    void workerScopeIsParenthesizedSoTenantCannotBeBypassed() {
+        String sql = handler.buildScopedExpression(ticketTable(), 2L, TENANT, List.of("WORKER"), List.of(9L))
+                .toString();
+        assertThat(sql).isEqualTo("ticket.tenant_id = 1 AND (ticket.building_id IN (9) OR ticket.worker_id = 2)");
+        assertThat(sql).doesNotContain("AND ticket.building_id IN (9) OR");
     }
 
     @Test
-    void workerWithoutBuildingsSeesNothingTenantStillApplied() {
+    void workerWithoutBuildingsSeesOnlyTicketsAssignedToHim() {
+        // 一个楼栋都不负责的师傅：左边恒假，仍然能看到"派给我的单"（跨楼栋强制派单的那类）
         assertThat(handler.buildScopedExpression(ticketTable(), 2L, TENANT, List.of("WORKER"), List.of()).toString())
-                .isEqualTo("ticket.tenant_id = 1 AND 1 = 0");
+                .isEqualTo("ticket.tenant_id = 1 AND (1 = 0 OR ticket.worker_id = 2)");
     }
 
     @Test
