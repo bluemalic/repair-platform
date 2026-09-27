@@ -10,7 +10,9 @@ import com.bluemalic.repair.service.CurrentTenantService;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
@@ -28,7 +30,8 @@ import java.util.List;
  * <p><b>第一层：租户</b>（ADR-008）——所有角色都受本租户约束，后勤也不再跨租户全可见：
  * <ul>
  *   <li>后勤管理（ADMIN）→ 本租户内不限制</li>
- *   <li>维修工（WORKER）→ 本租户内 building_id IN (worker_building 里他负责的楼栋)</li>
+ *   <li>维修工（WORKER）→ 本租户内 {@code building_id IN (他负责的楼栋) OR worker_id = 他}——
+ *       后一半是跨楼栋强制派单的单（见 {@link #buildScopeExpression} 的说明）</li>
  *   <li>学生（默认）→ 本租户内 student_id = 当前用户</li>
  * </ul>
  *
@@ -113,25 +116,43 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
     /**
      * 角色维度的条件（不含租户）。ADMIN 返回 null —— 表示"角色维度不限制"，
      * 是否还有租户条件由 {@link #buildScopedExpression} 决定。
+     *
+     * <p><b>维修工这一条是"或"，不是"只按楼栋"</b>：{@code building_id IN (负责楼栋) OR worker_id = 我}。
+     * 后一半是给**跨楼栋强制派单**（后勤临时抽调，见 `docs/01` §4.2）留的：可见范围必须与操作权一致，
+     * 否则"能派给他、他列表里却看不到"，这张单就成了没人能操作的孤儿。
+     * OR 必须加括号（AND 优先级更高），否则拼上租户条件会变成 {@code 租户 AND 楼栋 OR 派给我}——
+     * 后一个分支把租户条件绕过去了。测试里有一条专门盯这个括号。
      */
     Expression buildScopeExpression(Table table, long userId, List<String> roles, List<Long> buildingIds) {
         if (roles.contains("ADMIN")) {
             return null;
         }
         if (roles.contains("WORKER")) {
-            if (buildingIds.isEmpty()) {
-                // 不负责任何楼栋的维修工：一条也看不到（1=0 恒假条件）
-                return parse("1 = 0");
-            }
-            InExpression in = new InExpression();
-            in.setLeftExpression(new Column(qualified(table, "building_id")));
-            // jsqlparser 5.x：IN 的右侧必须用带括号的列表，裸 ExpressionList 会渲染成 "IN 1"
-            in.setRightExpression(new ParenthesedExpressionList<>(
-                    buildingIds.stream().map(LongValue::new).toList()));
-            return in;
+            // 一个楼栋都不负责的师傅：左边恒假，整体等价于"只看派给我的单"（不再特判成 1 = 0）
+            Expression byBuilding = buildingIds.isEmpty() ? parse("1 = 0") : inBuildings(table, buildingIds);
+            return parenthesis(new OrExpression(byBuilding, equalsColumn(table, "worker_id", userId)));
         }
         // 学生（以及任何未配置特殊范围的角色）
         return equalsColumn(table, "student_id", userId);
+    }
+
+    private Expression inBuildings(Table table, List<Long> buildingIds) {
+        InExpression in = new InExpression();
+        in.setLeftExpression(new Column(qualified(table, "building_id")));
+        // jsqlparser 5.x：IN 的右侧必须用带括号的列表，裸 ExpressionList 会渲染成 "IN 1"
+        in.setRightExpression(new ParenthesedExpressionList<>(
+                buildingIds.stream().map(LongValue::new).toList()));
+        return in;
+    }
+
+    /**
+     * 包一层括号。jsqlparser 5.x 的 {@code Parenthesis} 没有"接收表达式"的构造器
+     * （{@code withExpression} 是"替换第 0 个元素"，空列表上会 IndexOutOfBounds），所以先建空括号再 add。
+     */
+    private Expression parenthesis(Expression expression) {
+        Parenthesis parenthesis = new Parenthesis();
+        parenthesis.add(expression);
+        return parenthesis;
     }
 
     private Expression tenantCondition(Table table, long tenantId) {

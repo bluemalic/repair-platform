@@ -2,6 +2,7 @@ package com.bluemalic.repair.controller.worker;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.bluemalic.repair.common.Result;
+import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
@@ -24,7 +25,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 维修工端工单接口。可见范围 = 派给自己的 / 自己负责楼栋的（数据权限拦截器保证）。
+ * 维修工端工单接口。
+ *
+ * <p><b>可见范围</b>＝「我负责楼栋的工单」**或**「派给我的工单」（后者含后勤跨楼栋的紧急抽调），
+ * 由数据权限拦截器注入；列表上的 {@code scope} 只是**业务视图**（我要干什么 / 这栋楼在修什么），
+ * 越不过权限。规则见 `docs/01` §4.2。
  */
 @Tag(name = "维修工端-工单")
 @RestController
@@ -34,14 +39,19 @@ public class WorkerTicketController {
 
     private final TicketService ticketService;
 
-    @Operation(summary = "我的派单", description = "只返回负责楼栋范围内的工单")
+    @Operation(summary = "我的任务",
+            description = "两个视图：scope=mine（默认）只给派给我的单，默认状态为待接单/处理中/待验收；"
+                    + "scope=building 给我负责楼栋的全部工单（含终态与别人负责的）。"
+                    + "两者都可用 status 覆盖默认过滤。排序：紧急度高的置顶，同档内先来的在前")
     @SaCheckPermission("ticket:list:assigned")
     @GetMapping
     public Result<PageResult<TicketVO>> page(
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") long pageNum,
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "10") long pageSize,
-            @Parameter(description = "状态筛选") @RequestParam(required = false) Integer status) {
-        return Result.ok(ticketService.page(pageNum, pageSize, status, null, null));
+            @Parameter(description = "状态筛选") @RequestParam(required = false) Integer status,
+            @Parameter(description = "视图：mine（派给我的，默认）/ building（我负责楼栋的全部）")
+            @RequestParam(required = false) String scope) {
+        return Result.ok(ticketService.pageWorkerTasks(pageNum, pageSize, status, WorkerTaskScope.of(scope)));
     }
 
     @Operation(summary = "工单详情")

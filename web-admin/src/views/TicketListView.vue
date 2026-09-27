@@ -102,10 +102,29 @@ function workerLabel(worker: WorkerVO): string {
   return `${worker.realName}（${worker.username}）— 负责 ${buildings}`
 }
 
+/**
+ * 选中的师傅不负责这栋楼时**必须先确认一次**——跨楼栋派单是"紧急抽调"，不是常规操作
+ * （`docs/01` §4.2）：服务端放行并留痕，但要让调度员意识到自己越过了楼栋约束。
+ * 选中的人负责这栋楼（或工单没有楼栋信息）时直接派，不多一步点击。
+ */
 async function confirmDispatch() {
-  if (!dispatchTarget.value || !selectedWorkerId.value) return
-  await dispatchTicket(dispatchTarget.value.id, selectedWorkerId.value)
-  ElMessage.success('派单成功')
+  const target = dispatchTarget.value
+  const workerId = selectedWorkerId.value
+  if (!target || !workerId) return
+
+  const worker = workerOptions.value.find((item) => item.id === workerId)
+  const covered = !worker || worker.buildingIds.includes(target.buildingId)
+  if (!covered) {
+    const where = target.buildingName ? `${target.buildingName} ${target.room}` : `工单 ${target.ticketNo}`
+    await ElMessageBox.confirm(
+      `${worker.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋强制派单（紧急抽调），确认继续？`,
+      '跨楼栋派单',
+      { type: 'warning', confirmButtonText: '确认强制派单', cancelButtonText: '换人' },
+    )
+  }
+
+  await dispatchTicket(target.id, workerId)
+  ElMessage.success(covered ? '派单成功' : '已按紧急任务强制派单')
   dispatchVisible.value = false
   await load()
 }
