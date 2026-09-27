@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { ref } from 'vue'
-import { evaluateTicket, getTicketDetail } from '@/api/ticket'
+import { evaluateTicket, getTicketDetail, reworkTicket } from '@/api/ticket'
 import type { TicketDetailVO } from '@/types'
 
 /**
- * 验收评价：待验收 → 已完成（40 → 50）。
+ * 验收：待验收 →（通过）已完成 50 /（不通过）处理中 30。
  *
- * <p>页面上先把**维修结果**摆出来再让人打分——评价要有依据，不然就是凭印象点星。
+ * <p>页面上先把**维修结果**摆出来再让人判断——评价要有依据，不然就是凭印象点星。
+ *
+ * <p>两条出路（`docs/01` §4.1）：**打分通过**是"修完了、质量如何"；**打回重做**是"没修好、重来"。
+ * 后者不写评价、师傅不变（还是他返工），所以要说清理由——不写理由师傅只能猜。
  */
 const ticketId = ref('')
 const detail = ref<TicketDetailVO | null>(null)
@@ -15,6 +18,11 @@ const detail = ref<TicketDetailVO | null>(null)
 const score = ref(0)
 const content = ref('')
 const submitting = ref(false)
+
+/** 打回重做的理由区：默认收起，避免"看起来像主操作"。 */
+const reworkOpen = ref(false)
+const reworkReason = ref('')
+const reworking = ref(false)
 
 const SCORE_TEXT: Record<number, string> = {
   1: '很不满意',
@@ -59,6 +67,38 @@ async function submit() {
     submitting.value = false
   }
 }
+
+/** 打回重做：二次确认，因为它会把这单退回给师傅重新上门。 */
+async function submitRework() {
+  const reason = reworkReason.value.trim()
+  if (reason.length < 2) {
+    uni.showToast({ title: '请说明哪里没修好', icon: 'none' })
+    return
+  }
+  const confirmed = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: '打回重做',
+      content: '工单会退回给这位师傅重新处理，确认提交？',
+      confirmText: '确认打回',
+      cancelText: '再想想',
+      success: (res) => resolve(!!res.confirm),
+      fail: () => resolve(false),
+    })
+  })
+  if (!confirmed) {
+    return
+  }
+  reworking.value = true
+  try {
+    await reworkTicket(ticketId.value, reason)
+    uni.showToast({ title: '已打回，师傅会重新处理', icon: 'none' })
+    setTimeout(() => uni.navigateBack(), 1000)
+  } catch {
+    // request 里已提示（20002 状态不许等）
+  } finally {
+    reworking.value = false
+  }
+}
 </script>
 
 <template>
@@ -82,6 +122,20 @@ async function submit() {
     </view>
 
     <button class="submit" :loading="submitting" :disabled="submitting" @click="submit">提交评价</button>
+
+    <!-- 不通过：修得不行就退回去重做，不用"打低分接受"。默认收起，别让它看起来像主操作 -->
+    <view class="card rework">
+      <text v-if="!reworkOpen" class="rework-link" @click="reworkOpen = true">修得不行？打回重做</text>
+      <template v-else>
+        <text class="label">哪里没修好？</text>
+        <text class="hint">工单会退回给这位师傅重新处理（不是撤销，也不是换个师傅）</text>
+        <textarea v-model="reworkReason" class="textarea" maxlength="255"
+                  placeholder="例如：水管还在滴，接头没拧紧" />
+        <button class="rework-submit" :loading="reworking" :disabled="reworking" @click="submitRework">
+          确认打回
+        </button>
+      </template>
+    </view>
   </view>
 </template>
 
@@ -153,6 +207,31 @@ async function submit() {
   margin-top: 8rpx;
   color: #fff;
   background: #2c6cf6;
+  border-radius: 8rpx;
+}
+/* 打回重做：次要出口，视觉上不与"提交评价"抢主位 */
+.rework {
+  background: transparent;
+}
+.rework-link {
+  display: block;
+  padding: 8rpx 0;
+  font-size: 26rpx;
+  color: #909399;
+  text-align: center;
+  text-decoration: underline;
+}
+.hint {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 24rpx;
+  color: #909399;
+  line-height: 1.5;
+}
+.rework-submit {
+  margin-top: 20rpx;
+  color: #f56c6c;
+  background: #fef0f0;
   border-radius: 8rpx;
 }
 </style>
