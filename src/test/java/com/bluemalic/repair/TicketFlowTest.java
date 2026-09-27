@@ -152,12 +152,14 @@ class TicketFlowTest {
         JsonNode listA = getJson(studentA, "/api/student/tickets");
         assertThat(firstListIds(listA)).containsExactly(ticketA);
 
-        // 维修工（负责 1、3 号楼）：能看到 1 号楼的 A 单
-        JsonNode listW1 = getJson(workerInBuilding1, "/api/worker/tickets");
+        // 维修工（负责 1、3 号楼）：能看到 1 号楼的 A 单。
+        // 这里用 scope=building（「本楼栋」视图）：默认的「我的任务」只给派给我的单、只看进行中状态，
+        // 而 A 单此刻还没派单——换成默认视图就测不到"按楼栋可见"这条权限依据了
+        JsonNode listW1 = getJson(workerInBuilding1, "/api/worker/tickets?scope=building");
         assertThat(firstListIds(listW1)).contains(ticketA);
 
         // 维修工（只负责 3 号楼）：1 号楼的 A 单不可见，详情 20001
-        JsonNode listW3 = getJson(workerInBuilding3Only, "/api/worker/tickets");
+        JsonNode listW3 = getJson(workerInBuilding3Only, "/api/worker/tickets?scope=building");
         assertThat(firstListIds(listW3)).doesNotContain(ticketA);
         getJsonRaw(workerInBuilding3Only, "/api/worker/tickets/" + ticketA)
                 .andExpect(jsonPath("$.code").value(20001));
