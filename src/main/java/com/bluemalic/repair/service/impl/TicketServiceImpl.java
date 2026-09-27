@@ -19,6 +19,7 @@ import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
+import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Ticket;
@@ -269,6 +270,30 @@ public class TicketServiceImpl implements TicketService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
+    }
+
+    @Override
+    @Transactional
+    public void rework(long id, TicketReworkDTO dto) {
+        long studentId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = requireTicket(id);
+        if (!ticket.getStudentId().equals(studentId)) {
+            throw new BizException(ErrorCode.TICKET_NOT_YOURS);
+        }
+        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.PROCESSING.getCode());
+
+        // 理由进 ticket_log 的备注（时间线上看得见），**不新增列**：它和"驳回理由"是两件事，
+        // 塞进同一列会让两个动作的语义糊在一起（docs/01 §4.1 记了取舍）
+        conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.REWORK, studentId,
+                ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
+                entity -> { }, dto.getReason());
+        // 回到 30 处理中：重新登记"未处理升级"（基准仍是派单时间，口径不变）。
+        // 40 待验收本身不挂任何超时节点，所以这里 cancel 只是防御：万一将来给它挂了节点也不会漏撤
+        timeoutService.cancel(id);
+        timeoutService.registerProcess(id, ticket.getDispatchTime());
+        notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
+        log.info("验收不通过，打回重做 ticketId={} studentId={} reason={}", id, studentId, dto.getReason());
     }
 
     @Override
@@ -577,6 +602,8 @@ public class TicketServiceImpl implements TicketService {
             TicketAction.REJECT,   new NoticeSpec("TICKET_REJECTED",  "工单被驳回",       null,                          true),
             TicketAction.DISPATCH, new NoticeSpec("TICKET_DISPATCHED","新工单待接单",     "已派给你，请及时接单",       false),
             TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false),
+            // 验收不通过：发给维修工（toStudent=false → 接收人取 ticket.workerId）
+            TicketAction.REWORK,   new NoticeSpec("TICKET_REWORKED",  "验收不通过",       null,                          false),
             TicketAction.AUTO_CLOSE, new NoticeSpec("TICKET_AUTO_CLOSED", "工单已自动关闭", "验收后超时未关闭，工单已自动关闭", true));
 
     /**

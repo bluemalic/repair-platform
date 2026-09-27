@@ -11,6 +11,7 @@ import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
+import com.bluemalic.repair.dto.TicketReworkDTO;
 
 /**
  * 工单业务。所有状态流转都经状态机校验、写 ticket_log、发站内通知。
@@ -45,6 +46,14 @@ public interface TicketService {
 
     /** 学生验收评价（40 → 50），写 ticket_evaluation，唯一索引兜底幂等。 */
     void evaluate(long id, TicketEvaluateDTO dto);
+
+    /**
+     * 学生验收不通过（40 → 30，打回重做），`docs/01` §4.1。
+     *
+     * <p>与"驳回"是两件事：驳回清空派单退回调度池（这单不该我做），打回**保留 `worker_id`**
+     * （还是你做，但没做好）。理由进 `ticket_log` 并通知维修工。
+     */
+    void rework(long id, TicketReworkDTO dto);
 
     /** 维修工接单（20 → 30），条件更新兜住并发抢单。 */
     void accept(long id);

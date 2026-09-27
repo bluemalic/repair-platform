@@ -54,7 +54,9 @@ public enum TicketStatus {
             REJECTED.code, Set.of(TO_ACCEPT.code),
             TO_ACCEPT.code, Set.of(PROCESSING.code, REJECTED.code),
             PROCESSING.code, Set.of(TO_VERIFY.code, REJECTED.code),
-            TO_VERIFY.code, Set.of(FINISHED.code, REJECTED.code),
+            // 40 → 30 是"学生验收不通过、打回重做"（docs/01 §4.1）：与 40 → 80（驳回，退调度池）不同，
+            // 它保留 worker_id——还是这位师傅返工
+            TO_VERIFY.code, Set.of(FINISHED.code, REJECTED.code, PROCESSING.code),
             FINISHED.code, Set.of(CLOSED.code));
 
     /** 非法跃迁抛 20002，由全局处理器转成统一返回体。 */

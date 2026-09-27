@@ -3,6 +3,7 @@ package com.bluemalic.repair.controller.student;
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
+import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -70,6 +71,23 @@ public class StudentTicketController {
     public Result<Void> evaluate(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketEvaluateDTO dto) {
         ticketService.evaluate(id, dto);
+        return Result.ok();
+    }
+
+    /**
+     * 验收不通过：打回给**同一位师傅**返工（40 → 30），`docs/01` §4.1。
+     *
+     * <p>权限码复用 {@code ticket:evaluate}：这是"验收"这条路的两半（通过 / 不通过），
+     * 不存在"能验收通过但不能打回"的角色，单独造一个权限码只会多一处要维护的授权。
+     */
+    @Operation(summary = "验收不通过（打回重做）",
+            description = "待验收状态下打回：工单回到处理中，师傅不变（保留 worker_id），"
+                    + "理由必填并随通知发给维修工。与「驳回」不同——驳回是退回调度的派单池")
+    @SaCheckPermission("ticket:evaluate")
+    @PostMapping("/{id}/rework")
+    public Result<Void> rework(@Parameter(description = "工单ID") @PathVariable long id,
+                               @Valid @RequestBody TicketReworkDTO dto) {
+        ticketService.rework(id, dto);
         return Result.ok();
     }
 }
