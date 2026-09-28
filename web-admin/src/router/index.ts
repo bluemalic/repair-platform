@@ -25,6 +25,8 @@ const router = createRouter({
         { path: 'repair-codes', name: 'repairCodes', component: () => import('@/views/RepairCodesView.vue') },
         { path: 'buildings', name: 'buildings', component: () => import('@/views/BuildingsView.vue') },
         { path: 'categories', name: 'categories', component: () => import('@/views/CategoriesView.vue') },
+        // 操作日志放在基础数据一组里：它记的主要是基础数据与账号的改动（docs/01 §4.4）
+        { path: 'audit-logs', name: 'auditLogs', component: () => import('@/views/AuditLogView.vue') },
         // 平台运营端：与上面这些**不是同一个域**——这个页面只给平台运营账号（userType = 4），
         // 它调的是 /api/platform/**；平台账号调 /api/admin/** 一律 10003（ADR-012）
         {

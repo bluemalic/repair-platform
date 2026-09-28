@@ -133,6 +133,7 @@ async function submitPassword() {
             <el-menu-item index="/repair-codes">报修码管理</el-menu-item>
             <el-menu-item index="/buildings">楼栋管理</el-menu-item>
             <el-menu-item index="/categories">类别管理</el-menu-item>
+            <el-menu-item index="/audit-logs">操作日志</el-menu-item>
           </el-sub-menu>
         </template>
       </el-menu>
