@@ -26,6 +26,9 @@ import java.util.Map;
 /**
  * 统计看板实现。职责只有三件事：把日期条件补齐成时间区间、把 SQL 出来的原始数字换算成比率、
  * 把需要文案的地方（紧急度）换成中文——真正的聚合都在 Mapper XML 里。
+ *
+ * <p>Excel 导出（{@link #export}）不额外算任何数：把上面四个方法的返回值交给
+ * {@link StatisticsExcelWriter} 摆成表——导出与页面同口径不是靠自觉，是靠只有一份实现。
  */
 @Slf4j
 @Service
@@ -44,6 +47,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
     private final StatisticsMapper statisticsMapper;
     private final CurrentTenantService currentTenantService;
+    private final StatisticsExcelWriter excelWriter;
 
     @Override
     public StatisticsOverviewVO overview(StatisticsQueryDTO query) {
@@ -114,7 +118,38 @@ public class StatisticsServiceImpl implements StatisticsService {
         return rows;
     }
 
+    @Override
+    public byte[] export(StatisticsQueryDTO query) {
+        // 顺序不能反：先把区间解析出来（时间范围校验在这一步，一个字节都还没写），
+        // 再把四份数据取齐，最后才生成工作簿。中途失败时响应是一份完整的 JSON 错误，而不是半截 xlsx。
+        Range range = resolveRange(query);
+        LocalDate firstDay = range.start().toLocalDate();
+        LocalDate lastDay = range.end().minusDays(1).toLocalDate();
+        StatisticsExcelWriter.Report report = new StatisticsExcelWriter.Report(
+                firstDay,
+                lastDay,
+                overview(query),
+                trend(query),
+                distribution(dimensionQuery(firstDay, lastDay, "category")),
+                distribution(dimensionQuery(firstDay, lastDay, "building")),
+                distribution(dimensionQuery(firstDay, lastDay, "urgency")),
+                workerWorkload(query));
+        return excelWriter.toBytes(report);
+    }
+
     // ==================== 私有工具 ====================
+
+    /**
+     * 分布要按三个维度各取一次。这里用**已解析的区间**新建 DTO，而不是在调用方的 DTO 上改 {@code dimension}：
+     * 同一个对象被改来改去，读代码的人就得回放整段流程才知道它此刻是什么值。
+     */
+    private StatisticsQueryDTO dimensionQuery(LocalDate start, LocalDate end, String dimension) {
+        StatisticsQueryDTO dimensionQuery = new StatisticsQueryDTO();
+        dimensionQuery.setStart(start);
+        dimensionQuery.setEnd(end);
+        dimensionQuery.setDimension(dimension);
+        return dimensionQuery;
+    }
 
     private Long currentTenantId() {
         // 租户来源与数据权限拦截器同源（ADR-008）：登录时写进 Session，这里读缓存，

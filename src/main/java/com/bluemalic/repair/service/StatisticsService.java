@@ -23,4 +23,16 @@ public interface StatisticsService {
     List<StatisticsDistributionVO> distribution(StatisticsQueryDTO query);
 
     List<StatisticsWorkerWorkloadVO> workerWorkload(StatisticsQueryDTO query);
+
+    /**
+     * 导出统计报表（Excel，P1）：四张工作表对应上面四个方法，**取数走的就是它们**——
+     * 导出不复制口径，所以 Excel 里的数与页面上的数不可能对不上（口径漂移在这个模块里踩过，
+     * 防线就只有一条：不写第二份实现）。
+     *
+     * <p>返回字节数组而不是写出到流：报表是聚合结果（几百行、几十 KB），先落内存换来两件事——
+     * ① 校验失败（如时间范围超 366 天）时一个字节都没写，错误照常走统一异常处理器回 JSON；
+     * ② 响应带得上 {@code Content-Length}。代价与"什么时候必须改成直写响应流"写在
+     * {@code StatisticsExcelWriter} 的类注释里。
+     */
+    byte[] export(StatisticsQueryDTO query);
 }
