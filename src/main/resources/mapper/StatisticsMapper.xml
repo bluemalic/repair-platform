@@ -12,17 +12,26 @@
 -->
 <mapper namespace="com.bluemalic.repair.mapper.StatisticsMapper">
 
-    <!-- 核心指标卡。满意度 LEFT JOIN 评价表；uk_ticket 保证一个工单一条评价，不会放大行数 -->
+    <!-- 核心指标卡。满意度 LEFT JOIN 评价表；uk_ticket 保证一个工单一条评价，不会放大行数
+
+         超时计数**从"超时动作"一侧找工单**（半连接 + COUNT(DISTINCT)），而不是逐行 EXISTS 探 ticket_log：
+         压测时（2 万单、看板 100 QPS）这一条 EXPLAIN 出来是"每行一次相关子查询"，P50 606ms、只能跑到 64 QPS，
+         而"超时"在真实数据里是稀有事件——从动作侧出发配合 idx_action_ticket 是一扫就完的事。
+         COUNT(DISTINCT) 不能省：同一张工单可能既接过单超时、又处理超时，去重后才与 EXISTS 的口径一致。
+         口径本身没变：**仍然以 ticket_log 里有没有出现过超时动作为准**，不在 SQL 里重算阈值（见文件头注释）。 -->
     <select id="selectOverview" resultType="com.bluemalic.repair.vo.StatisticsOverviewVO">
         SELECT COUNT(*)                              AS total,
                AVG(t.arrive_minutes)                 AS avgResponseMinutes,
                AVG(t.handle_minutes)                 AS avgHandleMinutes,
                AVG(e.score)                          AS avgScore,
-               COALESCE(SUM(CASE WHEN EXISTS (
-                   SELECT 1 FROM ticket_log l
-                   WHERE l.ticket_id = t.id
-                     AND l.action IN ('ACCEPT_TIMEOUT', 'PROCESS_TIMEOUT', 'AUTO_CLOSE')
-               ) THEN 1 ELSE 0 END), 0)              AS timeoutCount
+               (SELECT COUNT(DISTINCT l.ticket_id)
+                FROM ticket_log l
+                         JOIN ticket t2 ON t2.id = l.ticket_id
+                WHERE l.action IN ('ACCEPT_TIMEOUT', 'PROCESS_TIMEOUT', 'AUTO_CLOSE')
+                  AND t2.deleted = 0
+                  AND t2.tenant_id = #{tenantId}
+                  AND t2.submit_time &gt;= #{start}
+                  AND t2.submit_time &lt; #{end})      AS timeoutCount
         FROM ticket t
                  LEFT JOIN ticket_evaluation e ON e.ticket_id = t.id
         WHERE t.deleted = 0
