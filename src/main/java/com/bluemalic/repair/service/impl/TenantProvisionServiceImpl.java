@@ -3,6 +3,8 @@ package com.bluemalic.repair.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.Paging;
@@ -16,10 +18,13 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AccountService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.TenantProvisionService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TenantAdminVO;
 import com.bluemalic.repair.vo.TenantVO;
+import java.util.ArrayList;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -48,6 +53,8 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
     private final TenantMapper tenantMapper;
     private final SysUserMapper sysUserMapper;
     private final AccountService accountService;
+
+    private final AuditService auditService;
 
     @Override
     public PageResult<TenantVO> page(long pageNum, long pageSize, Integer status, String keyword) {
@@ -91,6 +98,10 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
 
         log.info("开通租户 tenantId={} code={} 操作人={}",
                 tenant.getId(), tenant.getCode(), StpUtil.getLoginIdAsLong());
+        // 平台运营自己的操作，租户记 0（docs/01 §4.4）
+        auditService.record(AuditAction.TENANT_PROVISION, AuditTarget.TENANT, tenant.getId(), tenant.getName(),
+                "开通学校 " + tenant.getName() + "（编码 " + tenant.getCode()
+                        + "），并创建首个管理员 " + dto.getAdminUsername());
         // 回查一次：create_time 是数据库默认值填的，插入后的实体里那个字段还是 null，
         // 直接转 VO 会让开通接口的响应缺一列（列表接口里却有），前端得为同一个字段写两种判断
         return TenantConverter.toVO(tenantMapper.selectById(tenant.getId()));
@@ -98,7 +109,7 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
 
     @Override
     public void update(long tenantId, TenantUpdateDTO dto) {
-        requireTenant(tenantId);
+        Tenant before = requireTenant(tenantId);
         int rows = tenantMapper.update(null, Wrappers.<Tenant>lambdaUpdate()
                 .eq(Tenant::getId, tenantId)
                 .set(Tenant::getName, dto.getName())
@@ -106,11 +117,24 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 .set(Tenant::getPhone, dto.getPhone()));
         requireUpdated(rows);
         log.info("修改租户资料 tenantId={} 操作人={}", tenantId, StpUtil.getLoginIdAsLong());
+        // 联系人与联系电话属于个人信息，摘要里只说改了哪些字段、不回显值（与账号那条同口径）
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(before.getName(), dto.getName())) {
+            changed.add("学校名 " + before.getName() + "→" + dto.getName());
+        }
+        if (!Objects.equals(before.getContact(), dto.getContact())) {
+            changed.add("联系人");
+        }
+        if (!Objects.equals(before.getPhone(), dto.getPhone())) {
+            changed.add("联系电话");
+        }
+        auditService.record(AuditAction.TENANT_UPDATE, AuditTarget.TENANT, tenantId, dto.getName(),
+                "修改学校 " + before.getName() + "：" + (changed.isEmpty() ? "无字段变化" : String.join("、", changed)));
     }
 
     @Override
     public void changeStatus(long tenantId, int status) {
-        requireTenant(tenantId);
+        Tenant tenant = requireTenant(tenantId);
         int rows = tenantMapper.update(null, Wrappers.<Tenant>lambdaUpdate()
                 .eq(Tenant::getId, tenantId)
                 .set(Tenant::getStatus, status));
@@ -118,6 +142,8 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
 
         if (Integer.valueOf(STATUS_ENABLED).equals(status)) {
             log.info("启用租户 tenantId={} 操作人={}", tenantId, StpUtil.getLoginIdAsLong());
+            auditService.record(AuditAction.TENANT_STATUS, AuditTarget.TENANT, tenantId, tenant.getName(),
+                    "启用学校 " + tenant.getName());
             return;
         }
         // **先改库再踢人**，顺序不能反：反过来的话，踢人过程中新登录的用户读到的还是旧状态、
@@ -125,6 +151,9 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
         int online = accountService.kickoutAllOfTenant(tenantId);
         log.info("停用租户 tenantId={} 踢下线在线数={} 操作人={}",
                 tenantId, online, StpUtil.getLoginIdAsLong());
+        // 踢下线的数量写进摘要：事后复盘"停用那天影响了多少人"就靠它
+        auditService.record(AuditAction.TENANT_STATUS, AuditTarget.TENANT, tenantId, tenant.getName(),
+                "停用学校 " + tenant.getName() + "（踢下线 " + online + " 个在线账号）");
     }
 
     @Override
@@ -147,6 +176,8 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 UserType.ADMIN.getCode(), UserType.ADMIN.getRoleCode(), true, "登录名"));
         log.info("新增租户管理员 tenantId={} userId={} username={} 操作人={}",
                 tenantId, admin.getId(), admin.getUsername(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.TENANT_ADMIN_ADD, AuditTarget.ACCOUNT, admin.getId(), admin.getUsername(),
+                "为学校新增后勤管理员 " + admin.getUsername() + "（" + dto.getRealName() + "，首登需改密）");
         return TenantConverter.toAdminVO(admin);
     }
 
@@ -159,6 +190,11 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
         accountService.resetPassword(userId, tenantId, rawPassword, true);
         log.info("平台重置租户管理员口令 tenantId={} userId={} 操作人={}",
                 tenantId, userId, StpUtil.getLoginIdAsLong());
+        // 只记"重置了谁的口令"，口令本身绝不落库（AGENTS §5.9）
+        SysUser target = sysUserMapper.selectById(userId);
+        auditService.record(AuditAction.TENANT_ADMIN_PASSWORD_RESET, AuditTarget.ACCOUNT, userId,
+                target == null ? String.valueOf(userId) : target.getUsername(),
+                "重置学校管理员 " + (target == null ? userId : target.getUsername()) + " 的口令（下次登录需改密）");
     }
 
     /**

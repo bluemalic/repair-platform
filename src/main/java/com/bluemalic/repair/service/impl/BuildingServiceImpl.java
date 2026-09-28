@@ -2,6 +2,8 @@ package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.converter.BuildingConverter;
@@ -16,6 +18,7 @@ import com.bluemalic.repair.mapper.RepairCodeMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.BuildingService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.BuildingVO;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +53,8 @@ public class BuildingServiceImpl implements BuildingService {
     private final WorkerBuildingMapper workerBuildingMapper;
     private final CurrentTenantService currentTenantService;
 
+    private final AuditService auditService;
+
     @Override
     public List<BuildingVO> list(Integer status) {
         long tenantId = currentTenantService.requireTenantId();
@@ -79,6 +84,8 @@ public class BuildingServiceImpl implements BuildingService {
 
         log.info("新增楼栋 buildingId={} name={} operator={}",
                 building.getId(), building.getName(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.BUILDING_CREATE, AuditTarget.BUILDING, building.getId(), building.getName(),
+                "新增楼栋 " + building.getName() + (building.getArea() == null ? "" : "（" + building.getArea() + "）"));
         return BuildingConverter.toVO(building);
     }
 
@@ -86,7 +93,7 @@ public class BuildingServiceImpl implements BuildingService {
     @Transactional
     public void update(long id, BuildingUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
-        requireBuilding(id, tenantId);
+        Building before = requireBuilding(id, tenantId);
         requireNameNotUsed(tenantId, dto.getName(), id);
 
         int rows = buildingMapper.update(null, Wrappers.<Building>lambdaUpdate()
@@ -101,6 +108,15 @@ public class BuildingServiceImpl implements BuildingService {
         }
         log.info("修改楼栋 buildingId={} name={} status={} operator={}",
                 id, dto.getName(), dto.getStatus(), StpUtil.getLoginIdAsLong());
+        // 楼栋名可能被改过，所以新旧名字都写进摘要（排障时"这栋楼以前叫什么"是常见问题）
+        auditService.record(AuditAction.BUILDING_UPDATE, AuditTarget.BUILDING, id, dto.getName(),
+                "修改楼栋 " + before.getName() + (before.getName().equals(dto.getName())
+                        ? "" : "（原名 " + before.getName() + "，改名后 " + dto.getName() + "）")
+                        + "：状态 " + statusText(before.getStatus()) + "→" + statusText(dto.getStatus()));
+    }
+
+    private String statusText(Integer status) {
+        return Integer.valueOf(STATUS_ENABLED).equals(status) ? "启用" : "停用";
     }
 
     @Override
@@ -124,6 +140,8 @@ public class BuildingServiceImpl implements BuildingService {
         buildingMapper.deleteById(id);
         log.info("删除未被引用的楼栋 buildingId={} name={} operator={}",
                 id, building.getName(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.BUILDING_DELETE, AuditTarget.BUILDING, id, building.getName(),
+                "删除楼栋 " + building.getName() + "（逻辑删除，行仍在库里便于查证）");
     }
 
     private long countTickets(long buildingId) {

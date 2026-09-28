@@ -4,6 +4,8 @@ import cn.dev33.satoken.stp.SaTokenInfo;
 import cn.dev33.satoken.stp.StpInterface;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.RateLimiter;
@@ -17,6 +19,7 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AuthService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.CurrentUserVO;
 import com.bluemalic.repair.vo.LoginVO;
@@ -44,6 +47,8 @@ public class AuthServiceImpl implements AuthService {
     private final CurrentTenantService currentTenantService;
     private final RateLimiter rateLimiter;
     private final RateLimitRule rateLimitRule;
+
+    private final AuditService auditService;
 
     @Override
     public LoginVO login(LoginDTO dto) {
@@ -144,6 +149,13 @@ public class AuthServiceImpl implements AuthService {
         // "密码变了、标记还在"的中间态，用户改完还是被拦在改密页上。
         update.setMustChangePassword(0);
         sysUserMapper.updateById(update);
+
+        // 审计（账号安全事件）**必须写在 logout 之前**：审计要取当前租户与操作人，
+        // 而下面那句 logout 会把这次请求的登录态一起注销掉——写在其后会让 tenant_id 取到 null，
+        // 连带把整个改密操作拖失败（这条是写测试时才发现的，见 AuditLogTest 的注释）。
+        // 也正因为审计与业务同事务，顺序写错不是"少一条记录"，而是"功能直接不可用"——这是刻意的
+        auditService.record(AuditAction.PASSWORD_CHANGE_SELF, AuditTarget.ACCOUNT, userId, user.getUsername(),
+                "本人修改登录口令（改后所有会话失效，需重新登录）");
 
         // 改密之后让该账号的所有会话失效，包括正在发起这次改密的会话。
         // 只失效其他端是不够的：改密的动机之一就是"怀疑账号被别人用着"，

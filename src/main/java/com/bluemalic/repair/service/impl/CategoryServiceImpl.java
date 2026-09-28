@@ -2,6 +2,8 @@ package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.converter.CategoryConverter;
@@ -12,6 +14,7 @@ import com.bluemalic.repair.entity.TicketCategory;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.CategoryService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.CategoryVO;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +41,8 @@ public class CategoryServiceImpl implements CategoryService {
     private final TicketCategoryMapper ticketCategoryMapper;
     private final TicketMapper ticketMapper;
     private final CurrentTenantService currentTenantService;
+
+    private final AuditService auditService;
 
     @Override
     public List<CategoryVO> list(Integer status) {
@@ -68,6 +73,8 @@ public class CategoryServiceImpl implements CategoryService {
 
         log.info("新增报修类别 categoryId={} name={} operator={}",
                 category.getId(), category.getName(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.CATEGORY_CREATE, AuditTarget.CATEGORY, category.getId(), category.getName(),
+                "新增报修类别 " + category.getName() + "（默认紧急度 " + category.getDefaultUrgency() + "）");
         return CategoryConverter.toVO(category);
     }
 
@@ -75,7 +82,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Transactional
     public void update(long id, CategoryUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
-        requireCategory(id, tenantId);
+        TicketCategory before = requireCategory(id, tenantId);
         requireNameNotUsed(tenantId, dto.getName(), id);
 
         int rows = ticketCategoryMapper.update(null, Wrappers.<TicketCategory>lambdaUpdate()
@@ -90,6 +97,14 @@ public class CategoryServiceImpl implements CategoryService {
         }
         log.info("修改报修类别 categoryId={} name={} status={} operator={}",
                 id, dto.getName(), dto.getStatus(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.CATEGORY_UPDATE, AuditTarget.CATEGORY, id, dto.getName(),
+                "修改报修类别 " + before.getName() + (before.getName().equals(dto.getName())
+                        ? "" : "（改名为 " + dto.getName() + "）")
+                        + "：状态 " + statusText(before.getStatus()) + "→" + statusText(dto.getStatus()));
+    }
+
+    private String statusText(Integer status) {
+        return Integer.valueOf(STATUS_ENABLED).equals(status) ? "启用" : "停用";
     }
 
     @Override
@@ -109,6 +124,8 @@ public class CategoryServiceImpl implements CategoryService {
         ticketCategoryMapper.deleteById(id);
         log.info("删除未被引用的报修类别 categoryId={} name={} operator={}",
                 id, category.getName(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.CATEGORY_DELETE, AuditTarget.CATEGORY, id, category.getName(),
+                "删除报修类别 " + category.getName() + "（逻辑删除，行仍在库里便于查证）");
     }
 
     /** 取本租户的类别，不存在一律说"不存在"。 */
