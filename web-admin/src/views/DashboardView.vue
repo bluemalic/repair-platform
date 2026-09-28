@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import { distribution, overview, trend, workerWorkload } from '@/api/statistics'
+import { distribution, exportStatistics, overview, trend, workerWorkload } from '@/api/statistics'
 import type { DistributionItem, StatisticsOverview, WorkerWorkload } from '@/types'
 
 const params = ref({ start: '', end: '' })
 const cards = ref<StatisticsOverview | null>(null)
 const dimension = ref<'category' | 'building' | 'urgency'>('category')
 const workload = ref<WorkerWorkload[]>([])
+const exporting = ref(false)
 
 const trendRef = ref<HTMLDivElement>()
 const pieRef = ref<HTMLDivElement>()
@@ -53,6 +54,19 @@ async function loadAll() {
   await Promise.all([loadCards(), loadTrend(), loadPie()])
 }
 
+/**
+ * 导出当前时间范围的报表。后端要先把四组聚合跑完才回第一个字节，所以按钮上有 loading；
+ * 失败（没权限 / 范围超限 / 登录过期）由 http.download 统一弹提示，这里不用管。
+ */
+async function handleExport() {
+  exporting.value = true
+  try {
+    await exportStatistics(params.value)
+  } finally {
+    exporting.value = false
+  }
+}
+
 onMounted(async () => {
   if (trendRef.value) trendChart = echarts.init(trendRef.value)
   if (pieRef.value) pieChart = echarts.init(pieRef.value)
@@ -80,6 +94,7 @@ watch(dimension, loadPie)
       <el-date-picker v-model="params.start" type="date" value-format="YYYY-MM-DD" placeholder="起始日期" />
       <el-date-picker v-model="params.end" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
       <el-button type="primary" @click="loadAll">查询</el-button>
+      <el-button :loading="exporting" @click="handleExport">导出 Excel</el-button>
       <span class="hint">不填则默认近 30 天</span>
     </div>
 
