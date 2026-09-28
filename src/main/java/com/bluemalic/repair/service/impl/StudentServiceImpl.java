@@ -3,6 +3,8 @@ package com.bluemalic.repair.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
@@ -14,6 +16,7 @@ import com.bluemalic.repair.dto.StudentUpdateDTO;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.service.AccountService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.StudentService;
 import com.bluemalic.repair.vo.PageResult;
@@ -30,6 +33,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -66,6 +70,9 @@ public class StudentServiceImpl implements StudentService {
 
     private final SysUserMapper sysUserMapper;
     private final AccountService accountService;
+
+    private final AuditService auditService;
+
     private final CurrentTenantService currentTenantService;
 
     @Override
@@ -97,6 +104,8 @@ public class StudentServiceImpl implements StudentService {
                 dto.getRealName(), dto.getPhone(), dto.getPassword()));
         log.info("新增学生 studentId={} username={} operator={}",
                 student.getId(), student.getUsername(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.STUDENT_CREATE, AuditTarget.STUDENT, student.getId(), student.getUsername(),
+                "新增学生 " + student.getUsername() + "（" + dto.getRealName() + "，首登需改密）");
         return StudentConverter.toVO(student);
     }
 
@@ -104,7 +113,7 @@ public class StudentServiceImpl implements StudentService {
     @Transactional
     public void update(long id, StudentUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
-        accountService.require(id, tenantId, UserType.STUDENT.getCode(), ACCOUNT_LABEL);
+        SysUser before = accountService.require(id, tenantId, UserType.STUDENT.getCode(), ACCOUNT_LABEL);
 
         accountService.updateProfile(id, tenantId, dto.getRealName(), dto.getPhone());
         // 停用时的踢下线在 changeStatus 里，那条不变量属于账号层
@@ -115,14 +124,42 @@ public class StudentServiceImpl implements StudentService {
             accountService.resetPassword(id, tenantId, dto.getPassword(), true);
         }
         log.info("修改学生 studentId={} operator={}", id, StpUtil.getLoginIdAsLong());
+        // 与维修工同一条口径：只记"改了哪些字段"，不回显姓名 / 手机号的旧值与新值
+        auditService.record(AuditAction.STUDENT_UPDATE, AuditTarget.STUDENT, id, before.getUsername(),
+                "修改学生 " + before.getUsername() + "：" + describeChanges(before, dto));
+    }
+
+    /** 改了哪些字段的字段名清单（不写值），见 AuditAction 与 docs/01 §4.4。 */
+    private String describeChanges(SysUser before, StudentUpdateDTO dto) {
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(before.getRealName(), dto.getRealName())) {
+            changed.add("姓名");
+        }
+        if (!Objects.equals(before.getPhone(), dto.getPhone())) {
+            changed.add("手机号");
+        }
+        if (!Objects.equals(before.getStatus(), dto.getStatus())) {
+            changed.add("状态 " + statusText(before.getStatus()) + "→" + statusText(dto.getStatus()));
+        }
+        if (dto.getPassword() != null) {
+            changed.add("重置口令（下次登录仍需改密）");
+        }
+        return changed.isEmpty() ? "无字段变化" : String.join("、", changed);
+    }
+
+    private String statusText(Integer status) {
+        return Integer.valueOf(1).equals(status) ? "启用" : "停用";
     }
 
     @Override
     @Transactional
     public void resetPassword(long id, String rawPassword) {
         long tenantId = currentTenantService.requireTenantId();
-        accountService.require(id, tenantId, UserType.STUDENT.getCode(), ACCOUNT_LABEL);
+        SysUser student = accountService.require(id, tenantId, UserType.STUDENT.getCode(), ACCOUNT_LABEL);
         accountService.resetPassword(id, tenantId, rawPassword, true);
+        // 只记"重置了谁"，**不记口令**（AGENTS §5.9）
+        auditService.record(AuditAction.PASSWORD_RESET, AuditTarget.STUDENT, id, student.getUsername(),
+                "重置学生 " + student.getUsername() + " 的口令（下次登录需改密）");
     }
 
     @Override
@@ -157,6 +194,9 @@ public class StudentServiceImpl implements StudentService {
 
         log.info("批量导入学生 新建={} 跳过={} 忽略={} operator={}",
                 created, skippedUsernames.size(), parsed.ignored(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.STUDENT_IMPORT, AuditTarget.STUDENT, null, null,
+                "批量导入学生：新增 " + created + " 个，跳过已存在 " + skippedUsernames.size()
+                        + " 个，忽略无效 " + parsed.ignored() + " 条");
         StudentImportVO vo = new StudentImportVO();
         vo.setCreated(created);
         vo.setSkipped(skippedUsernames.size());

@@ -4,6 +4,8 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
@@ -19,6 +21,7 @@ import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.AccountService;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.WorkerService;
 import com.bluemalic.repair.vo.PageResult;
@@ -29,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,6 +61,8 @@ public class WorkerServiceImpl implements WorkerService {
     private final WorkerBuildingMapper workerBuildingMapper;
     private final BuildingMapper buildingMapper;
     private final AccountService accountService;
+
+    private final AuditService auditService;
     private final CurrentTenantService currentTenantService;
 
     @Override
@@ -110,6 +116,8 @@ public class WorkerServiceImpl implements WorkerService {
 
         log.info("新增维修工 workerId={} username={} operator={}",
                 worker.getId(), worker.getUsername(), StpUtil.getLoginIdAsLong());
+        auditService.record(AuditAction.WORKER_CREATE, AuditTarget.WORKER, worker.getId(), worker.getUsername(),
+                "新增维修工 " + worker.getUsername() + "（" + dto.getRealName() + "）");
         return WorkerConverter.toVO(worker, List.of(), List.of());
     }
 
@@ -117,7 +125,8 @@ public class WorkerServiceImpl implements WorkerService {
     @Transactional
     public void update(long id, WorkerUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
-        accountService.require(id, tenantId, UserType.WORKER.getCode(), ACCOUNT_LABEL);
+        // 留一份改动前的样子，审计里好说清"改了哪些字段"
+        SysUser before = accountService.require(id, tenantId, UserType.WORKER.getCode(), ACCOUNT_LABEL);
 
         accountService.updateProfile(id, tenantId, dto.getRealName(), dto.getPhone());
         // 停用时的踢下线在 changeStatus 里，那条不变量属于账号层
@@ -130,6 +139,35 @@ public class WorkerServiceImpl implements WorkerService {
         } else {
             log.info("修改维修工信息 workerId={} operator={}", id, StpUtil.getLoginIdAsLong());
         }
+
+        auditService.record(AuditAction.WORKER_UPDATE, AuditTarget.WORKER, id, before.getUsername(),
+                "修改维修工 " + before.getUsername() + "：" + describeChanges(before, dto));
+    }
+
+    /**
+     * 改了哪些字段的**字段名清单**（不写值）：姓名与手机号属于个人信息，审计里只说"改过"，
+     * 不回显新旧值——审计表也是表，落进去就收不回来了（`docs/01` §4.4）。
+     * 启停状态是个例外：它是这类记录里最有信息量的一条，本身又不敏感，写清新旧值。
+     */
+    private String describeChanges(SysUser before, WorkerUpdateDTO dto) {
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(before.getRealName(), dto.getRealName())) {
+            changed.add("姓名");
+        }
+        if (!Objects.equals(before.getPhone(), dto.getPhone())) {
+            changed.add("手机号");
+        }
+        if (!Objects.equals(before.getStatus(), dto.getStatus())) {
+            changed.add("状态 " + statusText(before.getStatus()) + "→" + statusText(dto.getStatus()));
+        }
+        if (dto.getPassword() != null) {
+            changed.add("重置口令");
+        }
+        return changed.isEmpty() ? "无字段变化" : String.join("、", changed);
+    }
+
+    private String statusText(Integer status) {
+        return Integer.valueOf(1).equals(status) ? "启用" : "停用";
     }
 
     /**
@@ -143,7 +181,7 @@ public class WorkerServiceImpl implements WorkerService {
     @Transactional
     public void setBuildings(long id, WorkerBuildingsDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
-        accountService.require(id, tenantId, UserType.WORKER.getCode(), ACCOUNT_LABEL);
+        SysUser worker = accountService.require(id, tenantId, UserType.WORKER.getCode(), ACCOUNT_LABEL);
 
         List<Long> buildingIds = dto.getBuildingIds().stream()
                 .filter(Objects::nonNull)
@@ -174,6 +212,11 @@ public class WorkerServiceImpl implements WorkerService {
         // 这是数据权限的物理依据，改动会影响他能看到的全部工单，属于必须留痕的业务节点
         log.info("设置负责楼栋 workerId={} buildingIds={} operator={}",
                 id, buildingIds, StpUtil.getLoginIdAsLong());
+        // 审计里记下**楼栋名**（不是 ID 列表）：ID 列表过两天就没人看得懂了
+        List<String> names = buildingNames(buildingIds).values().stream().toList();
+        auditService.record(AuditAction.WORKER_BUILDINGS, AuditTarget.WORKER, id, worker.getUsername(),
+                "设置维修工 " + worker.getUsername() + " 的负责楼栋："
+                        + (names.isEmpty() ? "（清空，他将看不到任何工单）" : String.join("、", names)));
     }
 
     /** worker_id → 负责的楼栋 ID 列表（一次查完，避免逐行回库）。 */

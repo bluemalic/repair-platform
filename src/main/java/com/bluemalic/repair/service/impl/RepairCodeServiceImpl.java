@@ -3,6 +3,8 @@ package com.bluemalic.repair.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
@@ -13,6 +15,7 @@ import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.RepairCodeMapper;
+import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.RepairCodeService;
 import com.bluemalic.repair.vo.PageResult;
@@ -59,6 +62,8 @@ public class RepairCodeServiceImpl implements RepairCodeService {
     private final RepairCodeMapper repairCodeMapper;
     private final BuildingMapper buildingMapper;
     private final CurrentTenantService currentTenantService;
+
+    private final AuditService auditService;
 
     private final SecureRandom random = new SecureRandom();
 
@@ -109,6 +114,9 @@ public class RepairCodeServiceImpl implements RepairCodeService {
         log.info("生成报修码 codeId={} code={} buildingId={} room={} operator={}",
                 entity.getId(), entity.getCode(), dto.getBuildingId(), dto.getRoom(),
                 StpUtil.getLoginIdAsLong());
+        // 报修码是贴在门口的**位置码**，不是口令：写进审计便于事后核对（区别于手机号 / 密码）
+        auditService.record(AuditAction.REPAIR_CODE_CREATE, AuditTarget.REPAIR_CODE, entity.getId(), saved.getCode(),
+                "生成报修码 " + saved.getCode() + " → " + building.getName() + " " + dto.getRoom());
         return RepairCodeConverter.toVO(saved, building.getName());
     }
 
@@ -145,6 +153,14 @@ public class RepairCodeServiceImpl implements RepairCodeService {
             log.info("修改报修码 codeId={} room={} status={} operator={}",
                     id, dto.getRoom(), dto.getStatus(), StpUtil.getLoginIdAsLong());
         }
+        auditService.record(AuditAction.REPAIR_CODE_UPDATE, AuditTarget.REPAIR_CODE, id, newCode,
+                "修改报修码 " + existing.getCode() + "：房间 " + existing.getRoom() + "→" + dto.getRoom()
+                        + "，状态 " + statusText(existing.getStatus()) + "→" + statusText(dto.getStatus())
+                        + (regenerate ? "，并重新生成码（新码 " + newCode + "）" : ""));
+    }
+
+    private String statusText(Integer status) {
+        return Integer.valueOf(STATUS_ENABLED).equals(status) ? "启用" : "停用";
     }
 
     /**
