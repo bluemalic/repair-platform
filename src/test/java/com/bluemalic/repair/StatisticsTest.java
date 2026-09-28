@@ -130,6 +130,22 @@ class StatisticsTest {
     }
 
     @Test
+    void overviewCountsEachTimedOutTicketOnceEvenWithTwoTimeoutActions() throws Exception {
+        // 同一张工单既接过单超时、又处理超时：超时**工单数**只能算 1。
+        // 这条是压测那次改写的守卫：原来是逐行 EXISTS（天然去重），现在改成从 ticket_log 侧半连接
+        // + COUNT(DISTINCT)——少了 DISTINCT 会把这张单算成 2，分子分母跟着错，而且错得很隐蔽
+        Ticket both = ticket(1L, "2020-01-08", 30, 50, 1, 1, 1, workerA);
+        givenTimeoutLog(both, "ACCEPT_TIMEOUT");
+        givenTimeoutLog(both, "PROCESS_TIMEOUT");
+
+        String admin = givenAdmin("gdou");
+        JsonNode data = getData(admin, "/api/admin/statistics/overview" + RANGE);
+
+        // 原有 2 张超时单 + 这张（只算 1 次）= 3
+        assertThat(data.get("timeoutCount").asInt()).isEqualTo(3);
+    }
+
+    @Test
     void trendFillsMissingDaysAndGroupsByWeek() throws Exception {
         String admin = givenAdmin("gdou");
 
