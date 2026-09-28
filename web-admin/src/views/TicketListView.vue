@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { closeTicket, dispatchTicket, getTicketDetail, pageTickets, rejectTicket } from '@/api/ticket'
+import { closeTicket, dispatchTicket, getTicketDetail, pageTickets, rejectTicket, transferTicket } from '@/api/ticket'
 import { pageWorkers } from '@/api/worker'
 import type { TicketDetailVO, TicketVO, WorkerVO } from '@/types'
 
@@ -31,6 +31,8 @@ const ACTION: Record<string, string> = {
   CANCEL: '撤销工单',
   CLOSE: '关闭工单',
   REJECT: '驳回',
+  REWORK: '验收不通过（打回重做）',
+  TRANSFER: '转派',
   AUTO_CLOSE: '超时自动关闭',
   ACCEPT_TIMEOUT: '接单超时提醒',
   PROCESS_TIMEOUT: '处理超时升级',
@@ -68,8 +70,26 @@ const workerOptions = ref<WorkerVO[]>([])
 const workerSearching = ref(false)
 /** 命中总数：下拉里只放前 N 条，超过时提示"用关键字继续搜"，避免让人以为就这么多 */
 const workerTotal = ref(0)
+/**
+ * 同一个弹窗给两种动作用：`dispatch`（10/80 → 20，还没有师傅）与 `transfer`（20/30 → 20，换人）。
+ * 合并的理由是**两边的表单、选人逻辑、跨楼栋确认完全一样**，差别只在"要不要写理由"和调哪个接口；
+ * 拆成两个弹窗会让这段选人代码抄两遍。
+ */
+const dispatchMode = ref<'dispatch' | 'transfer'>('dispatch')
+const transferReason = ref('')
 
-async function openDispatch(row: TicketVO) {
+function openDispatch(row: TicketVO) {
+  dispatchMode.value = 'dispatch'
+  openWorkerPicker(row)
+}
+
+function openTransfer(row: TicketVO) {
+  dispatchMode.value = 'transfer'
+  transferReason.value = ''
+  openWorkerPicker(row)
+}
+
+async function openWorkerPicker(row: TicketVO) {
   dispatchTarget.value = row
   selectedWorkerId.value = undefined
   dispatchVisible.value = true
@@ -103,28 +123,41 @@ function workerLabel(worker: WorkerVO): string {
 }
 
 /**
- * 选中的师傅不负责这栋楼时**必须先确认一次**——跨楼栋派单是"紧急抽调"，不是常规操作
+ * 派单 / 转派的共同提交口。
+ *
+ * <p>选中的师傅不负责这栋楼时**必须先确认一次**——跨楼栋是"紧急抽调"，不是常规操作
  * （`docs/01` §4.2）：服务端放行并留痕，但要让调度员意识到自己越过了楼栋约束。
- * 选中的人负责这栋楼（或工单没有楼栋信息）时直接派，不多一步点击。
+ * 选中的人负责这栋楼时直接提交，不多一步点击。
  */
 async function confirmDispatch() {
   const target = dispatchTarget.value
   const workerId = selectedWorkerId.value
   if (!target || !workerId) return
+  const transferring = dispatchMode.value === 'transfer'
+  if (transferring && !transferReason.value.trim()) {
+    ElMessage.warning('请填写转派理由：原师傅要知道为什么这单被转走了')
+    return
+  }
 
   const worker = workerOptions.value.find((item) => item.id === workerId)
   const covered = !worker || worker.buildingIds.includes(target.buildingId)
   if (!covered) {
     const where = target.buildingName ? `${target.buildingName} ${target.room}` : `工单 ${target.ticketNo}`
     await ElMessageBox.confirm(
-      `${worker.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋强制派单（紧急抽调），确认继续？`,
-      '跨楼栋派单',
-      { type: 'warning', confirmButtonText: '确认强制派单', cancelButtonText: '换人' },
+      `${worker.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋${transferring ? '转派' : '强制派单'}（紧急抽调），确认继续？`,
+      transferring ? '跨楼栋转派' : '跨楼栋派单',
+      { type: 'warning', confirmButtonText: '确认继续', cancelButtonText: '换人' },
     )
   }
 
-  await dispatchTicket(target.id, workerId)
-  ElMessage.success(covered ? '派单成功' : '已按紧急任务强制派单')
+  if (transferring) {
+    await transferTicket(target.id, workerId, transferReason.value.trim())
+    // 转派的计时会重置，提示里把这句说出来：调度员要知道"催单时间重新起算"
+    ElMessage.success('已转派；接单计时重新起算')
+  } else {
+    await dispatchTicket(target.id, workerId)
+    ElMessage.success(covered ? '派单成功' : '已按紧急任务强制派单')
+  }
   dispatchVisible.value = false
   await load()
 }
@@ -198,11 +231,15 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="submitTime" label="提交时间" width="170" />
-      <el-table-column label="操作" width="260" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button link @click="openDetailById(row.id)">详情</el-button>
           <el-button v-if="row.status === 10 || row.status === 80" link type="primary" @click="openDispatch(row)">
             派单
+          </el-button>
+          <!-- 换人：待接单还没接、或接了还没完工时才谈得上换（40 之后该走驳回/打回） -->
+          <el-button v-if="[20, 30].includes(row.status)" link type="primary" @click="openTransfer(row)">
+            转派
           </el-button>
           <el-button v-if="[20, 30, 40].includes(row.status)" link type="danger" @click="doReject(row)">驳回</el-button>
           <el-button v-if="row.status === 50" link type="primary" @click="doClose(row)">关闭</el-button>
@@ -305,14 +342,24 @@ onMounted(async () => {
       </template>
     </el-drawer>
 
-    <el-dialog v-model="dispatchVisible" title="派单" width="520px">
-      <el-form label-width="72px">
+    <el-dialog v-model="dispatchVisible" :title="dispatchMode === 'transfer' ? '转派' : '派单'" width="520px">
+      <el-form label-width="80px">
         <el-form-item label="工单">
           <span>
             {{ dispatchTarget?.ticketNo }} · {{ dispatchTarget?.buildingName }} {{ dispatchTarget?.room }}
           </span>
         </el-form-item>
-        <el-form-item label="维修工">
+        <el-form-item v-if="dispatchMode === 'transfer'" label="转派理由">
+          <el-input
+            v-model="transferReason"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+            show-word-limit
+            placeholder="会发给原师傅，例如：张师傅临时请假，改由你上门"
+          />
+        </el-form-item>
+        <el-form-item :label="dispatchMode === 'transfer' ? '改派给' : '维修工'">
           <el-select
             v-model="selectedWorkerId"
             filterable
@@ -332,7 +379,13 @@ onMounted(async () => {
       </el-form>
       <template #footer>
         <el-button @click="dispatchVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!selectedWorkerId" @click="confirmDispatch">确认派单</el-button>
+        <el-button
+          type="primary"
+          :disabled="!selectedWorkerId || (dispatchMode === 'transfer' && !transferReason.trim())"
+          @click="confirmDispatch"
+        >
+          {{ dispatchMode === 'transfer' ? '确认转派' : '确认派单' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>

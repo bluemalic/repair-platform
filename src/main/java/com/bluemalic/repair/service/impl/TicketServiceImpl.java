@@ -10,6 +10,7 @@ import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.converter.TicketConverter;
@@ -20,6 +21,7 @@ import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Ticket;
@@ -467,12 +469,11 @@ public class TicketServiceImpl implements TicketService {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
 
-        SysUser worker = sysUserMapper.selectById(dto.getWorkerId());
-        // 跨租户的师傅与"不存在的师傅"返回同一个错误：不告诉调用方"这个师傅是别家的"
-        if (worker == null || !Integer.valueOf(2).equals(worker.getUserType())
-                || !Integer.valueOf(1).equals(worker.getStatus())
-                || !ticket.getTenantId().equals(worker.getTenantId())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "维修工不存在或已停用");
+        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        // 已有师傅的单不能走"派单"：那是**换人**，要走转派——它要重置计时、清掉上一轮的
+        // 接单/到场时间、并单独留一条 TRANSFER 台账。两条路都能换人的话，台账就分不清了
+        if (ticket.getWorkerId() != null) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED, "该工单已有维修工，换人请用转派");
         }
 
         // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
@@ -493,6 +494,67 @@ public class TicketServiceImpl implements TicketService {
         timeoutService.registerAccept(id);
         log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
                 crossBuilding == null ? "" : crossBuilding);
+    }
+
+    @Override
+    @Transactional
+    public void transfer(long id, TicketTransferDTO dto) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = requireTicket(id);
+        // 20 → 20 / 30 → 20 都是允许的（docs/02 §5）；40 及之后不允许——那时该走打回或驳回
+        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
+
+        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        if (worker.getId().equals(ticket.getWorkerId())) {
+            // 转给同一个人的唯一效果是把 dispatch_time 往后推——那是一条绕过"24h 未接单提醒"的路
+            throw new BizException(ErrorCode.PARAM_INVALID, "新维修工与当前维修工相同，不需要转派");
+        }
+        Long previousWorkerId = ticket.getWorkerId();
+        String crossBuilding = crossBuildingTrace(ticket.getBuildingId(), worker.getId());
+        String remark = "转派给 " + worker.getRealName()
+                + (crossBuilding == null ? "" : "；" + crossBuilding)
+                + "；原因：" + dto.getReason();
+
+        conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.TRANSFER, adminId,
+                ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
+                        // 上一轮的接单/到场时间必须清掉：响应时长口径是"到场 − 派单"，
+                        // 留着旧值会算出负数或虚高的数。谁来过在 ticket_log 里，不丢
+                        .set(Ticket::getAcceptTime, null)
+                        .set(Ticket::getArriveTime, null),
+                entity -> {
+                    entity.setWorkerId(worker.getId());
+                    entity.setDispatchType(1);
+                    // 计时从头开始：不能让新师傅背前一个人的延迟
+                    entity.setDispatchTime(LocalDateTime.now());
+                },
+                remark);
+        // 通知原师傅（他的活没了，得知道为什么）：NoticeSpec(toStudent=false) 取的就是 ticket.workerId，
+        // 而这时的 ticket 还是转派前的对象
+        notifyTransition(ticket, TicketAction.TRANSFER, null,
+                "已转给 " + worker.getRealName() + "；原因：" + dto.getReason());
+        // 通知新师傅：与派单同一条文案
+        notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
+        // 计时重来，超时节点也要重登记（先撤掉旧节点的登记，避免按旧时间触发）
+        timeoutService.cancel(id);
+        timeoutService.registerAccept(id);
+        log.info("转派 ticketId={} from={} to={} operator={} reason={}",
+                id, previousWorkerId, worker.getId(), adminId, dto.getReason());
+    }
+
+    /**
+     * 派单 / 转派共用的目标校验：必须是**本租户**、启用中的维修工。
+     *
+     * <p>跨租户的师傅与"不存在的师傅"返回同一个错误：不告诉调用方"这个师傅是别家的"。
+     */
+    private SysUser requireEnabledWorker(Long workerId, Long tenantId) {
+        SysUser worker = sysUserMapper.selectById(workerId);
+        if (worker == null || !Integer.valueOf(UserType.WORKER.getCode()).equals(worker.getUserType())
+                || !Integer.valueOf(1).equals(worker.getStatus())
+                || !tenantId.equals(worker.getTenantId())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "维修工不存在或已停用");
+        }
+        return worker;
     }
 
     /**
@@ -604,6 +666,8 @@ public class TicketServiceImpl implements TicketService {
             TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false),
             // 验收不通过：发给维修工（toStudent=false → 接收人取 ticket.workerId）
             TicketAction.REWORK,   new NoticeSpec("TICKET_REWORKED",  "验收不通过",       null,                          false),
+            // 转派：发给**原师傅**（toStudent=false → 接收人取 ticket.workerId = 转派前的那个人）
+            TicketAction.TRANSFER, new NoticeSpec("TICKET_TRANSFERRED", "工单已转出",      null,                          false),
             TicketAction.AUTO_CLOSE, new NoticeSpec("TICKET_AUTO_CLOSED", "工单已自动关闭", "验收后超时未关闭，工单已自动关闭", true));
 
     /**

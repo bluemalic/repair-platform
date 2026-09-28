@@ -12,6 +12,7 @@ public enum TicketAction {
     FINISH("完工上报"),
     EVALUATE("验收评价"),
     REWORK("验收不通过"),
+    TRANSFER("转派"),
     CANCEL("撤销工单"),
     CLOSE("关闭工单"),
     REJECT("驳回"),

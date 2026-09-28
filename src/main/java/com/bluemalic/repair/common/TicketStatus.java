@@ -52,8 +52,10 @@ public enum TicketStatus {
             TO_DISPATCH.code, Set.of(TO_ACCEPT.code, CANCELED.code),
             // 已驳回的工单由后勤重新派单，回到待接单（见 docs/02 §5）
             REJECTED.code, Set.of(TO_ACCEPT.code),
-            TO_ACCEPT.code, Set.of(PROCESSING.code, REJECTED.code),
-            PROCESSING.code, Set.of(TO_VERIFY.code, REJECTED.code),
+            TO_ACCEPT.code, Set.of(PROCESSING.code, REJECTED.code, TO_ACCEPT.code),
+            PROCESSING.code, Set.of(TO_VERIFY.code, REJECTED.code, TO_ACCEPT.code),
+            // 上面两条里到 TO_ACCEPT 的那两个目标都是「转派」（docs/01 §4.1）：换个师傅但单不退，
+            // 新师傅仍要走"接单"。20 → 20 看着怪，但它就是"还是待接单，只换了人"
             // 40 → 30 是"学生验收不通过、打回重做"（docs/01 §4.1）：与 40 → 80（驳回，退调度池）不同，
             // 它保留 worker_id——还是这位师傅返工
             TO_VERIFY.code, Set.of(FINISHED.code, REJECTED.code, PROCESSING.code),

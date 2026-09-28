@@ -12,6 +12,7 @@ import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.dto.TicketTransferDTO;
 
 /**
  * 工单业务。所有状态流转都经状态机校验、写 ticket_log、发站内通知。
@@ -54,6 +55,15 @@ public interface TicketService {
      * （还是你做，但没做好）。理由进 `ticket_log` 并通知维修工。
      */
     void rework(long id, TicketReworkDTO dto);
+
+    /**
+     * 转派：把已派出去的单换个人做（20 / 30 → 20），`docs/01` §4.1。
+     *
+     * <p>与驳回、打回都不同：单不用退回调度池，师傅也不停手——只是换了个人。
+     * 计时**从头开始**（`dispatch_time` 重置、上一轮的接单/到场时间清空），
+     * 不能让新师傅背前一个人的延迟。
+     */
+    void transfer(long id, TicketTransferDTO dto);
 
     /** 维修工接单（20 → 30），条件更新兜住并发抢单。 */
     void accept(long id);

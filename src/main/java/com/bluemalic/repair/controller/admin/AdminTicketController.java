@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
+import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -51,12 +52,29 @@ public class AdminTicketController {
         return Result.ok(ticketService.detail(id));
     }
 
-    @Operation(summary = "派单", description = "待派单/已驳回 → 待接单")
+    @Operation(summary = "派单", description = "待派单/已驳回 → 待接单。**已有维修工的单不能走这里**：换人用转派")
     @SaCheckPermission("ticket:dispatch")
     @PostMapping("/{id}/dispatch")
     public Result<Void> dispatch(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketDispatchDTO dto) {
         ticketService.dispatch(id, dto);
+        return Result.ok();
+    }
+
+    /**
+     * 转派：换个人做，单不退（`docs/01` §4.1）。
+     *
+     * <p>理由必填——这条动作会让原师傅手上的活突然消失，他得知道为什么（"临时有事"和"你做得不行"是两回事）。
+     * 计时会从头开始（`dispatch_time` 重置、上一轮的接单/到场时间清空），不能让新师傅背前一个人的延迟。
+     */
+    @Operation(summary = "转派",
+            description = "待接单/处理中 → 待接单（换人）。理由必填，会随通知发给原师傅。"
+                    + "计时重置、上一轮接单/到场时间清空；不能转给当前维修工")
+    @SaCheckPermission("ticket:transfer")
+    @PostMapping("/{id}/transfer")
+    public Result<Void> transfer(@Parameter(description = "工单ID") @PathVariable long id,
+                                 @Valid @RequestBody TicketTransferDTO dto) {
+        ticketService.transfer(id, dto);
         return Result.ok();
     }
 
