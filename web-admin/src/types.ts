@@ -263,3 +263,26 @@ export type AiSqlFrame = Pick<AiQueryResult, 'sql' | 'chart'>
 export type AiDataFrame = Pick<AiQueryResult, 'columns' | 'rows' | 'rowLimited'>
 
 export type AiDoneFrame = Pick<AiQueryResult, 'conclusion' | 'elapsedMs'>
+
+/**
+ * 操作审计日志一行（`docs/03` §5.4）。
+ *
+ * `operatorName` / `targetName` 是**发生当时的名字快照**：账号改名、楼栋被删之后，这条记录仍然读得懂
+ * ——审计是只读的历史，不跟着主数据变。
+ */
+export interface AuditLogVO {
+  id: string
+  operatorId: string
+  operatorName: string
+  /** 动作码，如 WORKER_CREATE */
+  action: string
+  /** 中文名由服务端拼好，前端不维护动作字典（新动作上线不用等前端发版） */
+  actionLabel: string
+  targetType: string
+  targetId: string | null
+  targetName: string | null
+  /** 一句人话摘要（不含敏感字段原值） */
+  detail: string | null
+  ip: string | null
+  createTime: string
+}
