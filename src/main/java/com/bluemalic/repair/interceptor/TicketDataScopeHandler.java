@@ -4,13 +4,13 @@ import cn.dev33.satoken.stp.StpInterface;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.handler.MultiDataPermissionHandler;
+import com.bluemalic.repair.common.SqlAst;
 import com.bluemalic.repair.entity.WorkerBuilding;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.CurrentTenantService;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
-import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
@@ -36,7 +36,7 @@ import java.util.List;
  *   <li>学生（默认）→ 本租户内 student_id = 当前用户</li>
  * </ul>
  *
- * <p>条件列一律限定到表名/别名（{@link #qualified}）：单表查询时是 {@code ticket.student_id}，
+ * <p>条件列一律限定到表名/别名（{@link SqlAst#qualified}）：单表查询时是 {@code ticket.student_id}，
  * 带别名的多表 JOIN（统计看板等）时为 {@code t.student_id}，避免列歧义。
  *
  * <p>依赖用 {@link ObjectProvider} 惰性获取：handler 被 MybatisPlusInterceptor 构造期引用，
@@ -137,7 +137,7 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
         if (roles.contains("WORKER")) {
             // 一个楼栋都不负责的师傅：左边恒假，整体等价于"只看派给我的 + 我协作的"（不再特判成 1 = 0）
             Expression byBuilding = buildingIds.isEmpty() ? parse("1 = 0") : inBuildings(table, buildingIds);
-            return parenthesis(new OrExpression(
+            return SqlAst.parenthesize(new OrExpression(
                     new OrExpression(byBuilding, equalsColumn(table, "worker_id", userId)),
                     collaborationsOf(table, userId)));
         }
@@ -159,27 +159,17 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
      * 拼进去的 userId 是登录态里的 long（不是用户可控的字符串），不存在注入面。
      */
     private Expression collaborationsOf(Table table, long userId) {
-        return parse(qualified(table, "id")
+        return parse(SqlAst.qualified(table, "id")
                 + " IN (SELECT ticket_id FROM ticket_collaborator WHERE worker_id = " + userId + ")");
     }
 
     private Expression inBuildings(Table table, List<Long> buildingIds) {
         InExpression in = new InExpression();
-        in.setLeftExpression(new Column(qualified(table, "building_id")));
+        in.setLeftExpression(new Column(SqlAst.qualified(table, "building_id")));
         // jsqlparser 5.x：IN 的右侧必须用带括号的列表，裸 ExpressionList 会渲染成 "IN 1"
         in.setRightExpression(new ParenthesedExpressionList<>(
                 buildingIds.stream().map(LongValue::new).toList()));
         return in;
-    }
-
-    /**
-     * 包一层括号。jsqlparser 5.x 的 {@code Parenthesis} 没有"接收表达式"的构造器
-     * （{@code withExpression} 是"替换第 0 个元素"，空列表上会 IndexOutOfBounds），所以先建空括号再 add。
-     */
-    private Expression parenthesis(Expression expression) {
-        Parenthesis parenthesis = new Parenthesis();
-        parenthesis.add(expression);
-        return parenthesis;
     }
 
     private Expression tenantCondition(Table table, long tenantId) {
@@ -209,16 +199,11 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
 
     private Expression equalsColumn(Table table, String column, long value) {
         EqualsTo eq = new EqualsTo();
-        eq.setLeftExpression(new Column(qualified(table, column)));
+        eq.setLeftExpression(new Column(SqlAst.qualified(table, column)));
         eq.setRightExpression(new LongValue(value));
         return eq;
     }
 
-    /** 条件列限定到表名或别名：JOIN 场景别名优先，避免与其他表同名列歧义。 */
-    private String qualified(Table table, String column) {
-        String prefix = table.getAlias() != null ? table.getAlias().getName() : table.getName();
-        return prefix + "." + column;
-    }
 
     private Expression parse(String sql) {
         try {
