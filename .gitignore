@@ -67,3 +67,4 @@ desktop.ini
 /mysql-data/
 /redis-data/
 /minio-data/
+.zcodeignore
