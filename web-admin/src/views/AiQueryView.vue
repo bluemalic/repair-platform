@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import * as echarts from 'echarts'
+// 按需引入（#7）：问数页用饼 / 折线 / 柱三种图 + tooltip/grid + canvas 渲染，其余全不注册。
+import * as echarts from 'echarts/core'
+import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { EChartsType } from 'echarts/core'
 import { askAiStream } from '@/api/ai'
 import type { AiQueryResult } from '@/types'
+
+echarts.use([BarChart, LineChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const question = ref('')
 const streaming = ref(false)
@@ -25,7 +32,7 @@ const examples = [
 ]
 
 const chartRef = ref<HTMLDivElement>()
-let chart: echarts.ECharts | null = null
+let chart: EChartsType | null = null
 let controller: AbortController | null = null
 
 /**
