@@ -2,7 +2,7 @@ package com.bluemalic.repair.controller;
 
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.interceptor.RateLimit;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.vo.RepairCodeVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class TicketCodeController {
 
-    private final TicketService ticketService;
+    private final TicketQueryService ticketQueryService;
 
     @Operation(summary = "按报修码查询位置",
             description = "返回楼栋与房间：学生端用于预填报修表单，维修工端用于比对是否到对了房间。"
@@ -32,6 +32,6 @@ public class TicketCodeController {
     @GetMapping("/by-code/{code}")
     public Result<RepairCodeVO> byCode(
             @Parameter(description = "报修码，如 306718") @PathVariable String code) {
-        return Result.ok(ticketService.byCode(code));
+        return Result.ok(ticketQueryService.byCode(code));
     }
 }
