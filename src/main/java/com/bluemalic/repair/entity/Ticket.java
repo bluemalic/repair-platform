@@ -31,6 +31,9 @@ public class Ticket {
     /** 未派单时为 null */
     private Long workerId;
 
+    /** 拆单来源工单ID，非拆单产生的为 null。**只拆一层**，所以是父指针、不是树——别按树写查询 */
+    private Long parentTicketId;
+
     private Long buildingId;
 
     private String room;

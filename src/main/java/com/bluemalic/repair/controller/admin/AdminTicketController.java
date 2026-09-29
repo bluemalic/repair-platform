@@ -2,8 +2,10 @@ package com.bluemalic.repair.controller.admin;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.bluemalic.repair.common.Result;
+import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
+import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
@@ -14,6 +16,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -93,5 +96,37 @@ public class AdminTicketController {
     public Result<Void> close(@Parameter(description = "工单ID") @PathVariable long id) {
         ticketService.close(id);
         return Result.ok();
+    }
+
+    @Operation(summary = "加协作者（多人同做一单）",
+            description = "把另一个师傅拉进这单一起干（docs/01 §4.5）。待接单/处理中才能加，最多 3 人；"
+                    + "协作者能到场、能完工，不能接单/驳回/转派。权限与派单同源：都是「谁参与这单」的判断")
+    @SaCheckPermission("ticket:dispatch")
+    @PostMapping("/{id}/collaborators")
+    public Result<Void> addCollaborator(@Parameter(description = "工单ID") @PathVariable long id,
+                                       @Valid @RequestBody TicketCollaboratorDTO dto) {
+        ticketService.addCollaborator(id, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "移除协作者",
+            description = "被移除的师傅随之看不到这单（留痕在工单时间线里）。状态门槛与加协作者一致")
+    @SaCheckPermission("ticket:dispatch")
+    @DeleteMapping("/{id}/collaborators/{workerId}")
+    public Result<Void> removeCollaborator(@Parameter(description = "工单ID") @PathVariable long id,
+                                           @Parameter(description = "维修工ID") @PathVariable long workerId) {
+        ticketService.removeCollaborator(id, workerId);
+        return Result.ok();
+    }
+
+    @Operation(summary = "拆单",
+            description = "原单里其实是两件事时，拆出一张**待派单的新工单**（docs/01 §4.5）：继承楼栋/房间/学生/"
+                    + "现场图片，描述另填，类别与紧急度可改。只拆一层；不在这里指定师傅——派单是独立动作。"
+                    + "返回新工单，供前端直接显示新单号")
+    @SaCheckPermission("ticket:dispatch")
+    @PostMapping("/{id}/split")
+    public Result<TicketVO> split(@Parameter(description = "工单ID") @PathVariable long id,
+                                  @Valid @RequestBody TicketSplitDTO dto) {
+        return Result.ok(ticketService.split(id, dto));
     }
 }
