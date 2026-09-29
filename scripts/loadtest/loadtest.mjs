@@ -13,10 +13,12 @@
  *        --scenario submit --qps 100 --duration 60 --concurrency 40
  *
  * 场景：
- *   submit  学生提交报修（写路径，对应"峰值 100 QPS ≈ 6000 单/分钟"）
- *   list    管理端工单列表（读路径，P99 目标 300ms）
- *   dash    统计看板总览（读路径，目标 800ms）
- *   mixed   按 10% 提交 / 60% 列表 / 30% 看板混合（更接近真实峰值的构成）
+ *   submit    学生提交报修（写路径，对应"峰值 100 QPS ≈ 6000 单/分钟"）
+ *   list      管理端工单列表（读路径，P99 目标 300ms）
+ *   dash      统计看板总览（读路径，目标 800ms）
+ *   wlist     维修工「我的任务」（派给我的 + 我协作的）
+ *   wbuilding 维修工「本楼栋」（我负责楼栋的全部工单——师傅端最重的一条查询）
+ *   mixed     按 10% 提交 / 60% 列表 / 30% 看板混合（更接近真实峰值的构成）
  *
  * 判成功的标准（与接口契约一致）：HTTP 200 且 body.code === 0。
  * 业务失败（比如 10004 限流）也算失败——**压测要把限流打出来**，否则会漏掉"高并发下自己被限流"这种事。
@@ -32,6 +34,7 @@ const OPTIONS = {
   tenant: { type: 'string', default: 'gdou' },
   student: { type: 'string', default: '20260001' },
   admin: { type: 'string', default: 'admin' },
+  worker: { type: 'string', default: 'worker01' },
   password: { type: 'string', default: 'Repair@2026' },
   code: { type: 'string', default: '482913' },
   category: { type: 'string', default: '1' },
@@ -51,6 +54,8 @@ const SCENARIOS = {
   submit: { submit: 1 },
   list: { list: 1 },
   dash: { dash: 1 },
+  wlist: { wlist: 1 },
+  wbuilding: { wbuilding: 1 },
   mixed: { submit: 0.1, list: 0.6, dash: 0.3 },
 }
 
@@ -112,6 +117,17 @@ const actions = {
   },
   async dash(ctx) {
     return api('/api/admin/statistics/overview', { token: ctx.adminToken })
+  },
+  /**
+   * 师傅端「我的任务」：派给我的 + 我协作的（`docs/01` §4.2）。
+   * 这条路径上多了数据权限的第三层（`id IN (我协作的单)` 子查询），所以协同处理之后要单独压它。
+   */
+  async wlist(ctx) {
+    return api('/api/worker/tickets?pageNum=1&pageSize=10&scope=mine', { token: ctx.workerToken })
+  },
+  /** 师傅端「本楼栋」：我负责楼栋的**全部**工单——师傅端最重的一条读查询，最容易被子查询拖慢。 */
+  async wbuilding(ctx) {
+    return api('/api/worker/tickets?pageNum=1&pageSize=10&scope=building', { token: ctx.workerToken })
   },
 }
 
@@ -223,6 +239,10 @@ const label = args.label || `${args.scenario}-${qps}qps`
 const ctx = { label, submitSeq: 0 }
 ctx.studentToken = await login(args.tenant, args.student, args.password)
 ctx.adminToken = args.admin ? await login(args.tenant, args.admin, args.password) : null
+// 师傅端的两个场景要维修工登录态；只在用到时才登录，省掉其它场景的一次往返
+ctx.workerToken = Object.keys(weights).some((name) => name.startsWith('w'))
+  ? await login(args.tenant, args.worker, args.password)
+  : null
 console.log('登录完成，开始打流…')
 
 const startedAt = performance.now()
