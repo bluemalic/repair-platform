@@ -122,6 +122,7 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 6. **数据权限**：分两种情况，先判断表在不在拦截器范围内。
    - **拦截器覆盖的表**（只有 `ticket` 与 `notification`）：`ticket` 注入**两层**条件——**租户**（`tenant_id`，所有角色都受限，后勤只在本租户内不限）+ **角色**（学生 `student_id`；维修工 `building_id IN (负责楼栋) OR worker_id = 我`——后一半是跨楼栋强制派单的单，见 docs/01 §4.2）；`notification` 注入 `receiver_id = 我`。**这两张表的 Mapper 里不许手写 `student_id = ?` / `tenant_id = ?`**，写了就是重复且会漏。无登录态的系统上下文（定时任务）不注入，这是超时兜底能跨租户处理的前提（ADR-008）。
    - **其余所有表**（`sys_user` / `worker_building` / `repair_code` / `building` / `ticket_category` / 统计聚合…）：**拦截器不管，必须显式写 `tenant_id` 条件**。不写不是"忘了优化"，是**跨租户读写**——基础数据接口尤其危险，因为它们直接读写账号与数据权限依据。**判断标准只有一条：这张表在不在上面那个名单里；不在，就自己写。**
+   - **全局表例外（成文于 2026-09-29）**：`sys_role` / `sys_permission` / `sys_user_role` 是平台内置数据（种子数据 `tenant_id = 0`，所有租户共享同一套角色与权限码），**按角色码 / 角色 ID / 主键查询时不带 `tenant_id`——带了反而查不到**（账号的 tenant_id 是 1、2…，而角色行是 0）。判断标准：这张表的行是不是恒为 0 / 是否按主键或全局唯一键定位。工单附属表（`ticket_log` / `ticket_evaluation` / `ticket_collaborator` / `worker_building` / `repair_code`）**不属于**这一类——它们每行都带业务租户的 `tenant_id`，漏写就是跨租户读写。
 7. **参数校验**：用 `@Valid` + `jakarta.validation` 注解，不要手写 if 判空。
 8. **日志**：关键业务节点（提交、派单、接单、核销、AI 查询）必须打日志；traceId 由过滤器注入 MDC 贯穿全链路；**手机号、密码等敏感信息不打日志**。
 9. **配置**：全部走 `${ENV_VAR:默认值}` 占位；**任何密码 / Key 都不许硬编码进代码**。
