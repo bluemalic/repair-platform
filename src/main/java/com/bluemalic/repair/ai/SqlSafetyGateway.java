@@ -2,11 +2,11 @@ package com.bluemalic.repair.ai;
 
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.SqlAst;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
-import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
@@ -302,13 +302,13 @@ public class SqlSafetyGateway {
                 for (Expression expression : join.getOnExpressions()) {
                     on = and(on, expression);
                 }
-                join.setOnExpressions(List.of(and(parenthesized(on), scope)));
+                join.setOnExpressions(List.of(and(SqlAst.parenthesize(on), scope)));
             }
         }
 
         Expression existing = select.getWhere();
         select.setWhere(existing == null ? whereScope
-                : new AndExpression(parenthesized(existing), whereScope));
+                : new AndExpression(SqlAst.parenthesize(existing), whereScope));
     }
 
     /** 单张表的范围条件：租户一定有，逻辑删除列按表结构决定。 */
@@ -320,24 +320,13 @@ public class SqlSafetyGateway {
         return scope;
     }
 
-    /**
-     * 加一层括号。jsqlparser 5.x 的 {@code Parenthesis} 没有"接收表达式"的构造器
-     * （{@code withExpression} 是"替换第 0 个元素"，空列表上会 IndexOutOfBounds），
-     * 所以先建空括号再把条件放进去。
-     */
-    private Expression parenthesized(Expression expression) {
-        Parenthesis parenthesis = new Parenthesis();
-        parenthesis.add(expression);
-        return parenthesis;
-    }
-
     private Expression and(Expression left, Expression right) {
         return left == null ? right : new AndExpression(left, right);
     }
 
     private Expression columnEquals(Table table, String column, long value) {
         EqualsTo condition = new EqualsTo();
-        condition.setLeftExpression(new Column(qualified(table, column)));
+        condition.setLeftExpression(new Column(SqlAst.qualified(table, column)));
         condition.setRightExpression(new LongValue(value));
         return condition;
     }
@@ -361,11 +350,6 @@ public class SqlSafetyGateway {
         return null;
     }
 
-    /** 条件列限定到表名或别名：JOIN 场景别名优先，避免与其他表同名列歧义。 */
-    private String qualified(Table table, String column) {
-        String prefix = table.getAlias() != null ? table.getAlias().getName() : table.getName();
-        return prefix + "." + column;
-    }
 
     /** 复用 40002（生成的 SQL 未通过安全校验），文案说清是哪一条没过——不新造错误码。 */
     private BizException reject(String reason, String sql) {
