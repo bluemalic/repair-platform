@@ -13,8 +13,8 @@
 
 > 想看完整全景（进度 / 路线图 / 全链路图 / 决策索引）：**[docs/00-项目全景.md](docs/00-项目全景.md)**
 
-**本仓库目前是后端工程 + 管理端前端骨架**。下面区分"已完成"与"规划中"——README 其余部分描述的是**完整目标架构**，
-其中的前端、AI、对象存储等按里程碑推进，未完成的部分在下表和目录结构里都标了状态。
+三端（后端 + 管理端 + 学生/维修工端）与 AI 域均已完整交付。下表按里程碑区分交付批次，
+进度与测试数随每个功能 PR 同步更新。
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -99,16 +99,13 @@
 | 框架 | Spring Boot 3 + MyBatis-Plus |
 | 鉴权 | Sa-Token |
 | 数据库 | MySQL 8 |
-| 缓存 / 队列 | Redis 7（缓存 + Token + 延迟队列 + 向量检索） |
+| 缓存 / 队列 | Redis 7（缓存 + Token + 延迟队列） |
 | 对象存储 | MinIO |
 | AI | LangChain4j + DeepSeek API |
 | 接口文档 | Knife4j (OpenAPI 3) |
 | 前端 | 管理端 Vue 3 + Element Plus；学生 / 维修工端 **uni-app**（先编译 H5，备案后可编译小程序） |
 | 部署 | Docker + Docker Compose + Nginx |
 | CI/CD | GitHub Actions |
-
-> ⚠️ 技术栈表与上面的架构图是**完整目标架构**（含 MinIO、AI 域、学生/维修工端）；当前仓库已实现的部分见
-> 顶部"当前进度"表——例如 AI 域（M4）**尚未接入**，`miniapp-h5/`（学生/维修工端）**只有骨架**。
 
 ---
 
@@ -169,10 +166,10 @@ docker exec -i repair-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-char
 │   ├── entity/ dto/ vo/     实体 / 入参 / 出参
 │   ├── converter/           Entity / DTO / VO 转换
 │   ├── interceptor/         数据权限、鉴权
-│   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关　（规划中，M4）
+│   ├── ai/                  Schema 检索、SQL 生成、SQL 安全网关
 │   └── job/                 定时任务（超时调度）
-├── web-admin/               后勤管理端（Vue 3 + Element Plus + ECharts，脚手架已就绪）
-├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5，骨架已就绪）
+├── web-admin/               后勤管理端（Vue 3 + Element Plus + ECharts）
+├── miniapp-h5/              学生 / 维修工端（uni-app，先编译 H5）
 ├── docs/                    需求 / 数据库 / 接口规范 / 架构决策 / 部署
 ├── nginx/                   nginx 配置（已预留 / 与 /h5/ 两个前端静态目录）
 ├── Dockerfile
