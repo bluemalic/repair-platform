@@ -4,6 +4,7 @@ import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -33,8 +34,14 @@ public class StudentTicketController {
 
     private final TicketService ticketService;
 
+    /**
+     * 提交报修同样吃报修码（{@code TicketCreateDTO.repairCode}），与 {@code by-code} 同档限流：
+     * 无效码返回 {@code 20006}、有效码放行——响应本身就是枚举预言机，且有效码会真实建单，
+     * 滥用面比查询接口更大。阈值走 {@code repair.rate-limit.*}（ADR-009），不在注解上写死。
+     */
     @Operation(summary = "提交报修")
     @SaCheckPermission("ticket:create")
+    @RateLimit
     @PostMapping
     public Result<TicketVO> submit(@Valid @RequestBody TicketCreateDTO dto) {
         return Result.ok(ticketService.submit(dto));
