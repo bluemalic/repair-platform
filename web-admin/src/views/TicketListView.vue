@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { closeTicket, dispatchTicket, getTicketDetail, pageTickets, rejectTicket, transferTicket } from '@/api/ticket'
+import { addCollaborator, removeCollaborator, splitTicket } from '@/api/ticket'
+import { listCategories } from '@/api/category'
 import { pageWorkers } from '@/api/worker'
-import type { TicketDetailVO, TicketVO, WorkerVO } from '@/types'
+import type { CategoryVO, TicketDetailVO, TicketVO, WorkerVO } from '@/types'
 
 /** 状态字典：与后端 TicketStatus 一一对应（docs/02）。 */
 const STATUS: Record<number, { label: string; type: 'info' | 'warning' | 'primary' | 'success' | 'danger' }> = {
@@ -33,6 +35,9 @@ const ACTION: Record<string, string> = {
   REJECT: '驳回',
   REWORK: '验收不通过（打回重做）',
   TRANSFER: '转派',
+  ADD_COLLABORATOR: '加协作者',
+  REMOVE_COLLABORATOR: '移除协作者',
+  SPLIT: '拆单',
   AUTO_CLOSE: '超时自动关闭',
   ACCEPT_TIMEOUT: '接单超时提醒',
   PROCESS_TIMEOUT: '处理超时升级',
@@ -71,11 +76,12 @@ const workerSearching = ref(false)
 /** 命中总数：下拉里只放前 N 条，超过时提示"用关键字继续搜"，避免让人以为就这么多 */
 const workerTotal = ref(0)
 /**
- * 同一个弹窗给两种动作用：`dispatch`（10/80 → 20，还没有师傅）与 `transfer`（20/30 → 20，换人）。
- * 合并的理由是**两边的表单、选人逻辑、跨楼栋确认完全一样**，差别只在"要不要写理由"和调哪个接口；
- * 拆成两个弹窗会让这段选人代码抄两遍。
+ * 同一个弹窗给三种动作用：`dispatch`（10/80 → 20，还没有师傅）、`transfer`（20/30 → 20，换人）、
+ * `collaborator`（20/30，把另一个师傅拉进来一起干，`docs/01` §4.5）。
+ * 合并的理由是**三边的表单、选人逻辑完全一样**，差别只在"要不要写理由""要不要跨楼栋确认"和调哪个接口；
+ * 拆成三个弹窗会让这段选人代码抄三遍。
  */
-const dispatchMode = ref<'dispatch' | 'transfer'>('dispatch')
+const dispatchMode = ref<'dispatch' | 'transfer' | 'collaborator'>('dispatch')
 const transferReason = ref('')
 
 function openDispatch(row: TicketVO) {
@@ -88,6 +94,17 @@ function openTransfer(row: TicketVO) {
   transferReason.value = ''
   openWorkerPicker(row)
 }
+
+function openCollaborator(row: TicketVO) {
+  dispatchMode.value = 'collaborator'
+  openWorkerPicker(row)
+}
+
+const dialogTitle = computed(() => {
+  if (dispatchMode.value === 'transfer') return '转派'
+  if (dispatchMode.value === 'collaborator') return '加协作者'
+  return '派单'
+})
 
 async function openWorkerPicker(row: TicketVO) {
   dispatchTarget.value = row
@@ -134,6 +151,7 @@ async function confirmDispatch() {
   const workerId = selectedWorkerId.value
   if (!target || !workerId) return
   const transferring = dispatchMode.value === 'transfer'
+  const collaborating = dispatchMode.value === 'collaborator'
   if (transferring && !transferReason.value.trim()) {
     ElMessage.warning('请填写转派理由：原师傅要知道为什么这单被转走了')
     return
@@ -141,7 +159,9 @@ async function confirmDispatch() {
 
   const worker = workerOptions.value.find((item) => item.id === workerId)
   const covered = !worker || worker.buildingIds.includes(target.buildingId)
-  if (!covered) {
+  // 加协作者不做跨楼栋确认："来帮忙的人不负责本楼栋"正是这个功能要解决的场景，
+  // 每次都弹一遍确认等于把正常操作包装成异常（派单/转派才需要，那是越过了楼栋约束）
+  if (!covered && !collaborating) {
     const where = target.buildingName ? `${target.buildingName} ${target.room}` : `工单 ${target.ticketNo}`
     await ElMessageBox.confirm(
       `${worker.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋${transferring ? '转派' : '强制派单'}（紧急抽调），确认继续？`,
@@ -154,11 +174,65 @@ async function confirmDispatch() {
     await transferTicket(target.id, workerId, transferReason.value.trim())
     // 转派的计时会重置，提示里把这句说出来：调度员要知道"催单时间重新起算"
     ElMessage.success('已转派；接单计时重新起算')
+  } else if (collaborating) {
+    await addCollaborator(target.id, workerId)
+    ElMessage.success('已加入协作：他能到场、能完工，但不能接单与驳回')
   } else {
     await dispatchTicket(target.id, workerId)
     ElMessage.success(covered ? '派单成功' : '已按紧急任务强制派单')
   }
   dispatchVisible.value = false
+  await load()
+}
+
+// ==================== 拆单 ====================
+
+const splitVisible = ref(false)
+const splitTarget = ref<TicketVO | null>(null)
+const splitForm = reactive({ description: '', categoryId: undefined as string | undefined, urgency: undefined as number | undefined })
+const categoryOptions = ref<CategoryVO[]>([])
+
+async function openSplit(row: TicketVO) {
+  splitTarget.value = row
+  splitForm.description = ''
+  // 类别与紧急度默认继承原单，但**要能改**：拆出来那件事多半不是同一类
+  // （"灯坏了"与"水龙头漏水"）——不能改的话调度员就只能拆出一张类别错的单
+  splitForm.categoryId = row.categoryId
+  splitForm.urgency = row.urgency
+  splitVisible.value = true
+  categoryOptions.value = await listCategories(1)
+}
+
+async function confirmSplit() {
+  const target = splitTarget.value
+  if (!target) return
+  if (!splitForm.description.trim()) {
+    ElMessage.warning('请写清拆出来的是什么问题')
+    return
+  }
+  const created = await splitTicket(target.id, {
+    description: splitForm.description.trim(),
+    categoryId: splitForm.categoryId,
+    urgency: splitForm.urgency,
+  })
+  splitVisible.value = false
+  // 新单是"待派单"：告诉调度员下一步该干什么，而不是让他去列表里找
+  ElMessage.success(`已拆出新工单 ${created.ticketNo}（待派单）`)
+  await load()
+}
+
+/** 从详情抽屉里移除协作者：抽屉与列表都要刷新，否则看到的还是旧名单。 */
+async function doRemoveCollaborator(workerId: string, workerName: string) {
+  const target = detail.value
+  if (!target) return
+  await ElMessageBox.confirm(
+    `移除协作者 ${workerName}？他将不再看到这张工单。`,
+    '移除协作者',
+    { type: 'warning' },
+  )
+  await removeCollaborator(target.id, workerId)
+  ElMessage.success('已移除')
+  detail.value = await getTicketDetail(target.id)
   await load()
 }
 
@@ -231,7 +305,7 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="submitTime" label="提交时间" width="170" />
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="380" fixed="right">
         <template #default="{ row }">
           <el-button link @click="openDetailById(row.id)">详情</el-button>
           <el-button v-if="row.status === 10 || row.status === 80" link type="primary" @click="openDispatch(row)">
@@ -241,6 +315,12 @@ onMounted(async () => {
           <el-button v-if="[20, 30].includes(row.status)" link type="primary" @click="openTransfer(row)">
             转派
           </el-button>
+          <!-- 加协作者：一件活要两个人干（docs/01 §4.5）。10 还没主责、40 之后活已经干完，都没意义 -->
+          <el-button v-if="[20, 30].includes(row.status)" link type="primary" @click="openCollaborator(row)">
+            协作者
+          </el-button>
+          <!-- 拆单：一张单里其实是两件事；同样只在活还没干完时可用 -->
+          <el-button v-if="[10, 20, 30].includes(row.status)" link @click="openSplit(row)">拆单</el-button>
           <el-button v-if="[20, 30, 40].includes(row.status)" link type="danger" @click="doReject(row)">驳回</el-button>
           <el-button v-if="row.status === 50" link type="primary" @click="doClose(row)">关闭</el-button>
         </template>
@@ -268,6 +348,23 @@ onMounted(async () => {
           <el-descriptions-item label="紧急度">{{ URGENCY[detail.urgency] ?? '未知' }}</el-descriptions-item>
           <el-descriptions-item label="位置">{{ detail.buildingName }} {{ detail.room }}</el-descriptions-item>
           <el-descriptions-item label="类别">{{ detail.categoryName }}</el-descriptions-item>
+          <el-descriptions-item label="师傅">{{ detail.workerName ?? '未派单' }}</el-descriptions-item>
+          <!-- 协作者：主责不在这个列表里（他就是上面的「师傅」）。
+               移除按钮只在 20/30 出现——与后端的状态门槛一致，不做"点了才报错"的按钮 -->
+          <el-descriptions-item v-if="detail.collaborators?.length" label="协作者" :span="2">
+            <el-tag
+              v-for="c in detail.collaborators"
+              :key="c.workerId"
+              class="collaborator"
+              :closable="[20, 30].includes(detail.status)"
+              @close="doRemoveCollaborator(c.workerId, c.workerName)"
+            >
+              {{ c.workerName }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detail.parentTicketNo" label="拆单来源" :span="2">
+            由工单 {{ detail.parentTicketNo }} 拆出
+          </el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ detail.submitTime }}</el-descriptions-item>
           <el-descriptions-item label="派单时间">{{ detail.dispatchTime ?? '—' }}</el-descriptions-item>
           <el-descriptions-item label="到场时间">{{ detail.arriveTime ?? '—' }}</el-descriptions-item>
@@ -342,7 +439,7 @@ onMounted(async () => {
       </template>
     </el-drawer>
 
-    <el-dialog v-model="dispatchVisible" :title="dispatchMode === 'transfer' ? '转派' : '派单'" width="520px">
+    <el-dialog v-model="dispatchVisible" :title="dialogTitle" width="520px">
       <el-form label-width="80px">
         <el-form-item label="工单">
           <span>
@@ -384,7 +481,47 @@ onMounted(async () => {
           :disabled="!selectedWorkerId || (dispatchMode === 'transfer' && !transferReason.trim())"
           @click="confirmDispatch"
         >
-          {{ dispatchMode === 'transfer' ? '确认转派' : '确认派单' }}
+          {{ dispatchMode === 'transfer' ? '确认转派' : dispatchMode === 'collaborator' ? '确认加入' : '确认派单' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 拆单：只填"拆出来的是什么" + 类别/紧急度。楼栋房间学生与现场图片都由后端继承原单 -->
+    <el-dialog v-model="splitVisible" title="拆单" width="520px">
+      <el-form label-width="80px">
+        <el-form-item label="原工单">
+          <span>
+            {{ splitTarget?.ticketNo }} · {{ splitTarget?.buildingName }} {{ splitTarget?.room }}
+          </span>
+        </el-form-item>
+        <el-form-item label="拆出什么">
+          <el-input
+            v-model="splitForm.description"
+            type="textarea"
+            :rows="3"
+            maxlength="500"
+            show-word-limit
+            placeholder="只描述拆出来的那一件事，例如：卫生间水龙头也在漏水"
+          />
+        </el-form-item>
+        <el-form-item label="类别">
+          <el-select v-model="splitForm.categoryId" style="width: 100%">
+            <el-option v-for="c in categoryOptions" :key="c.id" :label="c.name" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="紧急度">
+          <el-radio-group v-model="splitForm.urgency">
+            <el-radio-button :value="1">普通</el-radio-button>
+            <el-radio-button :value="2">紧急</el-radio-button>
+            <el-radio-button :value="3">特急</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <div class="hint">新工单是「待派单」，位置、学生与现场照片沿用原单；再拆它是拆不动的（只拆一层）。</div>
+      </el-form>
+      <template #footer>
+        <el-button @click="splitVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!splitForm.description.trim()" @click="confirmSplit">
+          确认拆单
         </el-button>
       </template>
     </el-dialog>
@@ -421,6 +558,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.collaborator {
+  margin-right: 6px;
 }
 .muted {
   color: var(--el-text-color-secondary);
