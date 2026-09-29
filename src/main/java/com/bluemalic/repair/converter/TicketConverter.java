@@ -23,6 +23,16 @@ public class TicketConverter {
 
     public static TicketVO toVO(Ticket ticket, Map<Long, String> buildingNames, Map<Long, String> categoryNames) {
         TicketVO vo = new TicketVO();
+        copyBaseFields(vo, ticket, buildingNames, categoryNames);
+        return vo;
+    }
+
+    /**
+     * 两个 VO 共有的父类字段。此前 toVO 与 toDetailVO 各拷一份，注释自己写着"字段新增时这里是
+     * 必须同步的点"——同步点从两处收敛到一处，新增字段只改这里。
+     */
+    private static void copyBaseFields(TicketVO vo, Ticket ticket,
+                                       Map<Long, String> buildingNames, Map<Long, String> categoryNames) {
         vo.setId(ticket.getId());
         vo.setTicketNo(ticket.getTicketNo());
         vo.setStatus(ticket.getStatus());
@@ -39,7 +49,6 @@ public class TicketConverter {
         vo.setFinishTime(ticket.getFinishTime());
         vo.setArriveMinutes(ticket.getArriveMinutes());
         vo.setHandleMinutes(ticket.getHandleMinutes());
-        return vo;
     }
 
     public static TicketDetailVO toDetailVO(Ticket ticket,
@@ -50,23 +59,7 @@ public class TicketConverter {
                                             List<TicketLogVO> logs,
                                             TicketEvaluation evaluation) {
         TicketDetailVO vo = new TicketDetailVO();
-        // 父类字段逐个拷贝，字段新增时这里是必须同步的点
-        vo.setId(ticket.getId());
-        vo.setTicketNo(ticket.getTicketNo());
-        vo.setStatus(ticket.getStatus());
-        vo.setUrgency(ticket.getUrgency());
-        vo.setBuildingId(ticket.getBuildingId());
-        vo.setBuildingName(buildingNames.get(ticket.getBuildingId()));
-        vo.setRoom(ticket.getRoom());
-        vo.setCategoryId(ticket.getCategoryId());
-        vo.setCategoryName(categoryNames.get(ticket.getCategoryId()));
-        vo.setStudentId(ticket.getStudentId());
-        vo.setWorkerId(ticket.getWorkerId());
-        vo.setSubmitTime(ticket.getSubmitTime());
-        vo.setDispatchTime(ticket.getDispatchTime());
-        vo.setFinishTime(ticket.getFinishTime());
-        vo.setArriveMinutes(ticket.getArriveMinutes());
-        vo.setHandleMinutes(ticket.getHandleMinutes());
+        copyBaseFields(vo, ticket, buildingNames, categoryNames);
         // 详情扩展
         vo.setDescription(ticket.getDescription());
         vo.setImages(ticket.getImages());
