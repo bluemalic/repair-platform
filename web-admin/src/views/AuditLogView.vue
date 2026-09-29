@@ -17,6 +17,8 @@ const query = reactive({
   pageSize: 20,
   action: undefined as string | undefined,
   operatorKeyword: '',
+  /** 登录记录默认不显示（docs/01 §4.4）；选了具体动作时后端会忽略它 */
+  includeLogin: false,
   /** 日期区间是数组，传给接口时拆成 startDate / endDate（含当天） */
   range: [] as string[],
 })
@@ -39,6 +41,10 @@ const ACTIONS = [
   { code: 'CATEGORY_DELETE', label: '删除类别' },
   { code: 'REPAIR_CODE_CREATE', label: '新增报修码' },
   { code: 'REPAIR_CODE_UPDATE', label: '修改报修码' },
+  // 登录类（默认不在列表里出现，选它就会按这个动作筛）
+  { code: 'LOGIN_SUCCESS', label: '登录成功' },
+  { code: 'LOGIN_FAILED', label: '登录失败' },
+  { code: 'LOGIN_DISABLED', label: '停用账号尝试登录' },
 ]
 
 /** 目标类型的中文名（与后端 AuditTarget 对应）。 */
@@ -62,6 +68,7 @@ async function load() {
       operatorKeyword: query.operatorKeyword || undefined,
       startDate: query.range?.[0] || undefined,
       endDate: query.range?.[1] || undefined,
+      includeLogin: query.includeLogin,
     })
     rows.value = page.list
     total.value = page.total
@@ -92,6 +99,11 @@ onMounted(load)
       <el-select v-model="query.action" placeholder="全部动作" clearable style="width: 170px" @change="search">
         <el-option v-for="a in ACTIONS" :key="a.code" :label="a.label" :value="a.code" />
       </el-select>
+      <!-- 登录记录默认不显示（它占绝大多数，会把"谁改了东西"挤到后面）；
+           勾上它、或直接在动作里选登录类，都能看到 -->
+      <el-checkbox v-model="query.includeLogin" :disabled="!!query.action" @change="search">
+        含登录事件
+      </el-checkbox>
       <el-date-picker
         v-model="query.range"
         type="daterange"
