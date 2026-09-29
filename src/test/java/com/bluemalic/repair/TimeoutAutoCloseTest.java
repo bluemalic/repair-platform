@@ -12,13 +12,16 @@ import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.TicketService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -56,7 +59,21 @@ class TimeoutAutoCloseTest {
     @Autowired
     private TicketService ticketService;
 
+    @Autowired
+    private StringRedisTemplate redis;
+
     private final List<Long> createdTickets = new ArrayList<>();
+
+    @BeforeEach
+    void clearStaleTimeoutKeys() {
+        // key 与 TimeoutServiceImpl.KEY_PREFIX 对应（private，这里用字面量锚定）。
+        // ZSet 成员不随测试事务回滚，cancel 也只清自己登记的——之前失败运行留下的"幽灵成员"
+        // 会让兜底扫描捞到不存在的工单。每个用例前整 key 清空，把"偶发红"从根上抹掉。
+        Set<String> stale = redis.keys("ticket:timeout:*");
+        if (stale != null && !stale.isEmpty()) {
+            redis.delete(stale);
+        }
+    }
 
     @AfterEach
     void cleanZSetMembers() {
