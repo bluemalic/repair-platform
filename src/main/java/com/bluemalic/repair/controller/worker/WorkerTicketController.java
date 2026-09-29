@@ -7,6 +7,7 @@ import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
+import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -37,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class WorkerTicketController {
 
+    private final TicketQueryService ticketQueryService;
     private final TicketService ticketService;
 
     @Operation(summary = "我的任务",
@@ -51,14 +53,14 @@ public class WorkerTicketController {
             @Parameter(description = "状态筛选") @RequestParam(required = false) Integer status,
             @Parameter(description = "视图：mine（派给我的，默认）/ building（我负责楼栋的全部）")
             @RequestParam(required = false) String scope) {
-        return Result.ok(ticketService.pageWorkerTasks(pageNum, pageSize, status, WorkerTaskScope.of(scope)));
+        return Result.ok(ticketQueryService.pageWorkerTasks(pageNum, pageSize, status, WorkerTaskScope.of(scope)));
     }
 
     @Operation(summary = "工单详情")
     @SaCheckPermission("ticket:list:assigned")
     @GetMapping("/{id}")
     public Result<TicketDetailVO> detail(@Parameter(description = "工单ID") @PathVariable long id) {
-        return Result.ok(ticketService.detail(id));
+        return Result.ok(ticketQueryService.detail(id));
     }
 
     @Operation(summary = "接单", description = "待接单 → 处理中；被他人抢先返回 20003")

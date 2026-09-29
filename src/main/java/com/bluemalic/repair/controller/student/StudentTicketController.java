@@ -5,6 +5,7 @@ import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
+import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class StudentTicketController {
 
+    private final TicketQueryService ticketQueryService;
     private final TicketService ticketService;
 
     /**
@@ -54,14 +56,14 @@ public class StudentTicketController {
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") long pageNum,
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "10") long pageSize,
             @Parameter(description = "状态筛选") @RequestParam(required = false) Integer status) {
-        return Result.ok(ticketService.page(pageNum, pageSize, status, null, null));
+        return Result.ok(ticketQueryService.page(pageNum, pageSize, status, null, null));
     }
 
     @Operation(summary = "工单详情")
     @SaCheckPermission("ticket:list:self")
     @GetMapping("/{id}")
     public Result<TicketDetailVO> detail(@Parameter(description = "工单ID") @PathVariable long id) {
-        return Result.ok(ticketService.detail(id));
+        return Result.ok(ticketQueryService.detail(id));
     }
 
     @Operation(summary = "撤销工单", description = "仅待派单状态可撤销")

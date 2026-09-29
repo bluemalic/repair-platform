@@ -1,9 +1,5 @@
 package com.bluemalic.repair.service;
 
-import com.bluemalic.repair.common.WorkerTaskScope;
-import com.bluemalic.repair.vo.PageResult;
-import com.bluemalic.repair.vo.RepairCodeVO;
-import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCollaboratorDTO;
@@ -24,25 +20,6 @@ public interface TicketService {
 
     /** 学生提交报修（可带报修码自动定位楼栋房间）。 */
     TicketVO submit(TicketCreateDTO dto);
-
-    /** 按报修码查位置——学生扫码报修与维修工扫码到场共用（跨端抽象）。 */
-    RepairCodeVO byCode(String code);
-
-    /** 当前登录人视角的工单列表（数据范围由拦截器决定）。 */
-    PageResult<TicketVO> page(long pageNum, long pageSize, Integer status, Long buildingId, Long categoryId);
-
-    /**
-     * 维修工的任务列表（两个视图，见 `docs/01` §4.2）。与 {@link #page} 的区别不只是筛选：
-     * 它按"紧急度高的置顶、同档内先来的在前"排序（工作台关心的是先做哪一单）。
-     *
-     * @param scope  {@link WorkerTaskScope#MINE} 只给派给我的单（默认过滤进行中状态）、
-     *               {@link WorkerTaskScope#BUILDING} 给我负责楼栋的全部工单
-     * @param status 显式传了就按它过滤，覆盖视图的默认状态过滤
-     */
-    PageResult<TicketVO> pageWorkerTasks(long pageNum, long pageSize, Integer status, WorkerTaskScope scope);
-
-    /** 工单详情（含流转时间线与评价）。 */
-    TicketDetailVO detail(long id);
 
     /** 学生撤销（10 → 70）。 */
     void cancel(long id);
