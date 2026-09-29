@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { TicketDetailVO } from '@/types'
 
 /**
@@ -10,7 +11,12 @@ import type { TicketDetailVO } from '@/types'
  * <p>做成组件而不是两端各写一遍：两端这里**确实完全一样**，而差异（操作）本来就在别处。
  * 注意只传数据、不传函数——小程序端对"函数当 props"不友好（AGENTS §3.2）。
  */
-defineProps<{ detail: TicketDetailVO }>()
+const props = defineProps<{ detail: TicketDetailVO }>()
+
+/** 协作者姓名串起来显示（最多 3 个人，不值得为它做折叠或滚动）。 */
+const collaboratorNames = computed(() =>
+  (props.detail.collaborators ?? []).map((item) => item.workerName).join('、'),
+)
 
 const STATUS: Record<number, { label: string; color: string }> = {
   10: { label: '待派单', color: '#e6a23c' },
@@ -33,6 +39,11 @@ const ACTION: Record<string, string> = {
   CANCEL: '撤销工单',
   CLOSE: '关闭工单',
   REJECT: '驳回',
+  REWORK: '验收不通过',
+  TRANSFER: '转派',
+  ADD_COLLABORATOR: '加协作者',
+  REMOVE_COLLABORATOR: '移除协作者',
+  SPLIT: '拆单',
   AUTO_CLOSE: '超时自动关闭',
   ACCEPT_TIMEOUT: '接单超时提醒',
   PROCESS_TIMEOUT: '处理超时升级',
@@ -78,6 +89,16 @@ function statusLabel(status: number | null): string {
       <view v-if="detail.arriveMinutes !== null || detail.handleMinutes !== null" class="meta">
         <text v-if="detail.arriveMinutes !== null">响应 {{ detail.arriveMinutes }} 分钟</text>
         <text v-if="detail.handleMinutes !== null">　处理 {{ detail.handleMinutes }} 分钟</text>
+      </view>
+      <!-- 谁在干这单：主责 + 协作者。两端共用这个只读组件，所以学生也看得到（他知道有人来修就行） -->
+      <view v-if="detail.workerName || detail.collaborators?.length" class="meta">
+        <text v-if="detail.workerName">主责 {{ detail.workerName }}</text>
+        <text v-if="detail.collaborators?.length">
+          {{ detail.workerName ? ' · ' : '' }}协作 {{ collaboratorNames }}
+        </text>
+      </view>
+      <view v-if="detail.parentTicketNo" class="meta">
+        <text>由工单 {{ detail.parentTicketNo }} 拆出</text>
       </view>
     </view>
 

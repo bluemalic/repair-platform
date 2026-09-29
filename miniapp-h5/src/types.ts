@@ -38,6 +38,13 @@ export interface TicketVO {
   room: string
   categoryName: string
   workerId: string | null
+  /**
+   * 当前登录人是不是这单的协作者（`docs/01` §4.5）。
+   *
+   * **只有「我的任务」列表会填**（那里要把"派给我的"与"我协作的"分开显示），其它列表是 null——
+   * 别把它当 `false` 用，否则别的地方会凭空长出一个「协作」标记。
+   */
+  collaborative?: boolean | null
   submitTime: string
   /** 后端列表里就有这两个时间，Vue 侧要用到（详情里显示"派单/完工"时刻） */
   dispatchTime: string | null
@@ -90,8 +97,19 @@ export interface TicketDetailVO extends TicketVO {
   acceptTime: string | null
   arriveTime: string | null
   closeTime: string | null
+  /** 协作者（多人同做一单）。**主责不在这个列表里**——他是 workerId / workerName */
+  collaborators: TicketCollaboratorVO[]
+  workerName: string | null
+  /** 拆单来源（非拆单产生的为 null） */
+  parentTicketNo: string | null
   logs: TicketLogVO[]
   evaluation: TicketEvaluationVO | null
+}
+
+/** 协作者（只读展示，加/移由后勤在管理端做）。 */
+export interface TicketCollaboratorVO {
+  workerId: string
+  workerName: string
 }
 
 /** 上传结果（docs/03 §7.3）。 */
