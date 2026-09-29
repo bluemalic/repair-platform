@@ -315,13 +315,14 @@ class TicketCollaboratorTest {
         String ticketId = dispatchedTicket(student, admin, "test-co7-owner");
         addCollaborator(admin, ticketId, "test-co7-helper");
 
-        // 管理端与师傅端的详情都要能看到"谁在一起干"（两端读同一个 VO）
+        // 管理端与师傅端的详情都要能看到"谁在一起干"（两端读同一个 VO），以及主责是谁
         for (String token : List.of(admin, owner, helper)) {
             String url = token.equals(admin) ? "/api/admin/tickets/" + ticketId : "/api/worker/tickets/" + ticketId;
             JsonNode detail = getJson(token, url).path("data");
             assertThat(detail.path("collaborators")).hasSize(1);
             assertThat(detail.path("collaborators").get(0).path("workerName").asText())
                     .isEqualTo("test-co7-helper");
+            assertThat(detail.path("workerName").asText()).isEqualTo("test-co7-owner");
         }
     }
 

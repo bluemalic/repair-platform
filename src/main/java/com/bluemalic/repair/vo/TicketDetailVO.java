@@ -32,6 +32,9 @@ public class TicketDetailVO extends TicketVO {
     @Schema(description = "协作者（多人同做一单，docs/01 §4.5）；主责不在这个列表里，看 workerId")
     private List<TicketCollaboratorVO> collaborators;
 
+    @Schema(description = "主责维修工姓名（未派单为 null）。详情页要回答「谁负责」，只给一个 ID 没用")
+    private String workerName;
+
     @Schema(description = "拆单来源工单ID，非拆单产生的为 null")
     private Long parentTicketId;
 
