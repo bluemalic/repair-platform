@@ -293,8 +293,15 @@ public class TicketServiceImpl implements TicketService {
             parentTicketNo = parent == null ? null : parent.getTicketNo();
         }
 
-        return TicketConverter.toDetailVO(ticket, buildings, categories,
+        TicketDetailVO vo = TicketConverter.toDetailVO(ticket, buildings, categories,
                 collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
+        // 主责的姓名在这里补：转换器已经有 7 个参数，再加一个不如就近补一行。
+        // 详情页要回答"谁负责"——只给一个 ID，看的人还得自己去别处查
+        if (ticket.getWorkerId() != null) {
+            SysUser worker = sysUserMapper.selectById(ticket.getWorkerId());
+            vo.setWorkerName(worker == null ? null : nullToEmpty(worker.getRealName()));
+        }
+        return vo;
     }
 
     @Override
