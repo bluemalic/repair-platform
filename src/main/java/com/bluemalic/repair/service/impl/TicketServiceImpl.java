@@ -137,12 +137,12 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        SysUser student = requireUser(studentId);
+        SysUser student = transitions.requireUser(studentId);
 
         Long buildingId;
         String room;
         if (dto.getRepairCode() != null && !dto.getRepairCode().isBlank()) {
-            RepairCode repairCode = requireRepairCode(dto.getRepairCode(), student.getTenantId());
+            RepairCode repairCode = transitions.requireRepairCode(dto.getRepairCode(), student.getTenantId());
             buildingId = repairCode.getBuildingId();
             room = repairCode.getRoom();
         } else {
@@ -153,13 +153,13 @@ public class TicketServiceImpl implements TicketService {
             room = dto.getRoom();
         }
         // 楼栋校验不能只放在上面那个分支里：扫码路径同样要过（码指向的楼栋可能已被停用）
-        requireEnabledBuilding(buildingId, student.getTenantId());
+        transitions.requireEnabledBuilding(buildingId, student.getTenantId());
 
-        TicketCategory category = requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
+        TicketCategory category = transitions.requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
 
         Ticket ticket = new Ticket();
         ticket.setTenantId(student.getTenantId());
-        ticket.setTicketNo(nextTicketNo());
+        ticket.setTicketNo(transitions.nextTicketNo());
         ticket.setStudentId(studentId);
         ticket.setBuildingId(buildingId);
         ticket.setRoom(room);
@@ -177,14 +177,14 @@ public class TicketServiceImpl implements TicketService {
                 ticket.getId(), studentId, buildingId, room);
 
         return TicketConverter.toVO(ticket,
-                buildingNames(List.of(buildingId)), categoryNames(List.of(dto.getCategoryId())));
+                transitions.buildingNames(List.of(buildingId)), transitions.categoryNames(List.of(dto.getCategoryId())));
     }
 
     @Override
     public RepairCodeVO byCode(String code) {
         long userId = StpUtil.getLoginIdAsLong();
-        SysUser user = requireUser(userId);
-        RepairCode repairCode = requireRepairCode(code, user.getTenantId());
+        SysUser user = transitions.requireUser(userId);
+        RepairCode repairCode = transitions.requireRepairCode(code, user.getTenantId());
         Building building = buildingMapper.selectById(repairCode.getBuildingId());
 
         RepairCodeVO vo = new RepairCodeVO();
@@ -205,8 +205,8 @@ public class TicketServiceImpl implements TicketService {
                         .eq(categoryId != null, Ticket::getCategoryId, categoryId)
                         .orderByDesc(Ticket::getSubmitTime));
 
-        Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
-        Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        Map<Long, String> buildings = transitions.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = transitions.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream()
@@ -257,9 +257,9 @@ public class TicketServiceImpl implements TicketService {
 
         Page<Ticket> page = ticketMapper.selectPage(new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)), query);
 
-        Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
-        Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
-        Set<Long> collaborated = collaboratedTicketIds(currentTenantService.requireTenantId(), workerId,
+        Map<Long, String> buildings = transitions.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = transitions.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        Set<Long> collaborated = transitions.collaboratedTicketIds(currentTenantService.requireTenantId(), workerId,
                 page.getRecords().stream().map(Ticket::getId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -275,16 +275,16 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     public TicketDetailVO detail(long id) {
-        Ticket ticket = requireTicket(id);
-        Map<Long, String> buildings = buildingNames(List.of(ticket.getBuildingId()));
-        Map<Long, String> categories = categoryNames(List.of(ticket.getCategoryId()));
+        Ticket ticket = transitions.requireTicket(id);
+        Map<Long, String> buildings = transitions.buildingNames(List.of(ticket.getBuildingId()));
+        Map<Long, String> categories = transitions.categoryNames(List.of(ticket.getCategoryId()));
 
         List<TicketLog> logs = ticketLogMapper.selectList(Wrappers.<TicketLog>lambdaQuery()
                 .eq(TicketLog::getTenantId, ticket.getTenantId())
                 .eq(TicketLog::getTicketId, id).orderByAsc(TicketLog::getCreateTime));
         Map<Long, String> operators = sysUserMapper.selectByIds(
                         logs.stream().map(TicketLog::getOperatorId).distinct().toList()).stream()
-                .collect(Collectors.toMap(SysUser::getId, u -> nullToEmpty(u.getRealName())));
+                .collect(Collectors.toMap(SysUser::getId, u -> transitions.nullToEmpty(u.getRealName())));
         List<TicketLogVO> logVOs = logs.stream()
                 .map(l -> TicketConverter.toLogVO(l, operators)).toList();
 
@@ -302,12 +302,12 @@ public class TicketServiceImpl implements TicketService {
         }
 
         TicketDetailVO vo = TicketConverter.toDetailVO(ticket, buildings, categories,
-                collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
+                transitions.collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
         // 主责的姓名在这里补：转换器已经有 7 个参数，再加一个不如就近补一行。
         // 详情页要回答"谁负责"——只给一个 ID，看的人还得自己去别处查
         if (ticket.getWorkerId() != null) {
             SysUser worker = sysUserMapper.selectById(ticket.getWorkerId());
-            vo.setWorkerName(worker == null ? null : nullToEmpty(worker.getRealName()));
+            vo.setWorkerName(worker == null ? null : transitions.nullToEmpty(worker.getRealName()));
         }
         return vo;
     }
@@ -316,7 +316,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void cancel(long id) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CANCELED.getCode());
 
         // 学生只能撤自己的单——数据范围由拦截器注入到 UPDATE 里，这里不再手写 student_id 条件
@@ -330,7 +330,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void rework(long id, TicketReworkDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         if (!ticket.getStudentId().equals(studentId)) {
             throw new BizException(ErrorCode.TICKET_NOT_YOURS);
         }
@@ -354,7 +354,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void evaluate(long id, TicketEvaluateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         if (!ticket.getStudentId().equals(studentId)) {
             throw new BizException(ErrorCode.TICKET_NOT_YOURS);
         }
@@ -388,9 +388,9 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void accept(long id) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.PROCESSING.getCode());
-        if (isNotAssignee(ticket, workerId)) {
+        if (transitions.isNotAssignee(ticket, workerId)) {
             // 状态对但不是派给我的 → 并发抢单场景
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
@@ -412,17 +412,17 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void arrive(long id, TicketArriveDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         if (ticket.getStatus() != TicketStatus.PROCESSING.getCode()) {
             throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED, "工单不在处理中，无法到场打卡");
         }
         // 到场/完工对**参与人**开放：主责或协作者（docs/01 §4.5）。
         // 接单与驳回仍只给主责——那两件事是"我认领这单"和"这单不该我做"，属于处置权
-        if (isNotParticipant(ticket, workerId)) {
+        if (transitions.isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         // 扫码到场的关键校验：码对应的位置必须和工单一致，防止"人没到先打卡"
-        RepairCode repairCode = requireRepairCode(dto.getRepairCode(), ticket.getTenantId());
+        RepairCode repairCode = transitions.requireRepairCode(dto.getRepairCode(), ticket.getTenantId());
         if (!repairCode.getBuildingId().equals(ticket.getBuildingId())
                 || !repairCode.getRoom().equals(ticket.getRoom())) {
             throw new BizException(ErrorCode.REPAIR_CODE_ROOM_MISMATCH);
@@ -454,9 +454,9 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void finish(long id, TicketFinishDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_VERIFY.getCode());
-        if (isNotParticipant(ticket, workerId)) {
+        if (transitions.isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
 
@@ -482,7 +482,7 @@ public class TicketServiceImpl implements TicketService {
         if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
             notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_FINISHED_BY_COLLABORATOR",
                     "工单已由协作者完工",
-                    "工单 " + ticket.getTicketNo() + " 已由 " + nullToEmpty(requireUser(workerId).getRealName())
+                    "工单 " + ticket.getTicketNo() + " 已由 " + transitions.nullToEmpty(transitions.requireUser(workerId).getRealName())
                             + " 完工，等待学生验收",
                     ticket.getId());
         }
@@ -492,9 +492,9 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void rejectByWorker(long id, TicketRejectDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
-        if (isNotAssignee(ticket, workerId)) {
+        if (transitions.isNotAssignee(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         doReject(ticket, workerId, dto.getReason());
@@ -505,7 +505,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void rejectByAdmin(long id, TicketRejectDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
         doReject(ticket, adminId, dto.getReason());
         transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
@@ -532,10 +532,10 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void dispatch(long id, TicketDispatchDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
 
-        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         // 已有师傅的单不能走"派单"：那是**换人**，要走转派——它要重置计时、清掉上一轮的
         // 接单/到场时间、并单独留一条 TRANSFER 台账。两条路都能换人的话，台账就分不清了
         if (ticket.getWorkerId() != null) {
@@ -544,7 +544,7 @@ public class TicketServiceImpl implements TicketService {
 
         // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
         // 为的是不让"派错楼栋"变成一张没人能操作的单（被派的人按『派给我的单』看得到、能处理）
-        String crossBuilding = crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
+        String crossBuilding = transitions.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
 
         transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
@@ -566,17 +566,17 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void transfer(long id, TicketTransferDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         // 20 → 20 / 30 → 20 都是允许的（docs/02 §5）；40 及之后不允许——那时该走打回或驳回
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
 
-        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         if (worker.getId().equals(ticket.getWorkerId())) {
             // 转给同一个人的唯一效果是把 dispatch_time 往后推——那是一条绕过"24h 未接单提醒"的路
             throw new BizException(ErrorCode.PARAM_INVALID, "新维修工与当前维修工相同，不需要转派");
         }
         Long previousWorkerId = ticket.getWorkerId();
-        String crossBuilding = crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
+        String crossBuilding = transitions.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
         String remark = "转派给 " + worker.getRealName()
                 + (crossBuilding == null ? "" : "；" + crossBuilding)
                 + "；原因：" + dto.getReason();
@@ -612,17 +612,17 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void addCollaborator(long id, TicketCollaboratorDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         requireCollaboratingStatus(ticket, "加协作者");
         // 与派单同一条校验：本租户、启用中的维修工（跨租户与"不存在"对外是同一个错误）
-        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         if (worker.getId().equals(ticket.getWorkerId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "他就是这单的主责师傅，不用再加成协作者");
         }
-        if (isCollaborator(ticket, worker.getId())) {
+        if (transitions.isCollaborator(ticket, worker.getId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "该师傅已经是这单的协作者");
         }
-        if (collaboratorCount(ticket) >= MAX_COLLABORATORS) {
+        if (transitions.collaboratorCount(ticket) >= MAX_COLLABORATORS) {
             throw new BizException(ErrorCode.PARAM_INVALID,
                     "一单最多 " + MAX_COLLABORATORS + " 个协作者；活再多就该考虑拆单了");
         }
@@ -639,7 +639,7 @@ public class TicketServiceImpl implements TicketService {
         }
 
         transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
-                TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + nullToEmpty(worker.getRealName()));
+                TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + transitions.nullToEmpty(worker.getRealName()));
         notifyCollaboratorChange(ticket, worker, true);
         log.info("加协作者 ticketId={} workerId={} operator={}", id, worker.getId(), adminId);
     }
@@ -648,7 +648,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public void removeCollaborator(long id, long workerId) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         requireCollaboratingStatus(ticket, "移除协作者");
 
         int rows = ticketCollaboratorMapper.delete(Wrappers.<TicketCollaborator>lambdaQuery()
@@ -662,7 +662,7 @@ public class TicketServiceImpl implements TicketService {
         SysUser worker = sysUserMapper.selectById(workerId);
         transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
                 TicketAction.REMOVE_COLLABORATOR, adminId,
-                "移除协作者：" + (worker == null ? String.valueOf(workerId) : nullToEmpty(worker.getRealName())));
+                "移除协作者：" + (worker == null ? String.valueOf(workerId) : transitions.nullToEmpty(worker.getRealName())));
         if (worker != null) {
             // 通知当事人：他刚失去这张单的可见范围，不告诉他，他会照旧去现场
             notifyCollaboratorChange(ticket, worker, false);
@@ -674,7 +674,7 @@ public class TicketServiceImpl implements TicketService {
     @Transactional
     public TicketVO split(long id, TicketSplitDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         if (ticket.getParentTicketId() != null) {
             // 只拆一层：拆出来的单再拆下去会变成一棵谁都说不清的树（docs/01 §4.5）
             throw new BizException(ErrorCode.PARAM_INVALID, "拆出来的工单不能再拆");
@@ -684,11 +684,11 @@ public class TicketServiceImpl implements TicketService {
                     TicketStatus.of(ticket.getStatus()).getDesc() + "的工单不能拆单");
         }
         Long categoryId = dto.getCategoryId() == null ? ticket.getCategoryId() : dto.getCategoryId();
-        requireEnabledCategory(categoryId, ticket.getTenantId());
+        transitions.requireEnabledCategory(categoryId, ticket.getTenantId());
 
         Ticket created = new Ticket();
         created.setTenantId(ticket.getTenantId());
-        created.setTicketNo(nextTicketNo());
+        created.setTicketNo(transitions.nextTicketNo());
         created.setStudentId(ticket.getStudentId());
         created.setParentTicketId(ticket.getId());
         // 楼栋 / 房间 / 图片继承原单：拆出来的那件事与原来那件在同一处、由同一个学生报的，
@@ -711,8 +711,8 @@ public class TicketServiceImpl implements TicketService {
         notifySplit(ticket, created);
         log.info("拆单 sourceTicketId={} newTicketId={} operator={}", id, created.getId(), adminId);
 
-        return TicketConverter.toVO(created, buildingNames(List.of(created.getBuildingId())),
-                categoryNames(List.of(created.getCategoryId())));
+        return TicketConverter.toVO(created, transitions.buildingNames(List.of(created.getBuildingId())),
+                transitions.categoryNames(List.of(created.getCategoryId())));
     }
 
     /**
@@ -729,7 +729,7 @@ public class TicketServiceImpl implements TicketService {
 
     /** 加/移协作者的通知：**当事人**（他被加进来 / 被移出去，是直接受影响的人）+ **主责**（谁进了这单他该知道）。 */
     private void notifyCollaboratorChange(Ticket ticket, SysUser worker, boolean added) {
-        String name = nullToEmpty(worker.getRealName());
+        String name = transitions.nullToEmpty(worker.getRealName());
         notificationService.send(ticket.getTenantId(), worker.getId(),
                 added ? "TICKET_COLLABORATOR_ADDED" : "TICKET_COLLABORATOR_REMOVED",
                 added ? "你被加入协作" : "你已不是协作人",
@@ -765,47 +765,16 @@ public class TicketServiceImpl implements TicketService {
 
     /** 通知里的位置文案：楼栋名 + 房间号（楼栋查不到时只给房间号，不编造）。 */
     private String location(Ticket ticket) {
-        String building = buildingNames(List.of(ticket.getBuildingId())).get(ticket.getBuildingId());
+        String building = transitions.buildingNames(List.of(ticket.getBuildingId())).get(ticket.getBuildingId());
         return (building == null ? "" : building) + ticket.getRoom();
     }
 
-    /**
-     * 派单 / 转派共用的目标校验：必须是**本租户**、启用中的维修工。
-     *
-     * <p>跨租户的师傅与"不存在的师傅"返回同一个错误：不告诉调用方"这个师傅是别家的"。
-     */
-    private SysUser requireEnabledWorker(Long workerId, Long tenantId) {
-        SysUser worker = sysUserMapper.selectById(workerId);
-        if (worker == null || !Integer.valueOf(UserType.WORKER.getCode()).equals(worker.getUserType())
-                || !Integer.valueOf(1).equals(worker.getStatus())
-                || !tenantId.equals(worker.getTenantId())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "维修工不存在或已停用");
-        }
-        return worker;
-    }
-
-    /**
-     * 跨楼栋强制派单的留痕文案；师傅负责这栋楼时返回 {@code null}（正常的派单不写多余备注）。
-     *
-     * <p>它进 `ticket_log.remark`，所以在管理端的工单时间线上看得见"这一单是被谁强行跨楼栋派下来的"。
-     */
-    private String crossBuildingTrace(Long tenantId, long buildingId, long workerId) {
-        boolean covered = workerBuildingMapper.selectCount(Wrappers.<WorkerBuilding>lambdaQuery()
-                .eq(WorkerBuilding::getTenantId, tenantId)
-                .eq(WorkerBuilding::getWorkerId, workerId)
-                .eq(WorkerBuilding::getBuildingId, buildingId)) > 0;
-        if (covered) {
-            return null;
-        }
-        log.warn("跨楼栋强制派单 buildingId={} workerId={}（该师傅不负责这栋楼）", buildingId, workerId);
-        return "跨楼栋强制派单（该师傅不负责本单楼栋）";
-    }
 
     @Override
     @Transactional
     public void close(long id) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
 
         transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.CLOSE, adminId,
@@ -819,7 +788,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public void autoClose(long id) {
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
         transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
                 ticket.getTenantId(), ticket.getStatus(),
@@ -832,7 +801,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public void remindAcceptTimeout(long id) {
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
                 NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
@@ -842,7 +811,7 @@ public class TicketServiceImpl implements TicketService {
     @Override
     @Transactional
     public void escalateProcessTimeout(long id) {
-        Ticket ticket = requireTicket(id);
+        Ticket ticket = transitions.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
                 NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()
@@ -861,7 +830,7 @@ public class TicketServiceImpl implements TicketService {
             // 已流转（接单/完工/驳回/关闭）——提醒没有意义，静默跳过
             return;
         }
-        if (notifiedBefore(ticket.getTenantId(), ticket.getId(), action)) {
+        if (transitions.notifiedBefore(ticket.getTenantId(), ticket.getId(), action)) {
             return;
         }
         transitions.writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
@@ -869,42 +838,6 @@ public class TicketServiceImpl implements TicketService {
         int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), noticeType,
                 noticeTitle, content, ticket.getId());
         log.info("{} ticketId={} 送达后勤管理员 {} 人", action.getDesc(), ticket.getId(), sent);
-    }
-
-    /** 幂等判据：ticket_log 里已有该动作的记录（日志本身就是"已处理过"的事实依据）。 */
-    private boolean notifiedBefore(Long tenantId, long ticketId, TicketAction action) {
-        return ticketLogMapper.selectCount(Wrappers.<TicketLog>lambdaQuery()
-                .eq(TicketLog::getTenantId, tenantId)
-                .eq(TicketLog::getTicketId, ticketId)
-                .eq(TicketLog::getAction, action.name())) > 0;
-    }
-
-    // ==================== 私有工具 ====================
-
-    private boolean isNotAssignee(Ticket ticket, long workerId) {
-        return ticket.getWorkerId() == null || ticket.getWorkerId() != workerId;
-    }
-
-    /**
-     * 是不是这单的**参与人**：主责 或 协作者。协作者能到场、能完工；接单与驳回仍只给主责
-     * ——那两件事是"我认领这单"和"这单不该我做"，属于处置权（`docs/01` §4.5）。
-     */
-    private boolean isNotParticipant(Ticket ticket, long workerId) {
-        return isNotAssignee(ticket, workerId) && !isCollaborator(ticket, workerId);
-    }
-
-    /** 这个人在不在这单的协作者名单里。带 tenant_id 条件——防御纵深，见 {@link #collaboratedTicketIds}。 */
-    private boolean isCollaborator(Ticket ticket, long workerId) {
-        return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
-                .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
-                .eq(TicketCollaborator::getTicketId, ticket.getId())
-                .eq(TicketCollaborator::getWorkerId, workerId)) > 0;
-    }
-
-    private long collaboratorCount(Ticket ticket) {
-        return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
-                .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
-                .eq(TicketCollaborator::getTicketId, ticket.getId()));
     }
 
     /**
@@ -922,137 +855,5 @@ public class TicketServiceImpl implements TicketService {
                 .or().exists("SELECT 1 FROM ticket_collaborator c"
                         + " WHERE c.ticket_id = ticket.id AND c.worker_id = {0}", workerId));
     }
-
-    /** 详情里的协作者名单：一次查询 + 一次批量取姓名，不做 N+1。 */
-    private List<TicketCollaboratorVO> collaboratorsOf(Ticket ticket) {
-        List<TicketCollaborator> rows = ticketCollaboratorMapper.selectList(
-                Wrappers.<TicketCollaborator>lambdaQuery()
-                        .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
-                        .eq(TicketCollaborator::getTicketId, ticket.getId())
-                        .orderByAsc(TicketCollaborator::getCreateTime));
-        if (rows.isEmpty()) {
-            return List.of();
-        }
-        Map<Long, String> names = sysUserMapper.selectByIds(
-                        rows.stream().map(TicketCollaborator::getWorkerId).distinct().toList()).stream()
-                .collect(Collectors.toMap(SysUser::getId, u -> nullToEmpty(u.getRealName())));
-        return rows.stream().map(row -> {
-            TicketCollaboratorVO vo = new TicketCollaboratorVO();
-            vo.setWorkerId(row.getWorkerId());
-            vo.setWorkerName(names.get(row.getWorkerId()));
-            return vo;
-        }).toList();
-    }
-
-    /**
-     * 本页里"我参与协作"的工单 ID（给列表打「协作」标记用）。一次查询，不逐条回库。
-     *
-     * <p>条件里只带 worker_id 不带 tenant_id，与上面查 `worker_building` 同一个理由：
-     * worker_id 是全局唯一的雪花 ID（不可能命中别家租户的人），而工单 ID 取自**已经过租户过滤**的一页。
-     */
-    private Set<Long> collaboratedTicketIds(Long tenantId, long workerId, List<Long> ticketIds) {
-        if (ticketIds.isEmpty()) {
-            return Set.of();
-        }
-        return ticketCollaboratorMapper.selectList(Wrappers.<TicketCollaborator>lambdaQuery()
-                        .eq(TicketCollaborator::getTenantId, tenantId)
-                        .eq(TicketCollaborator::getWorkerId, workerId)
-                        .in(TicketCollaborator::getTicketId, ticketIds))
-                .stream().map(TicketCollaborator::getTicketId).collect(Collectors.toSet());
-    }
-
-    private Ticket requireTicket(long id) {
-        Ticket ticket = ticketMapper.selectById(id);
-        if (ticket == null) {
-            // 查不到 = 不存在，或不在当前用户的数据范围内——对外统一说"不存在"，不泄露差别
-            throw new BizException(ErrorCode.TICKET_NOT_FOUND);
-        }
-        return ticket;
-    }
-
-    private SysUser requireUser(long id) {
-        SysUser user = sysUserMapper.selectById(id);
-        if (user == null || !Integer.valueOf(1).equals(user.getStatus())) {
-            throw new BizException(ErrorCode.NOT_LOGIN);
-        }
-        return user;
-    }
-
-    private RepairCode requireRepairCode(String code, Long tenantId) {
-        RepairCode repairCode = repairCodeMapper.selectOne(Wrappers.<RepairCode>lambdaQuery()
-                .eq(RepairCode::getTenantId, tenantId)
-                .eq(RepairCode::getCode, code)
-                .eq(RepairCode::getStatus, 1));
-        if (repairCode == null) {
-            throw new BizException(ErrorCode.REPAIR_CODE_INVALID);
-        }
-        return repairCode;
-    }
-
-    /**
-     * 楼栋必须是本租户下、启用中的。校验对象是"最终落到工单上的那个 buildingId"，所以两条提交路径都要过。
-     *
-     * <p><b>直接传 buildingId 不校验会怎样</b>：能建出"后勤看得到、师傅永远看不到"的孤儿工单——
-     * 工单的可见范围是"师傅负责的楼栋"，而一个不存在 / 别家租户的楼栋不在任何人的范围内，
-     * 这张单从此没人能接。
-     *
-     * <p><b>扫码路径不校验会怎样</b>：停用一个楼栋并不会自动停用挂在它下面的报修码，
-     * 门上的码照扫、单照建，"停用楼栋 = 不能再用于新报修"（docs/03 §5.4）就成了空话。
-     *
-     * <p>对外不区分"不存在 / 别家租户的 / 已停用"，与类别的校验口径一致（也就不会透露别家的楼栋存在）。
-     */
-    private void requireEnabledBuilding(Long buildingId, Long tenantId) {
-        Building building = buildingMapper.selectById(buildingId);
-        if (building == null || !building.getTenantId().equals(tenantId)
-                || !Integer.valueOf(1).equals(building.getStatus())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "楼栋不存在或已停用");
-        }
-    }
-
-    /**
-     * 类别必须是本租户下、启用中的。提交报修与拆单共用——**同一条校验只能有一份实现**，
-     * 否则两条路径会各自漂移（拆单能挑到已停用的类别，就是"少写一次校验"的典型后果）。
-     *
-     * <p>对外不区分"不存在 / 别家租户的 / 已停用"，与楼栋的校验口径一致。
-     */
-    private TicketCategory requireEnabledCategory(Long categoryId, Long tenantId) {
-        TicketCategory category = ticketCategoryMapper.selectById(categoryId);
-        if (category == null || !category.getTenantId().equals(tenantId)
-                || !Integer.valueOf(1).equals(category.getStatus())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "报修类别不存在或已停用");
-        }
-        return category;
-    }
-
-    /** 工单号：WX + 日期 + 当日序号（Redis INCR），uk_ticket_no 兜底唯一。 */
-    private String nextTicketNo() {
-        String date = LocalDate.now().format(TICKET_NO_DATE);
-        String seqKey = "ticket:no:seq:" + date;
-        Long seq = stringRedisTemplate.opsForValue().increment(seqKey);
-        stringRedisTemplate.expire(seqKey, Duration.ofDays(2));
-        return "WX" + date + String.format("%06d", seq);
-    }
-
-    /** 批量 id → 楼栋名（selectByIds 一次拿全，避免循环回库的 N+1）。 */
-    private Map<Long, String> buildingNames(List<Long> ids) {
-        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
-        if (distinct.isEmpty()) {
-            return Map.of();
-        }
-        return buildingMapper.selectByIds(distinct).stream()
-                .collect(Collectors.toMap(Building::getId, Building::getName));
-    }
-
-    private Map<Long, String> categoryNames(List<Long> ids) {
-        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
-        if (distinct.isEmpty()) {
-            return Map.of();
-        }
-        return ticketCategoryMapper.selectByIds(distinct).stream()
-                .collect(Collectors.toMap(TicketCategory::getId, TicketCategory::getName));
-    }
-
-    private String nullToEmpty(String s) {
-        return s == null ? "" : s;
-    }
 }
+
