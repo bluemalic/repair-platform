@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+// 按需引入（#7）：看板只用折线（趋势）与饼（分布）+ tooltip/grid + canvas 渲染。
+// 全量 echarts 约 1MB，这里只注册用得到的，构建产物体积在 PR 描述里对比。
+import * as echarts from 'echarts/core'
+import { LineChart, PieChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { EChartsType } from 'echarts/core'
 import { distribution, exportStatistics, overview, trend, workerWorkload } from '@/api/statistics'
 import type { DistributionItem, StatisticsOverview, WorkerWorkload } from '@/types'
+
+echarts.use([LineChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const params = ref({ start: '', end: '' })
 const cards = ref<StatisticsOverview | null>(null)
@@ -12,8 +20,8 @@ const exporting = ref(false)
 
 const trendRef = ref<HTMLDivElement>()
 const pieRef = ref<HTMLDivElement>()
-let trendChart: echarts.ECharts | null = null
-let pieChart: echarts.ECharts | null = null
+let trendChart: EChartsType | null = null
+let pieChart: EChartsType | null = null
 
 /** 平均值/比率为 null 表示样本不足，显示 "-" 而不是 0（后端口径，见 docs/03）。 */
 function show(value: number | null | undefined, suffix = ''): string {
