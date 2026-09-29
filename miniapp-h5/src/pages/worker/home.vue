@@ -132,6 +132,8 @@ function openDetail(row: TicketVO) {
             class="urgency"
             :style="{ color: URGENCY[row.urgency].color, borderColor: URGENCY[row.urgency].color }"
           >{{ URGENCY[row.urgency].label }}</text>
+          <!-- 协作单：后勤把我拉进来一起做的（docs/01 §4.5）。标出来才分得清"派给我的"与"我搭手的" -->
+          <text v-if="row.collaborative" class="collaborative">协作</text>
         </view>
         <text class="status" :style="{ color: STATUS[row.status]?.color }">
           {{ STATUS[row.status]?.label ?? row.status }}
@@ -182,6 +184,14 @@ function openDetail(row: TicketVO) {
   font-size: 22rpx;
   line-height: 32rpx;
   border: 2rpx solid;
+  border-radius: 6rpx;
+}
+.collaborative {
+  padding: 0 10rpx;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  color: #2c6cf6;
+  border: 2rpx solid #2c6cf6;
   border-radius: 6rpx;
 }
 .page {
