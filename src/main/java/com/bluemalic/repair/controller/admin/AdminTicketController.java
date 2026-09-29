@@ -7,6 +7,7 @@ import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
+import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AdminTicketController {
 
+    private final TicketQueryService ticketQueryService;
     private final TicketService ticketService;
 
     @Operation(summary = "全部工单", description = "支持状态 / 楼栋 / 类别筛选")
@@ -45,14 +47,14 @@ public class AdminTicketController {
             @Parameter(description = "状态筛选") @RequestParam(required = false) Integer status,
             @Parameter(description = "楼栋筛选") @RequestParam(required = false) Long buildingId,
             @Parameter(description = "类别筛选") @RequestParam(required = false) Long categoryId) {
-        return Result.ok(ticketService.page(pageNum, pageSize, status, buildingId, categoryId));
+        return Result.ok(ticketQueryService.page(pageNum, pageSize, status, buildingId, categoryId));
     }
 
     @Operation(summary = "工单详情", description = "含流转时间线与评价")
     @SaCheckPermission("ticket:list:all")
     @GetMapping("/{id}")
     public Result<TicketDetailVO> detail(@Parameter(description = "工单ID") @PathVariable long id) {
-        return Result.ok(ticketService.detail(id));
+        return Result.ok(ticketQueryService.detail(id));
     }
 
     @Operation(summary = "派单", description = "待派单/已驳回 → 待接单。**已有维修工的单不能走这里**：换人用转派")
