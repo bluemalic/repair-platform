@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -55,6 +56,9 @@ public class AuditServiceImpl implements AuditService {
 
     private final CurrentTenantService currentTenantService;
 
+    /** 登录成功事件的去重（`docs/01` §4.4）：同一账号 + 同一天 + 同一 IP 只记一条。 */
+    private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
+
     /** 请求对象可能不存在（定时任务等系统上下文）→ 用 ObjectProvider 之外的最轻办法：允许为 null。 */
     private final org.springframework.beans.factory.ObjectProvider<HttpServletRequest> requestProvider;
 
@@ -77,12 +81,95 @@ public class AuditServiceImpl implements AuditService {
     }
 
     @Override
+    public void recordLoginSuccess(long tenantId, long userId, String username) {
+        String ip = clientIp();
+        if (!firstLoginOfTheDay(tenantId, userId, ip)) {
+            return;
+        }
+        insertLogin(tenantId, userId, username, AuditAction.LOGIN_SUCCESS, "登录成功");
+    }
+
+    @Override
+    public void recordLoginFailure(long tenantId, Long userId, String username, String action, String detail) {
+        insertLogin(tenantId, userId, username, action, detail);
+    }
+
+    /**
+     * 登录审计的实际写入。**整体包在 try/catch 里**——这两个方法是全项目唯一"审计失败不阻断业务"的地方
+     * （理由见接口注释与 `docs/01` §4.4）：登录失败还只是登不进去，登录成功写不进去却要把人挡在门外，
+     * 而那时唯一能来修表的管理员也在门外。失败只记 ERROR，不往上抛。
+     */
+    private void insertLogin(long tenantId, Long userId, String username, String action, String detail) {
+        try {
+            AuditLog entry = new AuditLog();
+            entry.setTenantId(tenantId);
+            entry.setOperatorId(userId == null ? 0L : userId);
+            entry.setOperatorName(truncate(loginOperatorName(userId, username), MAX_OPERATOR_NAME));
+            entry.setAction(action);
+            // 登录事件没有"目标"：它没有改任何东西。被尝试的那个账号记在操作人列（见 docs/01 §4.4）
+            entry.setDetail(truncate(detail, MAX_DETAIL));
+            entry.setIp(truncate(clientIp(), MAX_IP));
+            entry.setCreateTime(LocalDateTime.now());
+            auditLogMapper.insert(entry);
+        } catch (Exception e) {
+            log.error("登录审计写入失败（不阻断登录） action={} tenantId={} username={}", action, tenantId, username, e);
+        }
+    }
+
+    /**
+     * 今天这个账号有没有从同一个 IP 登录过（`docs/01` §4.4 的去重规则）。
+     *
+     * <p>用 Redis 的 SETNX 而不是查库：登录是高频路径（H5 每次冷启动都走），查一次 audit_log
+     * 会给这张越来越大的表加一次索引扫描；SETNX 是 O(1)。键带当天日期，TTL 到当天结束——
+     * 换句话说"去重只对当天有意义"，跨天自然重新记。
+     *
+     * <p><b>拿不到 Redis 时返回 true（照记）</b>：宁可多记几条，也不要因为缓存不可用就漏掉登录事件。
+     */
+    private boolean firstLoginOfTheDay(long tenantId, long userId, String ip) {
+        String key = "audit:login:" + tenantId + ":" + userId + ":"
+                + LocalDate.now() + ":" + (ip == null ? "-" : ip);
+        try {
+            Boolean first = stringRedisTemplate.opsForValue()
+                    .setIfAbsent(key, "1", Duration.ofSeconds(secondsUntilTomorrow()));
+            return first == null || first;
+        } catch (Exception e) {
+            log.warn("登录审计去重键写入失败，按未登录过处理（会多记一条） key={}", key, e);
+            return true;
+        }
+    }
+
+    /** 到明天 0 点还有多少秒（多给 60 秒余量，避免临界点上键提前过期）。 */
+    private long secondsUntilTomorrow() {
+        LocalDateTime now = LocalDateTime.now();
+        return Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay()).getSeconds() + 60;
+    }
+
+    /**
+     * 登录记录里的"操作人"：账号存在就用他的姓名，**账号不存在就用尝试时输入的那个用户名**——
+     * "有人在试一个不存在的账号"正是这条记录的全部价值。
+     */
+    private String loginOperatorName(Long userId, String username) {
+        if (userId != null) {
+            SysUser user = sysUserMapper.selectById(userId);
+            if (user != null && StringUtils.hasText(user.getRealName())) {
+                return user.getRealName();
+            }
+        }
+        return StringUtils.hasText(username) ? username : "未知账号";
+    }
+
+    @Override
     public PageResult<AuditLogVO> page(long pageNum, long pageSize, String action, String operatorKeyword,
-                                       LocalDate startDate, LocalDate endDate) {
+                                       LocalDate startDate, LocalDate endDate, boolean includeLogin) {
         long tenantId = currentTenantService.requireTenantId();
         var query = Wrappers.<AuditLog>lambdaQuery()
                 .eq(AuditLog::getTenantId, tenantId)
                 .eq(StringUtils.hasText(action), AuditLog::getAction, action)
+                // 没指定动作、也没勾"含登录事件"时把登录类排除掉：这个页面的主查询是"谁改了东西"，
+                // 登录记录会占绝大多数（docs/01 §4.4）。**显式指定了动作就不排除**——否则
+                // "筛 LOGIN_FAILED 却查不到"会变成一个很难想明白的现象
+                .notIn(!StringUtils.hasText(action) && !includeLogin,
+                        AuditLog::getAction, AuditAction.LOGIN_ACTIONS)
                 .like(StringUtils.hasText(operatorKeyword), AuditLog::getOperatorName, operatorKeyword)
                 // 日期筛选用 [startDate 00:00, endDate 次日 00:00) 的半开区间：写成 <= 23:59:59
                 // 会丢掉最后一秒里发生的操作，这种边界在排障时最容易被当成"记录丢了"
