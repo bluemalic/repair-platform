@@ -43,7 +43,11 @@ export interface TicketVO {
   buildingName: string
   room: string
   categoryName: string
+  /** 拆单时要用它（类别默认继承原单） */
+  categoryId: string
   workerId: string | null
+  /** 当前登录人是不是协作者。**只有师傅端任务列表会填**，其它列表为 null（docs/01 §4.5） */
+  collaborative?: boolean | null
   submitTime: string
   dispatchTime: string | null
   finishTime: string | null
@@ -180,9 +184,21 @@ export interface TicketDetailVO extends TicketVO {
   acceptTime: string | null
   arriveTime: string | null
   closeTime: string | null
+  /** 协作者（多人同做一单）。**主责不在这个列表里**——他是 workerId / workerName */
+  collaborators: TicketCollaboratorVO[]
+  workerName: string | null
+  /** 拆单来源（非拆单产生的单为 null）：详情页显示"由 XX 拆出" */
+  parentTicketId: string | null
+  parentTicketNo: string | null
   logs: TicketLogVO[]
   /** 未评价时为 null */
   evaluation: TicketEvaluationVO | null
+}
+
+/** 协作者：只读展示，加/移协作者走 /admin/tickets/{id}/collaborators。 */
+export interface TicketCollaboratorVO {
+  workerId: string
+  workerName: string
 }
 
 /** 站内通知。title / content 由后端按动作规格生成，前端直接展示即可。 */
