@@ -85,7 +85,7 @@ public class WorkerServiceImpl implements WorkerService {
                 query.orderByAsc(SysUser::getUsername));
 
         List<Long> workerIds = page.getRecords().stream().map(SysUser::getId).toList();
-        Map<Long, List<Long>> buildingIdsByWorker = buildingIdsByWorker(workerIds);
+        Map<Long, List<Long>> buildingIdsByWorker = buildingIdsByWorker(tenantId, workerIds);
         Map<Long, String> buildingNames = buildingNames(buildingIdsByWorker.values().stream()
                 .flatMap(List::stream).distinct().toList());
 
@@ -220,11 +220,12 @@ public class WorkerServiceImpl implements WorkerService {
     }
 
     /** worker_id → 负责的楼栋 ID 列表（一次查完，避免逐行回库）。 */
-    private Map<Long, List<Long>> buildingIdsByWorker(List<Long> workerIds) {
+    private Map<Long, List<Long>> buildingIdsByWorker(long tenantId, List<Long> workerIds) {
         if (workerIds.isEmpty()) {
             return Map.of();
         }
         return workerBuildingMapper.selectList(Wrappers.<WorkerBuilding>lambdaQuery()
+                        .eq(WorkerBuilding::getTenantId, tenantId)
                         .in(WorkerBuilding::getWorkerId, workerIds))
                 .stream()
                 .collect(Collectors.groupingBy(WorkerBuilding::getWorkerId,

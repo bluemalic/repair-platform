@@ -43,6 +43,7 @@ import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.NotificationService;
+import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.vo.PageResult;
@@ -124,6 +125,7 @@ public class TicketServiceImpl implements TicketService {
     private final SysUserMapper sysUserMapper;
     private final WorkerBuildingMapper workerBuildingMapper;
     private final NotificationService notificationService;
+    private final CurrentTenantService currentTenantService;
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
     private final StringRedisTemplate stringRedisTemplate;
@@ -220,7 +222,9 @@ public class TicketServiceImpl implements TicketService {
         List<Long> myBuildings = List.of();
         if (scope == WorkerTaskScope.BUILDING) {
             myBuildings = workerBuildingMapper.selectList(
-                            Wrappers.<WorkerBuilding>lambdaQuery().eq(WorkerBuilding::getWorkerId, workerId))
+                            Wrappers.<WorkerBuilding>lambdaQuery()
+                                    .eq(WorkerBuilding::getTenantId, currentTenantService.requireTenantId())
+                                    .eq(WorkerBuilding::getWorkerId, workerId))
                     .stream().map(WorkerBuilding::getBuildingId).distinct().toList();
             if (myBuildings.isEmpty()) {
                 return PageResult.of(new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize), 0));
@@ -254,7 +258,7 @@ public class TicketServiceImpl implements TicketService {
 
         Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
         Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
-        Set<Long> collaborated = collaboratedTicketIds(workerId,
+        Set<Long> collaborated = collaboratedTicketIds(currentTenantService.requireTenantId(), workerId,
                 page.getRecords().stream().map(Ticket::getId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -275,6 +279,7 @@ public class TicketServiceImpl implements TicketService {
         Map<Long, String> categories = categoryNames(List.of(ticket.getCategoryId()));
 
         List<TicketLog> logs = ticketLogMapper.selectList(Wrappers.<TicketLog>lambdaQuery()
+                .eq(TicketLog::getTenantId, ticket.getTenantId())
                 .eq(TicketLog::getTicketId, id).orderByAsc(TicketLog::getCreateTime));
         Map<Long, String> operators = sysUserMapper.selectByIds(
                         logs.stream().map(TicketLog::getOperatorId).distinct().toList()).stream()
@@ -283,7 +288,9 @@ public class TicketServiceImpl implements TicketService {
                 .map(l -> TicketConverter.toLogVO(l, operators)).toList();
 
         TicketEvaluation evaluation = ticketEvaluationMapper.selectOne(
-                Wrappers.<TicketEvaluation>lambdaQuery().eq(TicketEvaluation::getTicketId, id));
+                Wrappers.<TicketEvaluation>lambdaQuery()
+                        .eq(TicketEvaluation::getTenantId, ticket.getTenantId())
+                        .eq(TicketEvaluation::getTicketId, id));
 
         // 拆单来源：按 id 取父单的工单号（走主键）。**取不到就留空**——父单可能不在当前用户的
         // 可见范围里（例如协作者看得到子单、看不到父单），那是正常的，不该因此报错或泄露
@@ -536,7 +543,7 @@ public class TicketServiceImpl implements TicketService {
 
         // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
         // 为的是不让"派错楼栋"变成一张没人能操作的单（被派的人按『派给我的单』看得到、能处理）
-        String crossBuilding = crossBuildingTrace(ticket.getBuildingId(), worker.getId());
+        String crossBuilding = crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
 
         conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
@@ -568,7 +575,7 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.PARAM_INVALID, "新维修工与当前维修工相同，不需要转派");
         }
         Long previousWorkerId = ticket.getWorkerId();
-        String crossBuilding = crossBuildingTrace(ticket.getBuildingId(), worker.getId());
+        String crossBuilding = crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
         String remark = "转派给 " + worker.getRealName()
                 + (crossBuilding == null ? "" : "；" + crossBuilding)
                 + "；原因：" + dto.getReason();
@@ -781,8 +788,9 @@ public class TicketServiceImpl implements TicketService {
      *
      * <p>它进 `ticket_log.remark`，所以在管理端的工单时间线上看得见"这一单是被谁强行跨楼栋派下来的"。
      */
-    private String crossBuildingTrace(long buildingId, long workerId) {
+    private String crossBuildingTrace(Long tenantId, long buildingId, long workerId) {
         boolean covered = workerBuildingMapper.selectCount(Wrappers.<WorkerBuilding>lambdaQuery()
+                .eq(WorkerBuilding::getTenantId, tenantId)
                 .eq(WorkerBuilding::getWorkerId, workerId)
                 .eq(WorkerBuilding::getBuildingId, buildingId)) > 0;
         if (covered) {
@@ -852,7 +860,7 @@ public class TicketServiceImpl implements TicketService {
             // 已流转（接单/完工/驳回/关闭）——提醒没有意义，静默跳过
             return;
         }
-        if (notifiedBefore(ticket.getId(), action)) {
+        if (notifiedBefore(ticket.getTenantId(), ticket.getId(), action)) {
             return;
         }
         writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
@@ -863,8 +871,9 @@ public class TicketServiceImpl implements TicketService {
     }
 
     /** 幂等判据：ticket_log 里已有该动作的记录（日志本身就是"已处理过"的事实依据）。 */
-    private boolean notifiedBefore(long ticketId, TicketAction action) {
+    private boolean notifiedBefore(Long tenantId, long ticketId, TicketAction action) {
         return ticketLogMapper.selectCount(Wrappers.<TicketLog>lambdaQuery()
+                .eq(TicketLog::getTenantId, tenantId)
                 .eq(TicketLog::getTicketId, ticketId)
                 .eq(TicketLog::getAction, action.name())) > 0;
     }
@@ -972,15 +981,17 @@ public class TicketServiceImpl implements TicketService {
         return isNotAssignee(ticket, workerId) && !isCollaborator(ticket, workerId);
     }
 
-    /** 这个人在不在这单的协作者名单里。按 worker_id 查，不带 tenant_id 也行——见 {@link #collaboratedTicketIds}。 */
+    /** 这个人在不在这单的协作者名单里。带 tenant_id 条件——防御纵深，见 {@link #collaboratedTicketIds}。 */
     private boolean isCollaborator(Ticket ticket, long workerId) {
         return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
+                .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
                 .eq(TicketCollaborator::getTicketId, ticket.getId())
                 .eq(TicketCollaborator::getWorkerId, workerId)) > 0;
     }
 
     private long collaboratorCount(Ticket ticket) {
         return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
+                .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
                 .eq(TicketCollaborator::getTicketId, ticket.getId()));
     }
 
@@ -1004,6 +1015,7 @@ public class TicketServiceImpl implements TicketService {
     private List<TicketCollaboratorVO> collaboratorsOf(Ticket ticket) {
         List<TicketCollaborator> rows = ticketCollaboratorMapper.selectList(
                 Wrappers.<TicketCollaborator>lambdaQuery()
+                        .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
                         .eq(TicketCollaborator::getTicketId, ticket.getId())
                         .orderByAsc(TicketCollaborator::getCreateTime));
         if (rows.isEmpty()) {
@@ -1026,11 +1038,12 @@ public class TicketServiceImpl implements TicketService {
      * <p>条件里只带 worker_id 不带 tenant_id，与上面查 `worker_building` 同一个理由：
      * worker_id 是全局唯一的雪花 ID（不可能命中别家租户的人），而工单 ID 取自**已经过租户过滤**的一页。
      */
-    private Set<Long> collaboratedTicketIds(long workerId, List<Long> ticketIds) {
+    private Set<Long> collaboratedTicketIds(Long tenantId, long workerId, List<Long> ticketIds) {
         if (ticketIds.isEmpty()) {
             return Set.of();
         }
         return ticketCollaboratorMapper.selectList(Wrappers.<TicketCollaborator>lambdaQuery()
+                        .eq(TicketCollaborator::getTenantId, tenantId)
                         .eq(TicketCollaborator::getWorkerId, workerId)
                         .in(TicketCollaborator::getTicketId, ticketIds))
                 .stream().map(TicketCollaborator::getTicketId).collect(Collectors.toSet());

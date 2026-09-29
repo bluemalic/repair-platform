@@ -132,7 +132,7 @@ public class BuildingServiceImpl implements BuildingService {
         if (countWorkerAssignments(id, tenantId) > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID, "还有维修工负责该楼栋，请先在维修工管理里解除");
         }
-        if (countRepairCodes(id) > 0) {
+        if (countRepairCodes(tenantId, id) > 0) {
             throw new BizException(ErrorCode.PARAM_INVALID, "该楼栋下还有报修码，请先处理报修码");
         }
 
@@ -150,8 +150,9 @@ public class BuildingServiceImpl implements BuildingService {
         return count == null ? 0 : count;
     }
 
-    private long countRepairCodes(long buildingId) {
+    private long countRepairCodes(long tenantId, long buildingId) {
         Long count = repairCodeMapper.selectCount(Wrappers.<RepairCode>lambdaQuery()
+                .eq(RepairCode::getTenantId, tenantId)
                 .eq(RepairCode::getBuildingId, buildingId));
         return count == null ? 0 : count;
     }
