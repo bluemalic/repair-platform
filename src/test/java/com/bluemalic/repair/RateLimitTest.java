@@ -143,6 +143,24 @@ class RateLimitTest {
         byCode(worker, VALID_CODE).andExpect(jsonPath("$.code").value(0));
     }
 
+    /**
+     * 提交报修与按码查询同一个待遇（ADR-009 第二段）：入参里带着 6 位报修码，
+     * 无效码 20006 / 有效码放行——响应本身就是枚举预言机，且有效码会真实建单，滥用面比查询更大。
+     * 测试期间建出的工单随测试事务回滚，只留 Redis 计数（@AfterEach 清）。
+     */
+    @Test
+    void submitEndpointIsLimitedToo() throws Exception {
+        String student = givenToken("test-rate-limit-submit", 1, 1L);
+
+        for (int i = 1; i <= rule.getMaxRequests(); i++) {
+            submit(student).andExpect(jsonPath("$.code").value(0));
+        }
+
+        submit(student).andExpect(status().isOk()).andExpect(jsonPath("$.code").value(10004));
+        // 提交与按码查询是两个独立的桶（拦截器按"类名.方法名"计数）
+        byCode(student, VALID_CODE).andExpect(jsonPath("$.code").value(0));
+    }
+
     // ==================== 登录：按租户 + 账号计数 ====================
 
     @Test
@@ -211,6 +229,14 @@ class RateLimitTest {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"repairCode\":\"" + code + "\"}"));
+    }
+
+    private ResultActions submit(String token) throws Exception {
+        return mockMvc.perform(post("/api/student/tickets")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"repairCode\":\"" + VALID_CODE + "\",\"categoryId\":1,"
+                        + "\"description\":\"限流用例\"}"));
     }
 
     /** 造用户 + 角色并登录拿 token（与其它测试同一套写法：租户 1 = 种子数据 gdou）。 */
