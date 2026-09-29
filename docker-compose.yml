@@ -52,10 +52,11 @@ services:
           memory: ${MYSQL_MEM_LIMIT:-768M}
 
   redis:
-    # redis-stack 比官方镜像多出 RediSearch，为 M4 的 AI 向量检索准备
-    # 若拉取困难或服务器内存紧张，改用下面注释掉的官方镜像即可（缓存/Token/延迟队列不受影响）
-    image: redis/redis-stack-server:7.2.0-v10
-    # image: redis:7-alpine
+    # 官方镜像足够：缓存、Sa-Token 会话、延迟队列（ZSet）、限流计数都只用到核心命令，
+    # redis-stack 多出的 RediSearch 从未被 MODULE 加载过——M4 的 Schema 注入走的是
+    # 全量拼提示词（docs/04 ADR-005 背景 + pom.xml），embedding 方案已放弃，
+    # 那个 module 在 2C2G 上只是白占内存。
+    image: redis:7-alpine
     container_name: repair-redis
     restart: unless-stopped
     command: >
