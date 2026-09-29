@@ -15,17 +15,20 @@ import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketArriveDTO;
+import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketCategory;
+import com.bluemalic.repair.entity.TicketCollaborator;
 import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
 import com.bluemalic.repair.entity.WorkerBuilding;
@@ -34,6 +37,7 @@ import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.RepairCodeMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
+import com.bluemalic.repair.mapper.TicketCollaboratorMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
@@ -43,6 +47,7 @@ import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.RepairCodeVO;
+import com.bluemalic.repair.vo.TicketCollaboratorVO;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketLogVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -59,6 +64,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -97,10 +103,22 @@ public class TicketServiceImpl implements TicketService {
     private static final String NOTICE_PROCESS_TIMEOUT = "TICKET_PROCESS_TIMEOUT";
     private static final String TITLE_PROCESS_TIMEOUT = "工单处理超时升级";
 
+    /**
+     * 一单最多几个协作者（`docs/01` §4.5）。**再多就不叫"搭把手"了**——那种情况该看是不是该拆单。
+     * 这个上限不是并发的硬保证（两个请求同时加可能都通过检查），但唯一索引挡住了重复，
+     * 最多多出一个人；为它加锁不值得，写在这里免得下次被当成 bug 查。
+     */
+    private static final int MAX_COLLABORATORS = 3;
+
+    /** 能拆单的状态：活还没干完才谈得上"拆"（40 之后已经修完了，见 `docs/01` §4.5）。 */
+    private static final List<Integer> SPLITTABLE_STATUSES = List.of(
+            TicketStatus.TO_DISPATCH.getCode(), TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode());
+
     private final TicketMapper ticketMapper;
     private final TicketLogMapper ticketLogMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final TicketCategoryMapper ticketCategoryMapper;
+    private final TicketCollaboratorMapper ticketCollaboratorMapper;
     private final BuildingMapper buildingMapper;
     private final RepairCodeMapper repairCodeMapper;
     private final SysUserMapper sysUserMapper;
@@ -134,11 +152,7 @@ public class TicketServiceImpl implements TicketService {
         // 楼栋校验不能只放在上面那个分支里：扫码路径同样要过（码指向的楼栋可能已被停用）
         requireEnabledBuilding(buildingId, student.getTenantId());
 
-        TicketCategory category = ticketCategoryMapper.selectById(dto.getCategoryId());
-        if (category == null || !category.getTenantId().equals(student.getTenantId())
-                || !Integer.valueOf(1).equals(category.getStatus())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "报修类别不存在或已停用");
-        }
+        TicketCategory category = requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
 
         Ticket ticket = new Ticket();
         ticket.setTenantId(student.getTenantId());
@@ -213,14 +227,21 @@ public class TicketServiceImpl implements TicketService {
             }
         }
 
-        // 可见范围仍由拦截器注入（负责楼栋 或 派给我的单）；下面的条件是**这个视图要看什么**，
-        // 属于业务筛选不属于权限：mine → worker_id = 我（含跨楼栋强制派单的单），building → 我负责的楼栋
+        // 可见范围仍由拦截器注入（负责楼栋 或 派给我的 或 我协作的）；下面的条件是**这个视图要看什么**，
+        // 属于业务筛选不属于权限：mine → 派给我的 + 我协作的，building → 我负责的楼栋
         LambdaQueryWrapper<Ticket> query = Wrappers.<Ticket>lambdaQuery()
-                .eq(scope == WorkerTaskScope.MINE, Ticket::getWorkerId, workerId)
                 .in(scope == WorkerTaskScope.BUILDING, Ticket::getBuildingId, myBuildings)
                 // 紧急度高的置顶；同一档内先来的在前（先提交/先派单的先做）——docs/01 §4.2
                 .orderByDesc(Ticket::getUrgency)
                 .orderByAsc(Ticket::getSubmitTime);
+        if (scope == WorkerTaskScope.MINE) {
+            // 「我的任务」= 派给我的 **+ 我参与协作的**（docs/01 §4.2）。协作单必须一起看得到——
+            // 漏看的代价是"这单没人去修"。这里用 EXISTS 而不是查列表再 IN：协作者数量没有上界
+            // （历史协作会一直累积），而 idx_worker(worker_id, ticket_id) 让这条子查询走索引。
+            query.and(w -> w.eq(Ticket::getWorkerId, workerId)
+                    .or().exists("SELECT 1 FROM ticket_collaborator c"
+                            + " WHERE c.ticket_id = ticket.id AND c.worker_id = {0}", workerId));
+        }
         if (status != null) {
             query.eq(Ticket::getStatus, status);
         } else if (scope == WorkerTaskScope.MINE) {
@@ -233,10 +254,17 @@ public class TicketServiceImpl implements TicketService {
 
         Map<Long, String> buildings = buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
         Map<Long, String> categories = categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        Set<Long> collaborated = collaboratedTicketIds(workerId,
+                page.getRecords().stream().map(Ticket::getId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream()
-                .map(t -> TicketConverter.toVO(t, buildings, categories)).toList());
+                .map(t -> {
+                    TicketVO vo = TicketConverter.toVO(t, buildings, categories);
+                    // 这个列表里**始终填**布尔值（其它列表才留 null）：前端按它打「协作」标记
+                    vo.setCollaborative(collaborated.contains(t.getId()));
+                    return vo;
+                }).toList());
         return PageResult.of(voPage);
     }
 
@@ -257,7 +285,16 @@ public class TicketServiceImpl implements TicketService {
         TicketEvaluation evaluation = ticketEvaluationMapper.selectOne(
                 Wrappers.<TicketEvaluation>lambdaQuery().eq(TicketEvaluation::getTicketId, id));
 
-        return TicketConverter.toDetailVO(ticket, buildings, categories, logVOs, evaluation);
+        // 拆单来源：按 id 取父单的工单号（走主键）。**取不到就留空**——父单可能不在当前用户的
+        // 可见范围里（例如协作者看得到子单、看不到父单），那是正常的，不该因此报错或泄露
+        String parentTicketNo = null;
+        if (ticket.getParentTicketId() != null) {
+            Ticket parent = ticketMapper.selectById(ticket.getParentTicketId());
+            parentTicketNo = parent == null ? null : parent.getTicketNo();
+        }
+
+        return TicketConverter.toDetailVO(ticket, buildings, categories,
+                collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
     }
 
     @Override
@@ -364,7 +401,9 @@ public class TicketServiceImpl implements TicketService {
         if (ticket.getStatus() != TicketStatus.PROCESSING.getCode()) {
             throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED, "工单不在处理中，无法到场打卡");
         }
-        if (isNotAssignee(ticket, workerId)) {
+        // 到场/完工对**参与人**开放：主责或协作者（docs/01 §4.5）。
+        // 接单与驳回仍只给主责——那两件事是"我认领这单"和"这单不该我做"，属于处置权
+        if (isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         // 扫码到场的关键校验：码对应的位置必须和工单一致，防止"人没到先打卡"
@@ -384,9 +423,11 @@ public class TicketServiceImpl implements TicketService {
                 ? (int) Duration.between(ticket.getDispatchTime(), now).toMinutes() : null;
         conditionalUpdate(id, ticket.getStatus(), TicketAction.ARRIVE, workerId,
                 ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
-                        .eq(Ticket::getWorkerId, workerId)
-                        .isNull(Ticket::getArriveTime),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus())
+                            .isNull(Ticket::getArriveTime);
+                    appendParticipantCondition(wrapper, workerId);
+                },
                 entity -> {
                     entity.setArriveTime(now);
                     entity.setArriveMinutes(arriveMinutes);
@@ -400,7 +441,7 @@ public class TicketServiceImpl implements TicketService {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_VERIFY.getCode());
-        if (isNotAssignee(ticket, workerId)) {
+        if (isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
 
@@ -409,8 +450,10 @@ public class TicketServiceImpl implements TicketService {
                 ? (int) Duration.between(ticket.getArriveTime(), now).toMinutes() : null;
         conditionalUpdate(id, TicketStatus.TO_VERIFY.getCode(), TicketAction.FINISH, workerId,
                 ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
-                        .eq(Ticket::getWorkerId, workerId),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    appendParticipantCondition(wrapper, workerId);
+                },
                 entity -> {
                     entity.setFinishTime(now);
                     entity.setResultDesc(dto.getResultDesc());
@@ -420,6 +463,14 @@ public class TicketServiceImpl implements TicketService {
         // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
         timeoutService.cancel(id);
         notifyTransition(ticket, TicketAction.FINISH, null, null);
+        // 协作者完成的：主责得知道自己的单被完成了（他不会收到学生那条通知）
+        if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
+            notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_FINISHED_BY_COLLABORATOR",
+                    "工单已由协作者完工",
+                    "工单 " + ticket.getTicketNo() + " 已由 " + nullToEmpty(requireUser(workerId).getRealName())
+                            + " 完工，等待学生验收",
+                    ticket.getId());
+        }
     }
 
     @Override
@@ -540,6 +591,167 @@ public class TicketServiceImpl implements TicketService {
         timeoutService.registerAccept(id);
         log.info("转派 ticketId={} from={} to={} operator={} reason={}",
                 id, previousWorkerId, worker.getId(), adminId, dto.getReason());
+    }
+
+    @Override
+    @Transactional
+    public void addCollaborator(long id, TicketCollaboratorDTO dto) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = requireTicket(id);
+        requireCollaboratingStatus(ticket, "加协作者");
+        // 与派单同一条校验：本租户、启用中的维修工（跨租户与"不存在"对外是同一个错误）
+        SysUser worker = requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        if (worker.getId().equals(ticket.getWorkerId())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "他就是这单的主责师傅，不用再加成协作者");
+        }
+        if (isCollaborator(ticket, worker.getId())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "该师傅已经是这单的协作者");
+        }
+        if (collaboratorCount(ticket) >= MAX_COLLABORATORS) {
+            throw new BizException(ErrorCode.PARAM_INVALID,
+                    "一单最多 " + MAX_COLLABORATORS + " 个协作者；活再多就该考虑拆单了");
+        }
+
+        TicketCollaborator collaborator = new TicketCollaborator();
+        collaborator.setTenantId(ticket.getTenantId());
+        collaborator.setTicketId(id);
+        collaborator.setWorkerId(worker.getId());
+        try {
+            ticketCollaboratorMapper.insert(collaborator);
+        } catch (DuplicateKeyException e) {
+            // uk_ticket_worker 兜底：并发下两次加同一个人到这里变成明确的业务错误
+            throw new BizException(ErrorCode.PARAM_INVALID, "该师傅已经是这单的协作者");
+        }
+
+        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+                TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + nullToEmpty(worker.getRealName()));
+        notifyCollaboratorChange(ticket, worker, true);
+        log.info("加协作者 ticketId={} workerId={} operator={}", id, worker.getId(), adminId);
+    }
+
+    @Override
+    @Transactional
+    public void removeCollaborator(long id, long workerId) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = requireTicket(id);
+        requireCollaboratingStatus(ticket, "移除协作者");
+
+        int rows = ticketCollaboratorMapper.delete(Wrappers.<TicketCollaborator>lambdaQuery()
+                .eq(TicketCollaborator::getTenantId, ticket.getTenantId())
+                .eq(TicketCollaborator::getTicketId, id)
+                .eq(TicketCollaborator::getWorkerId, workerId));
+        if (rows == 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "该师傅不是这单的协作者");
+        }
+
+        SysUser worker = sysUserMapper.selectById(workerId);
+        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+                TicketAction.REMOVE_COLLABORATOR, adminId,
+                "移除协作者：" + (worker == null ? String.valueOf(workerId) : nullToEmpty(worker.getRealName())));
+        if (worker != null) {
+            // 通知当事人：他刚失去这张单的可见范围，不告诉他，他会照旧去现场
+            notifyCollaboratorChange(ticket, worker, false);
+        }
+        log.info("移除协作者 ticketId={} workerId={} operator={}", id, workerId, adminId);
+    }
+
+    @Override
+    @Transactional
+    public TicketVO split(long id, TicketSplitDTO dto) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = requireTicket(id);
+        if (ticket.getParentTicketId() != null) {
+            // 只拆一层：拆出来的单再拆下去会变成一棵谁都说不清的树（docs/01 §4.5）
+            throw new BizException(ErrorCode.PARAM_INVALID, "拆出来的工单不能再拆");
+        }
+        if (!SPLITTABLE_STATUSES.contains(ticket.getStatus())) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED,
+                    TicketStatus.of(ticket.getStatus()).getDesc() + "的工单不能拆单");
+        }
+        Long categoryId = dto.getCategoryId() == null ? ticket.getCategoryId() : dto.getCategoryId();
+        requireEnabledCategory(categoryId, ticket.getTenantId());
+
+        Ticket created = new Ticket();
+        created.setTenantId(ticket.getTenantId());
+        created.setTicketNo(nextTicketNo());
+        created.setStudentId(ticket.getStudentId());
+        created.setParentTicketId(ticket.getId());
+        // 楼栋 / 房间 / 图片继承原单：拆出来的那件事与原来那件在同一处、由同一个学生报的，
+        // 现场照片往往一张里就有两处问题。**能改的只有"这件事本身是什么"**（见 TicketSplitDTO）
+        created.setBuildingId(ticket.getBuildingId());
+        created.setRoom(ticket.getRoom());
+        created.setCategoryId(categoryId);
+        created.setDescription(dto.getDescription());
+        created.setImages(ticket.getImages());
+        created.setUrgency(dto.getUrgency() == null ? ticket.getUrgency() : dto.getUrgency());
+        created.setStatus(TicketStatus.TO_DISPATCH.getCode());
+        created.setSubmitTime(LocalDateTime.now());
+        ticketMapper.insert(created);
+
+        // 两张单各记一条：原单说"我拆出了谁"、新单说"我从哪来"——各自的时间线都能自己解释自己
+        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+                TicketAction.SPLIT, adminId, "拆出工单 " + created.getTicketNo());
+        writeLog(ticket.getTenantId(), created.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
+                TicketAction.SPLIT, adminId, "由工单 " + ticket.getTicketNo() + " 拆出");
+        notifySplit(ticket, created);
+        log.info("拆单 sourceTicketId={} newTicketId={} operator={}", id, created.getId(), adminId);
+
+        return TicketConverter.toVO(created, buildingNames(List.of(created.getBuildingId())),
+                categoryNames(List.of(created.getCategoryId())));
+    }
+
+    /**
+     * 协作动作（加 / 移协作者）的状态门槛：20 待接单 / 30 处理中（`docs/01` §4.5）。
+     * 10 还没有主责、40 之后活已经干完，都没有"搭把手"的余地。
+     */
+    private void requireCollaboratingStatus(Ticket ticket, String action) {
+        int status = ticket.getStatus();
+        if (status != TicketStatus.TO_ACCEPT.getCode() && status != TicketStatus.PROCESSING.getCode()) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED,
+                    TicketStatus.of(status).getDesc() + "的工单不能" + action);
+        }
+    }
+
+    /** 加/移协作者的通知：**当事人**（他被加进来 / 被移出去，是直接受影响的人）+ **主责**（谁进了这单他该知道）。 */
+    private void notifyCollaboratorChange(Ticket ticket, SysUser worker, boolean added) {
+        String name = nullToEmpty(worker.getRealName());
+        notificationService.send(ticket.getTenantId(), worker.getId(),
+                added ? "TICKET_COLLABORATOR_ADDED" : "TICKET_COLLABORATOR_REMOVED",
+                added ? "你被加入协作" : "你已不是协作人",
+                "工单 " + ticket.getTicketNo() + "（" + location(ticket) + "）"
+                        + (added ? "：请与主责师傅一起处理" : "：已改由他人处理"),
+                ticket.getId());
+
+        Long ownerId = ticket.getWorkerId();
+        if (ownerId != null && !ownerId.equals(worker.getId())) {
+            notificationService.send(ticket.getTenantId(), ownerId,
+                    added ? "TICKET_COLLABORATOR_ADDED" : "TICKET_COLLABORATOR_REMOVED",
+                    added ? "有维修工加入协作" : "协作者已移除",
+                    "工单 " + ticket.getTicketNo()
+                            + (added ? "：已请 " + name + " 一起处理" : "：已移除协作者 " + name),
+                    ticket.getId());
+        }
+    }
+
+    /** 拆单通知：**学生**（他报的一单变成了两张）+ **原主责**（若已派了人：他的活少了一半）。 */
+    private void notifySplit(Ticket source, Ticket created) {
+        notificationService.send(source.getTenantId(), source.getStudentId(), "TICKET_SPLIT",
+                "报修已拆成两张单",
+                "原工单 " + source.getTicketNo() + " 里的问题已拆成两张单分别处理，新工单：" + created.getTicketNo(),
+                source.getId());
+        if (source.getWorkerId() != null) {
+            notificationService.send(source.getTenantId(), source.getWorkerId(), "TICKET_SPLIT",
+                    "你的工单已拆出一部分",
+                    "工单 " + source.getTicketNo() + " 已拆出新工单 " + created.getTicketNo()
+                            + "，那一部分由另一个人处理",
+                    source.getId());
+        }
+    }
+
+    /** 通知里的位置文案：楼栋名 + 房间号（楼栋查不到时只给房间号，不编造）。 */
+    private String location(Ticket ticket) {
+        String building = buildingNames(List.of(ticket.getBuildingId())).get(ticket.getBuildingId());
+        return (building == null ? "" : building) + ticket.getRoom();
     }
 
     /**
@@ -745,6 +957,78 @@ public class TicketServiceImpl implements TicketService {
         return ticket.getWorkerId() == null || ticket.getWorkerId() != workerId;
     }
 
+    /**
+     * 是不是这单的**参与人**：主责 或 协作者。协作者能到场、能完工；接单与驳回仍只给主责
+     * ——那两件事是"我认领这单"和"这单不该我做"，属于处置权（`docs/01` §4.5）。
+     */
+    private boolean isNotParticipant(Ticket ticket, long workerId) {
+        return isNotAssignee(ticket, workerId) && !isCollaborator(ticket, workerId);
+    }
+
+    /** 这个人在不在这单的协作者名单里。按 worker_id 查，不带 tenant_id 也行——见 {@link #collaboratedTicketIds}。 */
+    private boolean isCollaborator(Ticket ticket, long workerId) {
+        return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
+                .eq(TicketCollaborator::getTicketId, ticket.getId())
+                .eq(TicketCollaborator::getWorkerId, workerId)) > 0;
+    }
+
+    private long collaboratorCount(Ticket ticket) {
+        return ticketCollaboratorMapper.selectCount(Wrappers.<TicketCollaborator>lambdaQuery()
+                .eq(TicketCollaborator::getTicketId, ticket.getId()));
+    }
+
+    /**
+     * 把"参与人"条件拼进条件更新的 WHERE：{@code (worker_id = 我 OR EXISTS(我在协作者里))}。
+     *
+     * <p><b>必须与 {@link #isNotParticipant} 是同一个口径</b>——两边不一致就会出现
+     * "检查过了、但更新 0 行"，对外表现是一句莫名其妙的 20002。
+     *
+     * <p>为什么用 EXISTS 而不是"先把协作者的单查出来再 IN"：协作者数量没有上界（历史协作一直累积），
+     * 而 `idx_worker(worker_id, ticket_id)` 让这条子查询在 ticket_collaborator 上走索引。
+     * 子查询里引用外层 {@code ticket.id} 在 MySQL 里是允许的（被更新的表是 ticket，子查询查的是另一张表）。
+     */
+    private void appendParticipantCondition(LambdaUpdateWrapper<Ticket> wrapper, long workerId) {
+        wrapper.and(w -> w.eq(Ticket::getWorkerId, workerId)
+                .or().exists("SELECT 1 FROM ticket_collaborator c"
+                        + " WHERE c.ticket_id = ticket.id AND c.worker_id = {0}", workerId));
+    }
+
+    /** 详情里的协作者名单：一次查询 + 一次批量取姓名，不做 N+1。 */
+    private List<TicketCollaboratorVO> collaboratorsOf(Ticket ticket) {
+        List<TicketCollaborator> rows = ticketCollaboratorMapper.selectList(
+                Wrappers.<TicketCollaborator>lambdaQuery()
+                        .eq(TicketCollaborator::getTicketId, ticket.getId())
+                        .orderByAsc(TicketCollaborator::getCreateTime));
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> names = sysUserMapper.selectByIds(
+                        rows.stream().map(TicketCollaborator::getWorkerId).distinct().toList()).stream()
+                .collect(Collectors.toMap(SysUser::getId, u -> nullToEmpty(u.getRealName())));
+        return rows.stream().map(row -> {
+            TicketCollaboratorVO vo = new TicketCollaboratorVO();
+            vo.setWorkerId(row.getWorkerId());
+            vo.setWorkerName(names.get(row.getWorkerId()));
+            return vo;
+        }).toList();
+    }
+
+    /**
+     * 本页里"我参与协作"的工单 ID（给列表打「协作」标记用）。一次查询，不逐条回库。
+     *
+     * <p>条件里只带 worker_id 不带 tenant_id，与上面查 `worker_building` 同一个理由：
+     * worker_id 是全局唯一的雪花 ID（不可能命中别家租户的人），而工单 ID 取自**已经过租户过滤**的一页。
+     */
+    private Set<Long> collaboratedTicketIds(long workerId, List<Long> ticketIds) {
+        if (ticketIds.isEmpty()) {
+            return Set.of();
+        }
+        return ticketCollaboratorMapper.selectList(Wrappers.<TicketCollaborator>lambdaQuery()
+                        .eq(TicketCollaborator::getWorkerId, workerId)
+                        .in(TicketCollaborator::getTicketId, ticketIds))
+                .stream().map(TicketCollaborator::getTicketId).collect(Collectors.toSet());
+    }
+
     private Ticket requireTicket(long id) {
         Ticket ticket = ticketMapper.selectById(id);
         if (ticket == null) {
@@ -791,6 +1075,21 @@ public class TicketServiceImpl implements TicketService {
                 || !Integer.valueOf(1).equals(building.getStatus())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "楼栋不存在或已停用");
         }
+    }
+
+    /**
+     * 类别必须是本租户下、启用中的。提交报修与拆单共用——**同一条校验只能有一份实现**，
+     * 否则两条路径会各自漂移（拆单能挑到已停用的类别，就是"少写一次校验"的典型后果）。
+     *
+     * <p>对外不区分"不存在 / 别家租户的 / 已停用"，与楼栋的校验口径一致。
+     */
+    private TicketCategory requireEnabledCategory(Long categoryId, Long tenantId) {
+        TicketCategory category = ticketCategoryMapper.selectById(categoryId);
+        if (category == null || !category.getTenantId().equals(tenantId)
+                || !Integer.valueOf(1).equals(category.getStatus())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "报修类别不存在或已停用");
+        }
+        return category;
     }
 
     /** 工单号：WX + 日期 + 当日序号（Redis INCR），uk_ticket_no 兜底唯一。 */

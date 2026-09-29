@@ -30,8 +30,9 @@ import java.util.List;
  * <p><b>第一层：租户</b>（ADR-008）——所有角色都受本租户约束，后勤也不再跨租户全可见：
  * <ul>
  *   <li>后勤管理（ADMIN）→ 本租户内不限制</li>
- *   <li>维修工（WORKER）→ 本租户内 {@code building_id IN (他负责的楼栋) OR worker_id = 他}——
- *       后一半是跨楼栋强制派单的单（见 {@link #buildScopeExpression} 的说明）</li>
+ *   <li>维修工（WORKER）→ 本租户内 {@code building_id IN (他负责的楼栋) OR worker_id = 他
+ *       OR id IN (他协作的工单)}——后两项分别是跨楼栋强制派单的单与协同处理的单
+ *       （见 {@link #buildScopeExpression} 的说明）</li>
  *   <li>学生（默认）→ 本租户内 student_id = 当前用户</li>
  * </ul>
  *
@@ -117,23 +118,49 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
      * 角色维度的条件（不含租户）。ADMIN 返回 null —— 表示"角色维度不限制"，
      * 是否还有租户条件由 {@link #buildScopedExpression} 决定。
      *
-     * <p><b>维修工这一条是"或"，不是"只按楼栋"</b>：{@code building_id IN (负责楼栋) OR worker_id = 我}。
-     * 后一半是给**跨楼栋强制派单**（后勤临时抽调，见 `docs/01` §4.2）留的：可见范围必须与操作权一致，
-     * 否则"能派给他、他列表里却看不到"，这张单就成了没人能操作的孤儿。
-     * OR 必须加括号（AND 优先级更高），否则拼上租户条件会变成 {@code 租户 AND 楼栋 OR 派给我}——
-     * 后一个分支把租户条件绕过去了。测试里有一条专门盯这个括号。
+     * <p><b>维修工这一条是"或"，不是"只按楼栋"</b>：
+     * {@code building_id IN (负责楼栋) OR worker_id = 我 OR id IN (我协作的工单)}。
+     * 第二条是给**跨楼栋强制派单**（后勤临时抽调）留的，第三条是给**协同处理**（`docs/01` §4.5）留的
+     * ——两者的理由是同一条：**可见范围必须与操作权一致**，否则"能派给他 / 拉他进来、他列表里却看不到"，
+     * 这张单就成了没人能操作的孤儿。
+     *
+     * <p>OR 必须加括号（AND 优先级更高），否则拼上租户条件会变成 {@code 租户 AND 楼栋 OR 派给我}——
+     * 后两个分支把租户条件绕过去了。测试里有一条专门盯这个括号。
+     *
+     * <p>**名词对齐一下**：`docs/01` §4.2 说的是"三层叠加"，指维修工可见范围的三个来源；
+     * 在这张条件表里它们都在**角色**这一层里，租户那一层仍然在外面（ADR-008 的两层没有变）。
      */
     Expression buildScopeExpression(Table table, long userId, List<String> roles, List<Long> buildingIds) {
         if (roles.contains("ADMIN")) {
             return null;
         }
         if (roles.contains("WORKER")) {
-            // 一个楼栋都不负责的师傅：左边恒假，整体等价于"只看派给我的单"（不再特判成 1 = 0）
+            // 一个楼栋都不负责的师傅：左边恒假，整体等价于"只看派给我的 + 我协作的"（不再特判成 1 = 0）
             Expression byBuilding = buildingIds.isEmpty() ? parse("1 = 0") : inBuildings(table, buildingIds);
-            return parenthesis(new OrExpression(byBuilding, equalsColumn(table, "worker_id", userId)));
+            return parenthesis(new OrExpression(
+                    new OrExpression(byBuilding, equalsColumn(table, "worker_id", userId)),
+                    collaborationsOf(table, userId)));
         }
         // 学生（以及任何未配置特殊范围的角色）
         return equalsColumn(table, "student_id", userId);
+    }
+
+    /**
+     * 我参与协作的工单（`docs/01` §4.2 的第三层）：
+     * {@code ticket.id IN (SELECT ticket_id FROM ticket_collaborator WHERE worker_id = 我)}。
+     *
+     * <p><b>为什么是子查询而不是"先查出一串 id 再 IN"</b>：协作者数量没有上界（历史协作会一直累积），
+     * 而 `idx_worker(worker_id, ticket_id)` 让这条子查询走索引、代价是常数级。
+     * 子查询里不需要再带 `tenant_id`：worker_id 是全局唯一的雪花 ID（命不中别家租户的人），
+     * 且外层查询本来就有租户条件。
+     *
+     * <p>这里用一小段 SQL 片段解析而不是手工搭 AST：一个子查询要在 jsqlparser 5.x 里拼
+     * PlainSelect + SelectExpressionItem + ParenthesedSelect 四层，而形状只有这一种。
+     * 拼进去的 userId 是登录态里的 long（不是用户可控的字符串），不存在注入面。
+     */
+    private Expression collaborationsOf(Table table, long userId) {
+        return parse(qualified(table, "id")
+                + " IN (SELECT ticket_id FROM ticket_collaborator WHERE worker_id = " + userId + ")");
     }
 
     private Expression inBuildings(Table table, List<Long> buildingIds) {

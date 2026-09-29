@@ -29,6 +29,15 @@ public class TicketDetailVO extends TicketVO {
 
     private LocalDateTime closeTime;
 
+    @Schema(description = "协作者（多人同做一单，docs/01 §4.5）；主责不在这个列表里，看 workerId")
+    private List<TicketCollaboratorVO> collaborators;
+
+    @Schema(description = "拆单来源工单ID，非拆单产生的为 null")
+    private Long parentTicketId;
+
+    @Schema(description = "拆单来源工单的工单号（前端直接显示这个，不用再查一次）")
+    private String parentTicketNo;
+
     @Schema(description = "流转时间线")
     private List<TicketLogVO> logs;
 

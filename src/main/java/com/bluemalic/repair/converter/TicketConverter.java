@@ -3,6 +3,7 @@ package com.bluemalic.repair.converter;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
+import com.bluemalic.repair.vo.TicketCollaboratorVO;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketEvaluationVO;
 import com.bluemalic.repair.vo.TicketLogVO;
@@ -44,6 +45,8 @@ public class TicketConverter {
     public static TicketDetailVO toDetailVO(Ticket ticket,
                                             Map<Long, String> buildingNames,
                                             Map<Long, String> categoryNames,
+                                            List<TicketCollaboratorVO> collaborators,
+                                            String parentTicketNo,
                                             List<TicketLogVO> logs,
                                             TicketEvaluation evaluation) {
         TicketDetailVO vo = new TicketDetailVO();
@@ -73,6 +76,9 @@ public class TicketConverter {
         vo.setAcceptTime(ticket.getAcceptTime());
         vo.setArriveTime(ticket.getArriveTime());
         vo.setCloseTime(ticket.getCloseTime());
+        vo.setCollaborators(collaborators);
+        vo.setParentTicketId(ticket.getParentTicketId());
+        vo.setParentTicketNo(parentTicketNo);
         vo.setLogs(logs);
         if (evaluation != null) {
             TicketEvaluationVO evaluationVO = new TicketEvaluationVO();
