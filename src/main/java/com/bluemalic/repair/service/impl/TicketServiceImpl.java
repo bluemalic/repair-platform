@@ -66,7 +66,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -126,6 +125,8 @@ public class TicketServiceImpl implements TicketService {
     private final WorkerBuildingMapper workerBuildingMapper;
     private final NotificationService notificationService;
     private final CurrentTenantService currentTenantService;
+    /** 流转三件套（条件更新 / 写日志 / 发通知）抽到包私有组件，四个域拆分后共用这一份口径。 */
+    private final TicketTransitionSupport transitions;
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
     private final StringRedisTemplate stringRedisTemplate;
@@ -170,7 +171,7 @@ public class TicketServiceImpl implements TicketService {
         ticket.setSubmitTime(LocalDateTime.now());
         ticketMapper.insert(ticket);
 
-        writeLog(ticket.getTenantId(), ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
+        transitions.writeLog(ticket.getTenantId(), ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
                 TicketAction.SUBMIT, studentId, null);
         log.info("提交报修 ticketId={} studentId={} building={} room={}",
                 ticket.getId(), studentId, buildingId, room);
@@ -319,7 +320,7 @@ public class TicketServiceImpl implements TicketService {
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CANCELED.getCode());
 
         // 学生只能撤自己的单——数据范围由拦截器注入到 UPDATE 里，这里不再手写 student_id 条件
-        conditionalUpdate(id, TicketStatus.CANCELED.getCode(), TicketAction.CANCEL, studentId,
+        transitions.conditionalUpdate(id, TicketStatus.CANCELED.getCode(), TicketAction.CANCEL, studentId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
@@ -337,7 +338,7 @@ public class TicketServiceImpl implements TicketService {
 
         // 理由进 ticket_log 的备注（时间线上看得见），**不新增列**：它和"驳回理由"是两件事，
         // 塞进同一列会让两个动作的语义糊在一起（docs/01 §4.1 记了取舍）
-        conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.REWORK, studentId,
+        transitions.conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.REWORK, studentId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { }, dto.getReason());
@@ -345,7 +346,7 @@ public class TicketServiceImpl implements TicketService {
         // 40 待验收本身不挂任何超时节点，所以这里 cancel 只是防御：万一将来给它挂了节点也不会漏撤
         timeoutService.cancel(id);
         timeoutService.registerProcess(id, ticket.getDispatchTime());
-        notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
+        transitions.notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
         log.info("验收不通过，打回重做 ticketId={} studentId={} reason={}", id, studentId, dto.getReason());
     }
 
@@ -372,11 +373,11 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.TICKET_ALREADY_EVALUATED);
         }
 
-        conditionalUpdate(id, TicketStatus.FINISHED.getCode(), TicketAction.EVALUATE, studentId,
+        transitions.conditionalUpdate(id, TicketStatus.FINISHED.getCode(), TicketAction.EVALUATE, studentId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { });
-        notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
+        transitions.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
         timeoutService.registerEval(ticket.getId());
     }
@@ -395,7 +396,7 @@ public class TicketServiceImpl implements TicketService {
         }
 
         // where 带上 worker_id = 当前人 + status = 旧状态：被别人抢先时 rows = 0
-        conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.ACCEPT, workerId,
+        transitions.conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.ACCEPT, workerId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         .eq(Ticket::getWorkerId, workerId),
@@ -404,7 +405,7 @@ public class TicketServiceImpl implements TicketService {
         // 基准传派单时间（不是现在）：需求口径是"从派到完工"整体超期，与兜底扫描同基准
         timeoutService.cancel(id);
         timeoutService.registerProcess(id, ticket.getDispatchTime());
-        notifyTransition(ticket, TicketAction.ACCEPT, null, null);
+        transitions.notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
 
     @Override
@@ -435,7 +436,7 @@ public class TicketServiceImpl implements TicketService {
         // 到场不改变状态（30 → 30），只记录时间并折算响应时长 = 到场 − 派单
         Integer arriveMinutes = ticket.getDispatchTime() != null
                 ? (int) Duration.between(ticket.getDispatchTime(), now).toMinutes() : null;
-        conditionalUpdate(id, ticket.getStatus(), TicketAction.ARRIVE, workerId,
+        transitions.conditionalUpdate(id, ticket.getStatus(), TicketAction.ARRIVE, workerId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> {
                     wrapper.eq(Ticket::getStatus, ticket.getStatus())
@@ -446,7 +447,7 @@ public class TicketServiceImpl implements TicketService {
                     entity.setArriveTime(now);
                     entity.setArriveMinutes(arriveMinutes);
                 });
-        notifyTransition(ticket, TicketAction.ARRIVE, null, null);
+        transitions.notifyTransition(ticket, TicketAction.ARRIVE, null, null);
     }
 
     @Override
@@ -462,7 +463,7 @@ public class TicketServiceImpl implements TicketService {
         LocalDateTime now = LocalDateTime.now();
         Integer handleMinutes = ticket.getArriveTime() != null
                 ? (int) Duration.between(ticket.getArriveTime(), now).toMinutes() : null;
-        conditionalUpdate(id, TicketStatus.TO_VERIFY.getCode(), TicketAction.FINISH, workerId,
+        transitions.conditionalUpdate(id, TicketStatus.TO_VERIFY.getCode(), TicketAction.FINISH, workerId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> {
                     wrapper.eq(Ticket::getStatus, ticket.getStatus());
@@ -476,7 +477,7 @@ public class TicketServiceImpl implements TicketService {
                 });
         // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
         timeoutService.cancel(id);
-        notifyTransition(ticket, TicketAction.FINISH, null, null);
+        transitions.notifyTransition(ticket, TicketAction.FINISH, null, null);
         // 协作者完成的：主责得知道自己的单被完成了（他不会收到学生那条通知）
         if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
             notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_FINISHED_BY_COLLABORATOR",
@@ -497,7 +498,7 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         doReject(ticket, workerId, dto.getReason());
-        notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
+        transitions.notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
     }
 
     @Override
@@ -507,12 +508,12 @@ public class TicketServiceImpl implements TicketService {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
         doReject(ticket, adminId, dto.getReason());
-        notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
-        notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
+        transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
+        transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
     }
 
     private void doReject(Ticket ticket, long operatorId, String reason) {
-        conditionalUpdate(ticket.getId(), TicketStatus.REJECTED.getCode(), TicketAction.REJECT, operatorId,
+        transitions.conditionalUpdate(ticket.getId(), TicketStatus.REJECTED.getCode(), TicketAction.REJECT, operatorId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> {
@@ -545,7 +546,7 @@ public class TicketServiceImpl implements TicketService {
         // 为的是不让"派错楼栋"变成一张没人能操作的单（被派的人按『派给我的单』看得到、能处理）
         String crossBuilding = crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
 
-        conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
+        transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> {
@@ -554,7 +555,7 @@ public class TicketServiceImpl implements TicketService {
                     entity.setDispatchTime(LocalDateTime.now());
                 },
                 crossBuilding);
-        notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
+        transitions.notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
         timeoutService.registerAccept(id);
         log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
@@ -580,7 +581,7 @@ public class TicketServiceImpl implements TicketService {
                 + (crossBuilding == null ? "" : "；" + crossBuilding)
                 + "；原因：" + dto.getReason();
 
-        conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.TRANSFER, adminId,
+        transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.TRANSFER, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
                         // 上一轮的接单/到场时间必须清掉：响应时长口径是"到场 − 派单"，
@@ -596,10 +597,10 @@ public class TicketServiceImpl implements TicketService {
                 remark);
         // 通知原师傅（他的活没了，得知道为什么）：NoticeSpec(toStudent=false) 取的就是 ticket.workerId，
         // 而这时的 ticket 还是转派前的对象
-        notifyTransition(ticket, TicketAction.TRANSFER, null,
+        transitions.notifyTransition(ticket, TicketAction.TRANSFER, null,
                 "已转给 " + worker.getRealName() + "；原因：" + dto.getReason());
         // 通知新师傅：与派单同一条文案
-        notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
+        transitions.notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
         // 计时重来，超时节点也要重登记（先撤掉旧节点的登记，避免按旧时间触发）
         timeoutService.cancel(id);
         timeoutService.registerAccept(id);
@@ -637,7 +638,7 @@ public class TicketServiceImpl implements TicketService {
             throw new BizException(ErrorCode.PARAM_INVALID, "该师傅已经是这单的协作者");
         }
 
-        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+        transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
                 TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + nullToEmpty(worker.getRealName()));
         notifyCollaboratorChange(ticket, worker, true);
         log.info("加协作者 ticketId={} workerId={} operator={}", id, worker.getId(), adminId);
@@ -659,7 +660,7 @@ public class TicketServiceImpl implements TicketService {
         }
 
         SysUser worker = sysUserMapper.selectById(workerId);
-        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+        transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
                 TicketAction.REMOVE_COLLABORATOR, adminId,
                 "移除协作者：" + (worker == null ? String.valueOf(workerId) : nullToEmpty(worker.getRealName())));
         if (worker != null) {
@@ -703,9 +704,9 @@ public class TicketServiceImpl implements TicketService {
         ticketMapper.insert(created);
 
         // 两张单各记一条：原单说"我拆出了谁"、新单说"我从哪来"——各自的时间线都能自己解释自己
-        writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
+        transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
                 TicketAction.SPLIT, adminId, "拆出工单 " + created.getTicketNo());
-        writeLog(ticket.getTenantId(), created.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
+        transitions.writeLog(ticket.getTenantId(), created.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
                 TicketAction.SPLIT, adminId, "由工单 " + ticket.getTicketNo() + " 拆出");
         notifySplit(ticket, created);
         log.info("拆单 sourceTicketId={} newTicketId={} operator={}", id, created.getId(), adminId);
@@ -807,7 +808,7 @@ public class TicketServiceImpl implements TicketService {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
 
-        conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.CLOSE, adminId,
+        transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.CLOSE, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
@@ -820,11 +821,11 @@ public class TicketServiceImpl implements TicketService {
     public void autoClose(long id) {
         Ticket ticket = requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
-        conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
+        transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
-        notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
+        transitions.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
         timeoutService.cancel(id);
     }
 
@@ -863,7 +864,7 @@ public class TicketServiceImpl implements TicketService {
         if (notifiedBefore(ticket.getTenantId(), ticket.getId(), action)) {
             return;
         }
-        writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
+        transitions.writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
                 action, SYSTEM_OPERATOR, null);
         int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), noticeType,
                 noticeTitle, content, ticket.getId());
@@ -879,95 +880,6 @@ public class TicketServiceImpl implements TicketService {
     }
 
     // ==================== 私有工具 ====================
-
-    /** 状态变更通知的规格：类型、标题、正文后缀、默认接收方。满载等新动作加一行即可。 */
-    private record NoticeSpec(String type, String title, String suffix, boolean toStudent) {
-    }
-
-    /** 动作 → 通知规格。通知的文案与接收方收敛在这里，调用方只负责"触发"与必要的补充参数。 */
-    private static final Map<TicketAction, NoticeSpec> TRANSITION_NOTICE = Map.of(
-            TicketAction.ACCEPT,   new NoticeSpec("TICKET_ACCEPTED",  "维修工已接单",     "已被接单，维修工会尽快到场", true),
-            TicketAction.ARRIVE,   new NoticeSpec("TICKET_ARRIVED",   "维修工已到场",     "维修工已到场处理",           true),
-            TicketAction.FINISH,   new NoticeSpec("TICKET_FINISHED",  "维修完成待验收",   "已完成维修，请验收评价",     true),
-            TicketAction.REJECT,   new NoticeSpec("TICKET_REJECTED",  "工单被驳回",       null,                          true),
-            TicketAction.DISPATCH, new NoticeSpec("TICKET_DISPATCHED","新工单待接单",     "已派给你，请及时接单",       false),
-            TicketAction.EVALUATE, new NoticeSpec("TICKET_EVALUATED", "工单已验收",       null,                          false),
-            // 验收不通过：发给维修工（toStudent=false → 接收人取 ticket.workerId）
-            TicketAction.REWORK,   new NoticeSpec("TICKET_REWORKED",  "验收不通过",       null,                          false),
-            // 转派：发给**原师傅**（toStudent=false → 接收人取 ticket.workerId = 转派前的那个人）
-            TicketAction.TRANSFER, new NoticeSpec("TICKET_TRANSFERRED", "工单已转出",      null,                          false),
-            TicketAction.AUTO_CLOSE, new NoticeSpec("TICKET_AUTO_CLOSED", "工单已自动关闭", "验收后超时未关闭，工单已自动关闭", true));
-
-    /**
-     * 按动作给相关方发站内通知。默认接收方取自工单上的学生/维修工；
-     * explicitReceiver 非空时优先——派单时工单还没写维修工、管理员驳回时维修工已被清空，
-     * 这两种场景由调用方把"该收通知的人"传进来，而不是事后回查。
-     */
-    private void notifyTransition(Ticket ticket, TicketAction action, Long explicitReceiver, String suffix) {
-        NoticeSpec spec = TRANSITION_NOTICE.get(action);
-        if (spec == null) {
-            return;
-        }
-        long receiver = explicitReceiver != null ? explicitReceiver
-                : (spec.toStudent() ? ticket.getStudentId() : ticket.getWorkerId());
-        if (receiver <= 0) {
-            return;
-        }
-        notificationService.send(ticket.getTenantId(), receiver, spec.type(), spec.title(),
-                "工单 " + ticket.getTicketNo() + (suffix == null ? spec.suffix() : suffix), ticket.getId());
-    }
-
-    /**
-     * 条件更新：SET 来自 entitySetter 对实体的赋值（null 字段被 MP 跳过），
-     * WHERE 来自 wrapper（含当前状态）。rows = 0 → 状态已被并发改动 → 20002。
-     * 全部状态流转都从这里落库，顺带写 ticket_log。
-     *
-     * <p>不需要额外备注的流转用这个重载：日志备注取 {@code entity.rejectReason}（目前只有驳回会设它）。
-     */
-    private void conditionalUpdate(long id, int toStatus, TicketAction action, long operatorId,
-                                   Long tenantId, int fromStatus,
-                                   Consumer<LambdaUpdateWrapper<Ticket>> where,
-                                   Consumer<Ticket> entitySetter) {
-        conditionalUpdate(id, toStatus, action, operatorId, tenantId, fromStatus, where, entitySetter, null);
-    }
-
-    /**
-     * 带显式日志备注的重载。
-     *
-     * @param logRemark 写进 {@code ticket_log.remark} 的说明（如"跨楼栋强制派单"）；为 null 时按
-     *                  {@code entity.rejectReason} 兜底——这样驳回那条路径不用改，也不会因为
-     *                  "备注从实体上取"而对别的动作产生副作用
-     */
-    private void conditionalUpdate(long id, int toStatus, TicketAction action, long operatorId,
-                                   Long tenantId, int fromStatus,
-                                   Consumer<LambdaUpdateWrapper<Ticket>> where,
-                                   Consumer<Ticket> entitySetter, String logRemark) {
-        Ticket entity = new Ticket();
-        entity.setStatus(toStatus);
-        entitySetter.accept(entity);
-        LambdaUpdateWrapper<Ticket> wrapper = new LambdaUpdateWrapper<Ticket>()
-                .eq(Ticket::getId, id);
-        where.accept(wrapper);
-        int rows = ticketMapper.update(entity, wrapper);
-        if (rows == 0) {
-            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED);
-        }
-        writeLog(tenantId, id, fromStatus, toStatus, action, operatorId,
-                logRemark != null ? logRemark : entity.getRejectReason());
-    }
-
-    private void writeLog(Long tenantId, long ticketId, Integer fromStatus, int toStatus,
-                          TicketAction action, long operatorId, String remark) {
-        TicketLog ticketLog = new TicketLog();
-        ticketLog.setTenantId(tenantId);
-        ticketLog.setTicketId(ticketId);
-        ticketLog.setFromStatus(fromStatus);
-        ticketLog.setToStatus(toStatus);
-        ticketLog.setAction(action.name());
-        ticketLog.setOperatorId(operatorId);
-        ticketLog.setRemark(remark);
-        ticketLogMapper.insert(ticketLog);
-    }
 
     private boolean isNotAssignee(Ticket ticket, long workerId) {
         return ticket.getWorkerId() == null || ticket.getWorkerId() != workerId;
