@@ -40,6 +40,21 @@ public final class AuditAction {
     public static final String TENANT_ADMIN_ADD = "TENANT_ADMIN_ADD";
     public static final String TENANT_ADMIN_PASSWORD_RESET = "TENANT_ADMIN_PASSWORD_RESET";
 
+    // ---------- 登录事件（独立的一类，docs/01 §4.4）----------
+    public static final String LOGIN_SUCCESS = "LOGIN_SUCCESS";
+    public static final String LOGIN_FAILED = "LOGIN_FAILED";
+    public static final String LOGIN_DISABLED = "LOGIN_DISABLED";
+
+    /**
+     * 登录类动作。**列表默认把它们排除掉**（`docs/01` §4.4）：那个页面的主查询是"谁改了东西"，
+     * 而登录记录会占绝大多数。要看登录事件就显式按动作筛，或传 {@code includeLogin=true}。
+     *
+     * <p>用集合而不是"码以 LOGIN_ 开头"这种前缀判断：前缀看着聪明，但它把命名约定变成了逻辑——
+     * 哪天加一个 {@code LOGIN_SOMETHING} 就会被静默算进来。
+     */
+    public static final java.util.Set<String> LOGIN_ACTIONS =
+            java.util.Set.of(LOGIN_SUCCESS, LOGIN_FAILED, LOGIN_DISABLED);
+
     /** 动作码 → 中文名。**只用于展示**，不参与任何判断（判断一律用上面的码）。 */
     private static final Map<String, String> LABELS = Map.ofEntries(
             Map.entry(WORKER_CREATE, "新增维修工"),
@@ -62,7 +77,10 @@ public final class AuditAction {
             Map.entry(TENANT_UPDATE, "修改学校"),
             Map.entry(TENANT_STATUS, "启停学校"),
             Map.entry(TENANT_ADMIN_ADD, "新增学校管理员"),
-            Map.entry(TENANT_ADMIN_PASSWORD_RESET, "重置学校管理员口令"));
+            Map.entry(TENANT_ADMIN_PASSWORD_RESET, "重置学校管理员口令"),
+            Map.entry(LOGIN_SUCCESS, "登录成功"),
+            Map.entry(LOGIN_FAILED, "登录失败"),
+            Map.entry(LOGIN_DISABLED, "停用账号尝试登录"));
 
     private AuditAction() {
     }

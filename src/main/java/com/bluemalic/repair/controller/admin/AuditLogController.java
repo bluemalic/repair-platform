@@ -35,18 +35,25 @@ public class AuditLogController {
     private final AuditService auditService;
 
     @Operation(summary = "操作日志",
-            description = "本租户的账号与基础数据写操作，时间倒序。可按动作码、操作人姓名、日期区间筛选")
+            description = "本租户的账号与基础数据写操作，时间倒序。可按动作码、操作人姓名、日期区间筛选。"
+                    + "**默认不含登录事件**（这个页面的主查询是「谁改了东西」，登录记录会占绝大多数）："
+                    + "要看登录就把 includeLogin 传 true，或直接按 LOGIN_SUCCESS / LOGIN_FAILED / "
+                    + "LOGIN_DISABLED 筛——显式指定动作时 includeLogin 不起作用")
     @SaCheckPermission("audit:list")
     @GetMapping
     public Result<PageResult<AuditLogVO>> page(
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") long pageNum,
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") long pageSize,
-            @Parameter(description = "动作码，如 WORKER_CREATE") @RequestParam(required = false) String action,
+            @Parameter(description = "动作码，如 WORKER_CREATE / LOGIN_FAILED")
+            @RequestParam(required = false) String action,
             @Parameter(description = "操作人姓名关键字") @RequestParam(required = false) String operatorKeyword,
             @Parameter(description = "起始日期 yyyy-MM-dd（含）")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @Parameter(description = "结束日期 yyyy-MM-dd（含）")
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        return Result.ok(auditService.page(pageNum, pageSize, action, operatorKeyword, startDate, endDate));
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @Parameter(description = "是否包含登录事件，默认 false")
+            @RequestParam(defaultValue = "false") boolean includeLogin) {
+        return Result.ok(auditService.page(pageNum, pageSize, action, operatorKeyword,
+                startDate, endDate, includeLogin));
     }
 }

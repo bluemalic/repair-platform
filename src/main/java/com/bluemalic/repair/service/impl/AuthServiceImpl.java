@@ -55,8 +55,12 @@ public class AuthServiceImpl implements AuthService {
         Tenant tenant = tenantMapper.selectOne(Wrappers.<Tenant>lambdaQuery()
                 .eq(Tenant::getCode, dto.getTenantCode()));
         if (tenant == null || !Integer.valueOf(1).equals(tenant.getStatus())) {
+            // 租户都不存在 / 已停用：**不记审计**——这条记录没有"谁的表"能放（审计是按租户查的），
+            // 这类探测留在服务器的 WARN 日志里（docs/01 §4.4 的"明确不记"）
             throw new BizException(ErrorCode.TENANT_NOT_FOUND);
         }
+        // 限流拦下的也不单独记审计：它是失败的延续，同一次爆破会连续触发、逐条记只会刷屏；
+        // 每次**失败**都已经记了，看次数就够（docs/01 §4.4）
         requireLoginAttemptAllowed(tenant.getId(), dto.getUsername());
 
         SysUser user = sysUserMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
@@ -64,10 +68,16 @@ public class AuthServiceImpl implements AuthService {
                 .eq(SysUser::getUsername, dto.getUsername()));
         // 账号不存在与密码错误返回同一个错误码：不向尝试者透露"这个账号是否存在"
         if (user == null || !passwordEncoder.matches(dto.getPassword(), user.getPassword())) {
+            // 审计里**写清**是哪种（看的人是本租户后勤管理，他本来就看得见账号列表），
+            // 而接口响应仍然不区分——理由见 docs/01 §4.4。detail 里绝不带口令原文
+            auditService.recordLoginFailure(tenant.getId(), user == null ? null : user.getId(), dto.getUsername(),
+                    AuditAction.LOGIN_FAILED, user == null ? "账号不存在" : "口令错误");
             throw new BizException(ErrorCode.LOGIN_FAILED);
         }
         // 状态检查放在密码校验之后，同样是为了不泄露账号是否存在
         if (!Integer.valueOf(1).equals(user.getStatus())) {
+            auditService.recordLoginFailure(tenant.getId(), user.getId(), user.getUsername(),
+                    AuditAction.LOGIN_DISABLED, "账号已停用");
             throw new BizException(ErrorCode.ACCOUNT_DISABLED);
         }
 
@@ -94,6 +104,9 @@ public class AuthServiceImpl implements AuthService {
         // 不打印账号口令等敏感信息，只记定位问题需要的 ID
         log.info("登录成功 userId={} tenantId={} userType={}",
                 user.getId(), tenant.getId(), user.getUserType());
+        // 登录成功也入审计（docs/01 §4.4）：按「账号 + 天 + 来源 IP」去重，同一天同一处只留一条。
+        // 写失败只记 ERROR、不影响这次登录——它是全项目唯一"审计失败不阻断业务"的地方
+        auditService.recordLoginSuccess(tenant.getId(), user.getId(), user.getUsername());
         return vo;
     }
 
