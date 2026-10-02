@@ -9,7 +9,7 @@ import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketAssignmentService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TicketFlowService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -38,7 +38,7 @@ public class AdminTicketController {
 
     private final TicketAssignmentService assignmentService;
     private final TicketQueryService ticketQueryService;
-    private final TicketService ticketService;
+    private final TicketFlowService flowService;
 
     @Operation(summary = "全部工单", description = "支持状态 / 楼栋 / 类别筛选")
     @SaCheckPermission("ticket:list:all")
@@ -90,7 +90,7 @@ public class AdminTicketController {
     @PostMapping("/{id}/reject")
     public Result<Void> reject(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketRejectDTO dto) {
-        ticketService.rejectByAdmin(id, dto);
+        flowService.rejectByAdmin(id, dto);
         return Result.ok();
     }
 
@@ -98,7 +98,7 @@ public class AdminTicketController {
     @SaCheckPermission("ticket:close")
     @PostMapping("/{id}/close")
     public Result<Void> close(@Parameter(description = "工单ID") @PathVariable long id) {
-        ticketService.close(id);
+        flowService.close(id);
         return Result.ok();
     }
 

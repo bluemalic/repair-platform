@@ -1,131 +1,61 @@
 package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
-import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
-import com.bluemalic.repair.common.UserType;
-import com.bluemalic.repair.common.WorkerTaskScope;
-import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketArriveDTO;
-import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
-import com.bluemalic.repair.dto.TicketDispatchDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
-import com.bluemalic.repair.dto.TicketSplitDTO;
-import com.bluemalic.repair.dto.TicketTransferDTO;
-import com.bluemalic.repair.entity.Building;
-import com.bluemalic.repair.entity.SysUser;
-import com.bluemalic.repair.entity.Ticket;
-import com.bluemalic.repair.entity.TicketCategory;
-import com.bluemalic.repair.entity.TicketCollaborator;
-import com.bluemalic.repair.entity.TicketEvaluation;
-import com.bluemalic.repair.entity.TicketLog;
-import com.bluemalic.repair.entity.WorkerBuilding;
 import com.bluemalic.repair.entity.RepairCode;
-import com.bluemalic.repair.mapper.BuildingMapper;
-import com.bluemalic.repair.mapper.RepairCodeMapper;
-import com.bluemalic.repair.mapper.SysUserMapper;
-import com.bluemalic.repair.mapper.TicketCategoryMapper;
-import com.bluemalic.repair.mapper.TicketCollaboratorMapper;
+import com.bluemalic.repair.entity.SysUser;
+import com.bluemalic.repair.entity.TicketCategory;
+import com.bluemalic.repair.entity.Ticket;
+import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
-import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
-import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.NotificationService;
-import com.bluemalic.repair.service.CurrentTenantService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TicketFlowService;
 import com.bluemalic.repair.service.TimeoutService;
-import com.bluemalic.repair.vo.PageResult;
-import com.bluemalic.repair.vo.RepairCodeVO;
-import com.bluemalic.repair.vo.TicketCollaboratorVO;
 import com.bluemalic.repair.vo.TicketDetailVO;
-import com.bluemalic.repair.vo.TicketLogVO;
 import com.bluemalic.repair.vo.TicketVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * 工单业务实现。
+ * 工单流转域实现：submit 到 close 的全部状态跃迁。从 TicketServiceImpl 拆出（纯移动，
+ * 改动建议 #4 第五步·收官）。
  *
- * <p>三条铁律贯穿所有方法：
- * <ol>
- *   <li>状态流转先过 {@link TicketStatus#checkTransition}，再用<b>条件更新</b>落库
- *       （update ... where status = 旧状态），受影响行数 0 即视为被并发改动——
- *       幂等与并发安全都靠它，不靠"先查再改"</li>
- *   <li>每次流转写一条 ticket_log（from / to / action / operator），可追溯</li>
- *   <li>查询与更新都不写数据范围条件——学生 / 维修工的可见范围由数据权限拦截器注入（ADR-002）</li>
- * </ol>
+ * <p>查询在 {@link TicketQueryService}、派单在 {@link TicketAssignmentService}、
+ * 超时在 {@code TicketTimeoutHandler}；校验、条件更新、台账与通知复用
+ * {@link TicketTransitionSupport}。学生可见自己的单、维修工见负责楼栋或派给
+ * 自己的单、后勤限本租户——数据范围由拦截器注入（ADR-002）。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class TicketServiceImpl implements TicketService {
-
-    private static final DateTimeFormatter TICKET_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-
-    /**
-     * 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待验收）。
-     * 终态不进默认视图——工作台回答"我现在该干什么"，历史去「本楼栋」或显式筛状态看（docs/01 §4.2）。
-     */
-    private static final List<Integer> ACTIVE_STATUSES = List.of(
-            TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode(), TicketStatus.TO_VERIFY.getCode());
-
-    /**
-     * 一单最多几个协作者（`docs/01` §4.5）。**再多就不叫"搭把手"了**——那种情况该看是不是该拆单。
-     * 这个上限不是并发的硬保证（两个请求同时加可能都通过检查），但唯一索引挡住了重复，
-     * 最多多出一个人；为它加锁不值得，写在这里免得下次被当成 bug 查。
-     */
-    private static final int MAX_COLLABORATORS = 3;
-
-    /** 能拆单的状态：活还没干完才谈得上"拆"（40 之后已经修完了，见 `docs/01` §4.5）。 */
-    private static final List<Integer> SPLITTABLE_STATUSES = List.of(
-            TicketStatus.TO_DISPATCH.getCode(), TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode());
+public class TicketFlowServiceImpl implements TicketFlowService {
 
     private final TicketMapper ticketMapper;
-    private final TicketLogMapper ticketLogMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
-    private final TicketCategoryMapper ticketCategoryMapper;
-    private final TicketCollaboratorMapper ticketCollaboratorMapper;
-    private final BuildingMapper buildingMapper;
-    private final RepairCodeMapper repairCodeMapper;
-    private final SysUserMapper sysUserMapper;
-    private final WorkerBuildingMapper workerBuildingMapper;
     private final NotificationService notificationService;
-    private final CurrentTenantService currentTenantService;
-    /** 流转三件套（条件更新 / 写日志 / 发通知）抽到包私有组件，四个域拆分后共用这一份口径。 */
-    private final TicketTransitionSupport transitions;
     private final TimeoutService timeoutService;
-    private final TimeoutRule timeoutRule;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final TicketTransitionSupport transitions;
 
-    // ==================== 学生端 ====================
-
-    @Override
-    @Transactional
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
         SysUser student = transitions.requireUser(studentId);
@@ -170,10 +100,6 @@ public class TicketServiceImpl implements TicketService {
         return TicketConverter.toVO(ticket,
                 transitions.buildingNames(List.of(buildingId)), transitions.categoryNames(List.of(dto.getCategoryId())));
     }
-
-
-    @Override
-    @Transactional
     public void cancel(long id) {
         long studentId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -185,9 +111,6 @@ public class TicketServiceImpl implements TicketService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
     }
-
-    @Override
-    @Transactional
     public void rework(long id, TicketReworkDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -209,9 +132,6 @@ public class TicketServiceImpl implements TicketService {
         transitions.notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
         log.info("验收不通过，打回重做 ticketId={} studentId={} reason={}", id, studentId, dto.getReason());
     }
-
-    @Override
-    @Transactional
     public void evaluate(long id, TicketEvaluateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -241,11 +161,6 @@ public class TicketServiceImpl implements TicketService {
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
         timeoutService.registerEval(ticket.getId());
     }
-
-    // ==================== 维修工端 ====================
-
-    @Override
-    @Transactional
     public void accept(long id) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -267,9 +182,6 @@ public class TicketServiceImpl implements TicketService {
         timeoutService.registerProcess(id, ticket.getDispatchTime());
         transitions.notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
-
-    @Override
-    @Transactional
     public void arrive(long id, TicketArriveDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -309,9 +221,6 @@ public class TicketServiceImpl implements TicketService {
                 });
         transitions.notifyTransition(ticket, TicketAction.ARRIVE, null, null);
     }
-
-    @Override
-    @Transactional
     public void finish(long id, TicketFinishDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -347,9 +256,6 @@ public class TicketServiceImpl implements TicketService {
                     ticket.getId());
         }
     }
-
-    @Override
-    @Transactional
     public void rejectByWorker(long id, TicketRejectDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -360,9 +266,6 @@ public class TicketServiceImpl implements TicketService {
         doReject(ticket, workerId, dto.getReason());
         transitions.notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
     }
-
-    @Override
-    @Transactional
     public void rejectByAdmin(long id, TicketRejectDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -371,8 +274,7 @@ public class TicketServiceImpl implements TicketService {
         transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
         transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
     }
-
-    private void doReject(Ticket ticket, long operatorId, String reason) {
+    void doReject(Ticket ticket, long operatorId, String reason) {
         transitions.conditionalUpdate(ticket.getId(), TicketStatus.REJECTED.getCode(), TicketAction.REJECT, operatorId,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
@@ -385,11 +287,6 @@ public class TicketServiceImpl implements TicketService {
         timeoutService.cancel(ticket.getId());
         log.info("驳回工单 ticketId={} operator={} reason={}", ticket.getId(), operatorId, reason);
     }
-
-    // ==================== 后勤端 ====================
-
-    @Override
-    @Transactional
     public void close(long id) {
         long adminId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
@@ -402,21 +299,9 @@ public class TicketServiceImpl implements TicketService {
         // 人工关闭后取消已登记的验收超时任务，避免调度器重复处理
         timeoutService.cancel(id);
     }
-
-    /**
-     * 把"参与人"条件拼进条件更新的 WHERE：{@code (worker_id = 我 OR EXISTS(我在协作者里))}。
-     *
-     * <p><b>必须与 {@link #isNotParticipant} 是同一个口径</b>——两边不一致就会出现
-     * "检查过了、但更新 0 行"，对外表现是一句莫名其妙的 20002。
-     *
-     * <p>为什么用 EXISTS 而不是"先把协作者的单查出来再 IN"：协作者数量没有上界（历史协作一直累积），
-     * 而 `idx_worker(worker_id, ticket_id)` 让这条子查询在 ticket_collaborator 上走索引。
-     * 子查询里引用外层 {@code ticket.id} 在 MySQL 里是允许的（被更新的表是 ticket，子查询查的是另一张表）。
-     */
-    private void appendParticipantCondition(LambdaUpdateWrapper<Ticket> wrapper, long workerId) {
+    void appendParticipantCondition(LambdaUpdateWrapper<Ticket> wrapper, long workerId) {
         wrapper.and(w -> w.eq(Ticket::getWorkerId, workerId)
                 .or().exists("SELECT 1 FROM ticket_collaborator c"
                         + " WHERE c.ticket_id = ticket.id AND c.worker_id = {0}", workerId));
     }
 }
-
