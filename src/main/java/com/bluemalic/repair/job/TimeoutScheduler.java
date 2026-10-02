@@ -2,7 +2,7 @@ package com.bluemalic.repair.job;
 
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.service.TimeoutService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>每分钟兜底扫库，补 ZSet 丢失（Redis 重启）导致的漏处理</li>
  * </ul>
  *
- * <p>这里只做"编排"：到期工单该做什么（自动关闭）由 {@link TicketService#autoClose} 决定，
+ * <p>这里只做"编排"：到期工单该做什么（自动关闭）由 {@link TicketTimeoutHandler#autoClose} 决定，
  * 调度器不直接碰库。
  *
  * <p><b>测试里必须关掉</b>（{@code repair.timeout.scheduler-enabled=false}，见测试注解
@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TimeoutScheduler {
 
     private final TimeoutService timeoutService;
-    private final TicketService ticketService;
+    private final TicketTimeoutHandler timeoutHandler;
 
     /**
      * 任务名 → 上一次已经 WARN 过的失败信息（见 {@link #runQuietly}）。
@@ -98,7 +98,7 @@ public class TimeoutScheduler {
     private void closeDue(List<Long> ticketIds) {
         for (Long ticketId : ticketIds) {
             try {
-                ticketService.autoClose(ticketId);
+                timeoutHandler.autoClose(ticketId);
                 log.info("超时自动关闭 ticketId={}", ticketId);
             } catch (BizException e) {
                 // 状态已不是 50（人工关闭/撤单/已被另一实例处理）→ 正常跳过，不算失败
@@ -114,7 +114,7 @@ public class TimeoutScheduler {
         for (Long ticketId : ticketIds) {
             try {
                 // 幂等与"是否还该提醒"都在 remindAcceptTimeout 里判定（状态 + ticket_log）
-                ticketService.remindAcceptTimeout(ticketId);
+                timeoutHandler.remindAcceptTimeout(ticketId);
             } catch (BizException e) {
                 log.info("接单提醒跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
             } catch (Exception e) {
@@ -126,7 +126,7 @@ public class TimeoutScheduler {
     private void escalateDue(List<Long> ticketIds) {
         for (Long ticketId : ticketIds) {
             try {
-                ticketService.escalateProcessTimeout(ticketId);
+                timeoutHandler.escalateProcessTimeout(ticketId);
             } catch (BizException e) {
                 log.info("处理超时升级跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
             } catch (Exception e) {

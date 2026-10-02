@@ -48,26 +48,4 @@ public interface TicketService {
 
     /** 后勤关闭（50 → 60），超时自动关闭是 M3 的事，这里是人工兜底。 */
     void close(long id);
-
-    /** 超时自动关闭（50 → 60）。仅超时调度器调用（系统上下文，操作者=0），不对外暴露接口。 */
-    void autoClose(long id);
-
-    /**
-     * 接单超时提醒：20 待接单 超过阈值（默认 24h）仍无人接单时，提醒本租户后勤管理员。
-     * 仅超时调度器调用；不是状态跃迁（20 → 20，只写 ticket_log + 通知）。
-     *
-     * <p><b>职责边界</b>：是否"已到期"由调用方判定（ZSet 按 score、兜底扫描按时间阈值），
-     * 本方法只判定"还该不该提醒"——状态仍是 20，且 ticket_log 里没有 ACCEPT_TIMEOUT 记录
-     * （幂等：兜底扫描每分钟都会扫到同一批超期工单，不判重就会把管理员刷屏）。
-     */
-    void remindAcceptTimeout(long id);
-
-    /**
-     * 处理超时升级：30 处理中 自派单起超过阈值（默认 48h）仍未完工时，升级提醒本租户后勤管理员。
-     * 仅超时调度器调用；同样不是状态跃迁（30 → 30，只写 ticket_log + 通知）。
-     *
-     * <p>职责边界与 {@link #remindAcceptTimeout} 一致：是否到期由调用方判定（ZSet score / 兜底扫描阈值），
-     * 本方法只判定"还该不该升级"——状态仍是 30，且 ticket_log 里没有 PROCESS_TIMEOUT 记录。
-     */
-    void escalateProcessTimeout(long id);
 }

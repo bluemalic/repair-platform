@@ -14,7 +14,7 @@ import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.service.TimeoutService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,7 +64,7 @@ class TimeoutProcessEscalationTest {
     private TimeoutService timeoutService;
 
     @Autowired
-    private TicketService ticketService;
+    private TicketTimeoutHandler ticketService;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;

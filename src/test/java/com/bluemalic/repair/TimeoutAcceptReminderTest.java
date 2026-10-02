@@ -12,7 +12,7 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.TimeoutService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -65,7 +65,7 @@ class TimeoutAcceptReminderTest {
     private TimeoutService timeoutService;
 
     @Autowired
-    private TicketService ticketService;
+    private TicketTimeoutHandler ticketService;
 
     private final List<Long> createdTickets = new ArrayList<>();
 
