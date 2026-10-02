@@ -87,21 +87,12 @@ public class TicketServiceImpl implements TicketService {
 
     private static final DateTimeFormatter TICKET_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
 
-    /** ticket_log.operator_id 用 0 表示"系统"（超时调度等无登录态动作），与真人操作区分。 */
-    private static final long SYSTEM_OPERATOR = 0L;
-
     /**
      * 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待验收）。
      * 终态不进默认视图——工作台回答"我现在该干什么"，历史去「本楼栋」或显式筛状态看（docs/01 §4.2）。
      */
     private static final List<Integer> ACTIVE_STATUSES = List.of(
             TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode(), TicketStatus.TO_VERIFY.getCode());
-
-    /** 超时提醒类通知（不是状态跃迁，所以不进 TRANSITION_NOTICE 表）：类型与标题放一处。 */
-    private static final String NOTICE_ACCEPT_TIMEOUT = "TICKET_ACCEPT_TIMEOUT";
-    private static final String TITLE_ACCEPT_TIMEOUT = "工单超时未接单";
-    private static final String NOTICE_PROCESS_TIMEOUT = "TICKET_PROCESS_TIMEOUT";
-    private static final String TITLE_PROCESS_TIMEOUT = "工单处理超时升级";
 
     /**
      * 一单最多几个协作者（`docs/01` §4.5）。**再多就不叫"搭把手"了**——那种情况该看是不是该拆单。
@@ -410,61 +401,6 @@ public class TicketServiceImpl implements TicketService {
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         // 人工关闭后取消已登记的验收超时任务，避免调度器重复处理
         timeoutService.cancel(id);
-    }
-
-    @Override
-    @Transactional
-    public void autoClose(long id) {
-        Ticket ticket = transitions.requireTicket(id);
-        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
-        transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
-                ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
-                entity -> entity.setCloseTime(LocalDateTime.now()));
-        transitions.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
-        timeoutService.cancel(id);
-    }
-
-    @Override
-    @Transactional
-    public void remindAcceptTimeout(long id) {
-        Ticket ticket = transitions.requireTicket(id);
-        notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
-                NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
-                "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
-                        + " 无人接单，请及时调度");
-    }
-
-    @Override
-    @Transactional
-    public void escalateProcessTimeout(long id) {
-        Ticket ticket = transitions.requireTicket(id);
-        notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
-                NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
-                "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()
-                        + " 仍未完工，请及时跟进");
-    }
-
-    /**
-     * 超时提醒类动作的公共骨架：状态仍停在预期节点 + 之前没提醒过 → 记一笔日志并发通知给调度方。
-     *
-     * <p>两件事都靠 ticket_log：日志既是"提醒过"的判重依据（兜底扫描每分钟都会扫到同一批超期工单，
-     * 不判重会把管理员刷屏），也是"提醒动作发生过"的可追溯记录。
-     */
-    private void notifyTimeoutOnce(Ticket ticket, int expectedStatus, TicketAction action,
-                                   String noticeType, String noticeTitle, String content) {
-        if (ticket.getStatus() != expectedStatus) {
-            // 已流转（接单/完工/驳回/关闭）——提醒没有意义，静默跳过
-            return;
-        }
-        if (transitions.notifiedBefore(ticket.getTenantId(), ticket.getId(), action)) {
-            return;
-        }
-        transitions.writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
-                action, SYSTEM_OPERATOR, null);
-        int sent = notificationService.sendToTenantAdmins(ticket.getTenantId(), noticeType,
-                noticeTitle, content, ticket.getId());
-        log.info("{} ticketId={} 送达后勤管理员 {} 人", action.getDesc(), ticket.getId(), sent);
     }
 
     /**
