@@ -8,7 +8,7 @@ import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketQueryService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TicketFlowService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -39,7 +39,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class WorkerTicketController {
 
     private final TicketQueryService ticketQueryService;
-    private final TicketService ticketService;
+    private final TicketFlowService flowService;
 
     @Operation(summary = "我的任务",
             description = "两个视图：scope=mine（默认）只给派给我的单，默认状态为待接单/处理中/待验收；"
@@ -67,7 +67,7 @@ public class WorkerTicketController {
     @SaCheckPermission("ticket:accept")
     @PostMapping("/{id}/accept")
     public Result<Void> accept(@Parameter(description = "工单ID") @PathVariable long id) {
-        ticketService.accept(id);
+        flowService.accept(id);
         return Result.ok();
     }
 
@@ -76,7 +76,7 @@ public class WorkerTicketController {
     @PostMapping("/{id}/reject")
     public Result<Void> reject(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketRejectDTO dto) {
-        ticketService.rejectByWorker(id, dto);
+        flowService.rejectByWorker(id, dto);
         return Result.ok();
     }
 
@@ -88,7 +88,7 @@ public class WorkerTicketController {
     @PostMapping("/{id}/arrive")
     public Result<Void> arrive(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketArriveDTO dto) {
-        ticketService.arrive(id, dto);
+        flowService.arrive(id, dto);
         return Result.ok();
     }
 
@@ -97,7 +97,7 @@ public class WorkerTicketController {
     @PostMapping("/{id}/finish")
     public Result<Void> finish(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketFinishDTO dto) {
-        ticketService.finish(id, dto);
+        flowService.finish(id, dto);
         return Result.ok();
     }
 }

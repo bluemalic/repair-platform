@@ -1,18 +1,24 @@
 package com.bluemalic.repair.service;
 
-import com.bluemalic.repair.vo.TicketVO;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.vo.TicketVO;
 
 /**
- * 工单业务。所有状态流转都经状态机校验、写 ticket_log、发站内通知。
- * 列表查询的"谁能看到哪些单"由数据权限拦截器统一注入，这里不手写范围条件。
+ * 工单流转域：submit 到 close 的全部状态跃迁（学生侧提交/撤销/评价/打回，
+ * 维修工侧接单/到场/完工/驳回，后勤侧驳回/关闭）。从 {@code TicketService} 拆出
+ * （纯移动，改动建议 #4 第五步·收官）。
+ *
+ * <p>查询在 {@link TicketQueryService}、派单在 {@link TicketAssignmentService}、
+ * 超时在 {@code TicketTimeoutHandler}。每次流转都经状态机校验（{@code TicketStatus.checkTransition}）、
+ * 条件更新落库（受影响行数 0 = 并发改动）、写 {@code ticket_log}、发站内通知——
+ * 这些口径收在 {@code TicketTransitionSupport}，四域共用。
  */
-public interface TicketService {
+public interface TicketFlowService {
 
     /** 学生提交报修（可带报修码自动定位楼栋房间）。 */
     TicketVO submit(TicketCreateDTO dto);

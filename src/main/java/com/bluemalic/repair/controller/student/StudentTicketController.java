@@ -6,7 +6,7 @@ import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketQueryService;
-import com.bluemalic.repair.service.TicketService;
+import com.bluemalic.repair.service.TicketFlowService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -34,7 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class StudentTicketController {
 
     private final TicketQueryService ticketQueryService;
-    private final TicketService ticketService;
+    private final TicketFlowService flowService;
 
     /**
      * 提交报修同样吃报修码（{@code TicketCreateDTO.repairCode}），与 {@code by-code} 同档限流：
@@ -46,7 +46,7 @@ public class StudentTicketController {
     @RateLimit
     @PostMapping
     public Result<TicketVO> submit(@Valid @RequestBody TicketCreateDTO dto) {
-        return Result.ok(ticketService.submit(dto));
+        return Result.ok(flowService.submit(dto));
     }
 
     @Operation(summary = "我的工单", description = "只返回当前学生自己的工单（数据权限拦截器保证）")
@@ -70,7 +70,7 @@ public class StudentTicketController {
     @SaCheckPermission("ticket:cancel")
     @PostMapping("/{id}/cancel")
     public Result<Void> cancel(@Parameter(description = "工单ID") @PathVariable long id) {
-        ticketService.cancel(id);
+        flowService.cancel(id);
         return Result.ok();
     }
 
@@ -79,7 +79,7 @@ public class StudentTicketController {
     @PostMapping("/{id}/evaluate")
     public Result<Void> evaluate(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketEvaluateDTO dto) {
-        ticketService.evaluate(id, dto);
+        flowService.evaluate(id, dto);
         return Result.ok();
     }
 
@@ -96,7 +96,7 @@ public class StudentTicketController {
     @PostMapping("/{id}/rework")
     public Result<Void> rework(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketReworkDTO dto) {
-        ticketService.rework(id, dto);
+        flowService.rework(id, dto);
         return Result.ok();
     }
 }
