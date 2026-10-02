@@ -8,6 +8,7 @@ import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.service.TicketQueryService;
+import com.bluemalic.repair.service.TicketAssignmentService;
 import com.bluemalic.repair.service.TicketService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AdminTicketController {
 
+    private final TicketAssignmentService assignmentService;
     private final TicketQueryService ticketQueryService;
     private final TicketService ticketService;
 
@@ -62,7 +64,7 @@ public class AdminTicketController {
     @PostMapping("/{id}/dispatch")
     public Result<Void> dispatch(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketDispatchDTO dto) {
-        ticketService.dispatch(id, dto);
+        assignmentService.dispatch(id, dto);
         return Result.ok();
     }
 
@@ -79,7 +81,7 @@ public class AdminTicketController {
     @PostMapping("/{id}/transfer")
     public Result<Void> transfer(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketTransferDTO dto) {
-        ticketService.transfer(id, dto);
+        assignmentService.transfer(id, dto);
         return Result.ok();
     }
 
@@ -107,7 +109,7 @@ public class AdminTicketController {
     @PostMapping("/{id}/collaborators")
     public Result<Void> addCollaborator(@Parameter(description = "工单ID") @PathVariable long id,
                                        @Valid @RequestBody TicketCollaboratorDTO dto) {
-        ticketService.addCollaborator(id, dto);
+        assignmentService.addCollaborator(id, dto);
         return Result.ok();
     }
 
@@ -117,7 +119,7 @@ public class AdminTicketController {
     @DeleteMapping("/{id}/collaborators/{workerId}")
     public Result<Void> removeCollaborator(@Parameter(description = "工单ID") @PathVariable long id,
                                            @Parameter(description = "维修工ID") @PathVariable long workerId) {
-        ticketService.removeCollaborator(id, workerId);
+        assignmentService.removeCollaborator(id, workerId);
         return Result.ok();
     }
 
@@ -129,6 +131,6 @@ public class AdminTicketController {
     @PostMapping("/{id}/split")
     public Result<TicketVO> split(@Parameter(description = "工单ID") @PathVariable long id,
                                   @Valid @RequestBody TicketSplitDTO dto) {
-        return Result.ok(ticketService.split(id, dto));
+        return Result.ok(assignmentService.split(id, dto));
     }
 }
