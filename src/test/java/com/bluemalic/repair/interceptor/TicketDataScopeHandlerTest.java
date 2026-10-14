@@ -103,4 +103,51 @@ class TicketDataScopeHandlerTest {
                 .isEqualTo("ticket.student_id = 3");
         assertThat(handler.buildScopedExpression(ticketTable(), 1L, null, List.of("ADMIN"), List.of())).isNull();
     }
+
+    /**
+     * 未知角色（含**一个角色都没有**的账号）→ 恒假条件，一条工单都看不到。
+     *
+     * <p>改之前这条兜底是"落到学生口径"（ADR-012 的负面后果里记着它）。两种口径的差别不在
+     * "谁的权限更大"，而在**出错时的表现方向**：漏配一个角色的可见范围，恒假会让基层立刻报
+     * "我的列表空了"，学生口径则会安静地给出一批越权可见的单——后者的条件看起来还挺克制
+     * （{@code student_id = 我}），评审时看不出问题。
+     *
+     * <p>用条件而不是抛异常也是刻意的：对调用方来说，"这个人确实没有单"和"这个人被拒绝"
+     * 表现得一样（空列表），不会把一次数据配置疏忽升级成 500。
+     */
+    @Test
+    void unknownRoleSeesNothing() {
+        // 平台运营（PLATFORM）这类非租户角色若流到这里，看不到任何单
+        assertThat(handler.buildScopedExpression(ticketTable(), 1L, TENANT, List.of("PLATFORM"), List.of()).toString())
+                .isEqualTo("ticket.tenant_id = 1 AND 1 = 0");
+
+        // 一个角色都没有的账号同样恒假（这正是"角色数据缺失"的样子）
+        assertThat(handler.buildScopedExpression(ticketTable(), 5L, TENANT, List.of(), List.of()).toString())
+                .isEqualTo("ticket.tenant_id = 1 AND 1 = 0");
+
+        // 无租户的兜底分支也不放宽：仍然是一条也看不到
+        assertThat(handler.buildScopedExpression(ticketTable(), 5L, null, List.of(), List.of()).toString())
+                .isEqualTo("1 = 0");
+    }
+
+    /**
+     * 多角色账号的优先级：ADMIN → WORKER → STUDENT → 拒绝。
+     *
+     * <p>钉住这个顺序是因为它有实际含义：一个人同时是学生和维修工时按**维修工**口径取数
+     * （他确实要用维修工身份干活，列表里得有自己的派单）；把 STUDENT 提到前面会让他的
+     * 派单凭空消失。加新角色分支时别把这个顺序改掉。
+     */
+    @Test
+    void multipleRolesResolveInFixedOrder() {
+        assertThat(handler.buildScopedExpression(ticketTable(), 9L, TENANT,
+                List.of("STUDENT", "WORKER"), List.of(9L)).toString())
+                .isEqualTo("ticket.tenant_id = 1 AND (ticket.building_id IN (9)"
+                        + " OR ticket.worker_id = 9"
+                        + " OR ticket.id IN (SELECT ticket_id FROM ticket_collaborator WHERE worker_id = 9))");
+
+        // 后勤 + 学生：后勤口径（角色维度不限制，只剩租户条件）
+        assertThat(handler.buildScopedExpression(ticketTable(), 9L, TENANT,
+                List.of("STUDENT", "ADMIN"), List.of()).toString())
+                .isEqualTo("ticket.tenant_id = 1");
+    }
 }

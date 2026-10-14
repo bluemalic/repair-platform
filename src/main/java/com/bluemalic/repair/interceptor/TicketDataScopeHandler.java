@@ -33,7 +33,9 @@ import java.util.List;
  *   <li>维修工（WORKER）→ 本租户内 {@code building_id IN (他负责的楼栋) OR worker_id = 他
  *       OR id IN (他协作的工单)}——后两项分别是跨楼栋强制派单的单与协同处理的单
  *       （见 {@link #buildScopeExpression} 的说明）</li>
- *   <li>学生（默认）→ 本租户内 student_id = 当前用户</li>
+ *   <li>学生（STUDENT）→ 本租户内 student_id = 当前用户</li>
+ *   <li><b>未知角色（含一个角色都没有的账号）→ 恒假条件，一条也看不到</b>
+ *       （理由见 {@link #buildScopeExpression} 的说明）</li>
  * </ul>
  *
  * <p>条件列一律限定到表名/别名（{@link SqlAst#qualified}）：单表查询时是 {@code ticket.student_id}，
@@ -129,6 +131,15 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
      *
      * <p>**名词对齐一下**：`docs/01` §4.2 说的是"三层叠加"，指维修工可见范围的三个来源；
      * 在这张条件表里它们都在**角色**这一层里，租户那一层仍然在外面（ADR-008 的两层没有变）。
+     *
+     * <p><b>未知角色返回恒假（{@code 1 = 0}），不落回学生口径</b>：本方法是角色维度的唯一出口，
+     * 以后新增的租户角色都会流经这里。兜底做成"拒绝"而不是"猜一个最像的角色"，是为了让
+     * "新增角色忘了配可见范围"表现成**什么都看不到**——立刻会被发现；而不是"看到了一些不该看的"——
+     * 条件看着还挺克制（{@code student_id = 我}），却会凭空给出"某张单的 student_id 恰好是我"的可见性，
+     * 这类越权在评审里是看不出来的。ADR-012 的负面后果记的就是这一条。
+     *
+     * <p>顺序（ADMIN → WORKER → STUDENT → 拒绝）同时也是**多角色账号的优先级**：
+     * 一个人同时是学生和维修工时取维修工口径，测试里有一条专门钉住这个顺序。
      */
     Expression buildScopeExpression(Table table, long userId, List<String> roles, List<Long> buildingIds) {
         if (roles.contains("ADMIN")) {
@@ -141,8 +152,12 @@ public class TicketDataScopeHandler implements MultiDataPermissionHandler {
                     new OrExpression(byBuilding, equalsColumn(table, "worker_id", userId)),
                     collaborationsOf(table, userId)));
         }
-        // 学生（以及任何未配置特殊范围的角色）
-        return equalsColumn(table, "student_id", userId);
+        if (roles.contains("STUDENT")) {
+            return equalsColumn(table, "student_id", userId);
+        }
+        // 未知角色 / 一个角色都没有：**恒假，宁可看不到也不看多**（理由见方法注释）。
+        // 用条件而不是抛异常：表现成"这个人确实没有单"，而不是一个 500。
+        return parse("1 = 0");
     }
 
     /**
