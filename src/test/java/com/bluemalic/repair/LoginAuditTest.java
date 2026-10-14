@@ -170,12 +170,30 @@ class LoginAuditTest {
         assertThat(listActions(admin, "/api/admin/audit-logs?pageNum=1&pageSize=50&includeLogin=true"))
                 .contains(AuditAction.LOGIN_SUCCESS, AuditAction.LOGIN_FAILED);
 
-        // 按动作筛：**即使不勾也看得到**——否则"筛了却查不到"会变成一个很难想明白的现象
-        assertThat(listActions(admin, "/api/admin/audit-logs?pageNum=1&pageSize=50&action=LOGIN_FAILED"))
-                .containsExactly(AuditAction.LOGIN_FAILED);
+        // 按动作筛：**即使不勾也看得到**——否则"筛了却查不到"会变成一个很难想明白的现象。
+        //
+        // 断言刻意**不写成"全租户恰好一条"**：登录失败不去重（本类的规则就是靠次数看爆破），
+        // 于是本地 dev 库里只要有过一次真实的口令输错，这个列表就会多出历史记录。
+        // CI 用的是 Flyway 建出来的空库，这个差异**只在本地暴露**——本地跑全量时被它红过。
+        // 换成两条同样严格、但不假设"库里只有我造的数据"的断言：筛出来必须**全是** LOGIN_FAILED
+        // （证明没把别的动作混进来），且本用例刚造的那条**必须在里面**（证明筛了确实能查到）。
+        List<JsonNode> failed = listRows(admin, "/api/admin/audit-logs?pageNum=1&pageSize=50&action=LOGIN_FAILED");
+        assertThat(failed).isNotEmpty();
+        assertThat(failed).allMatch(row -> AuditAction.LOGIN_FAILED.equals(row.path("action").asText()));
+        assertThat(failed).anyMatch(row -> "test-la-list".equals(row.path("operatorName").asText()));
     }
 
     // ==================== 工具 ====================
+
+    /** 审计列表接口的原始行。用它在断言里同时看 action 与 operatorName，不必为每种组合再写一个提取器。 */
+    private List<JsonNode> listRows(String token, String url) throws Exception {
+        MvcResult result = mockMvc.perform(get(url).header("Authorization", "Bearer " + token)).andReturn();
+        JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+        assertThat(body.path("code").asInt()).as("接口应返回成功：" + url + " → " + body).isZero();
+        return java.util.stream.StreamSupport
+                .stream(body.path("data").path("list").spliterator(), false)
+                .toList();
+    }
 
     private List<AuditLog> loginsOf(String username) {
         return loginsOf(username, null);
@@ -196,12 +214,7 @@ class LoginAuditTest {
     }
 
     private List<String> listActions(String token, String url) throws Exception {
-        MvcResult result = mockMvc.perform(get(url).header("Authorization", "Bearer " + token)).andReturn();
-        JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
-        assertThat(body.path("code").asInt()).as("接口应返回成功：" + url + " → " + body).isZero();
-        return java.util.stream.StreamSupport
-                .stream(body.path("data").path("list").spliterator(), false)
-                .map(node -> node.path("action").asText()).toList();
+        return listRows(token, url).stream().map(node -> node.path("action").asText()).toList();
     }
 
     private org.springframework.test.web.servlet.ResultActions login(String username, String password, String ip)
