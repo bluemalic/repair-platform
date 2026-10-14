@@ -7,9 +7,9 @@ import java.util.List;
 /**
  * 超时调度（ADR-001：Redis ZSet 延迟队列，ZREM 返回值做多实例去重）。
  *
- * <p>两个节点各用一个 ZSet key（{@code ticket:timeout:ACCEPT} / {@code ticket:timeout:EVAL}），
- * member = ticketId、score = 到期毫秒时间戳。按节点分 key 而不是在一个 key 里用
- * "{@code id:节点}" 拼 member：消费时不需要解析和过滤，取消时也只是对两个 key 各删一次。
+ * <p>三个节点各用一个 ZSet key（{@code ticket:timeout:ACCEPT} / {@code ticket:timeout:PROCESS} /
+ * {@code ticket:timeout:EVAL}），member = ticketId、score = 到期毫秒时间戳。按节点分 key 而不是在一个 key 里用
+ * "{@code id:节点}" 拼 member：消费时不需要解析和过滤，取消时也只是对三个 key 各删一次。
  *
  * <p>职责边界：本接口只负责"登记到期任务 / 消费到期任务 / 兜底扫描"这些**机制**，
  * 到期后做什么（提醒后勤 / 自动关闭）由调用方（TimeoutScheduler）编排——这样不被
