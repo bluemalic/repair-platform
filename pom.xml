@@ -31,6 +31,11 @@
         <!-- Excel 导出（ADR-014）。4.0.3 是这个坐标的**最后一个版本**：
              EasyExcel 已更名为 FastExcel（cn.idev.excel:fastexcel），详见 ADR-014 的"负面后果" -->
         <easyexcel.version>4.0.3</easyexcel.version>
+        <!-- 覆盖率。版本其实由 spring-boot-starter-parent 管理（当前解析到 0.8.15），
+             这里**显式钉住只是为了消掉 Maven 那句 plugin.version is missing 的警告**——
+             构建输出里不该有每次都要人眼过滤一遍的噪音。想去掉这个 property 直接删，
+             Boot 会接管。 -->
+        <jacoco.version>0.8.15</jacoco.version>
     </properties>
 
     <dependencies>
@@ -223,6 +228,87 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+
+            <!-- 覆盖率（jacoco-maven-plugin 的版本由 spring-boot-starter-parent 管理，不自己钉）。
+                 report / check 都绑在 test 阶段而不是默认的 verify：
+                 **验证命令是 `mvn -B clean package`，而 package 在 verify 之前就结束了**——
+                 绑 verify 的话，这个门槛在日常命令里根本不会跑，等于没有。
+                 报告落在 target/site/jacoco/index.html，CI 里当构建产物上传。
+
+                 门槛值的来历（2026-10-14 接入时的实测，不是拍脑袋）：
+                   service.impl 行覆盖 90.6%（1860/2052）→ 门槛取 85%，留约 5 个点的余量
+                   整包行覆盖约 87.2%                    → 门槛取 80%
+                 余量的用途是让"正常加几十行没测试的代码"不至于立刻红；**红了请补测试，
+                 不要调低这两个数字**——它们只有在能被突破时才有意义。 -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 只instrument本项目自己的类。默认是"所有被加载的类"，包括依赖 jar——
+                                 那会让 jsqlparser 的生成代码（CCJSqlParserTokenManager 里那个巨型方法）
+                                 在每个测试 JVM 里抛一次 MethodTooLargeException 并打一串栈，
+                                 既刷屏又白拖慢启动。报告本来也只统计 target/classes，收窄没有副作用。 -->
+                            <includes>
+                                <include>com.bluemalic.repair.*</include>
+                            </includes>
+                            <!-- append=true（默认）会把**上一轮**的 jacoco.exec 累加进来。
+                                 那意味着门槛校验的是"几轮测试的并集"：先跑全量再单独跑一个类，
+                                 覆盖率仍然漂亮，门槛被旧数据骗过去。每次以本轮为准。 -->
+                            <append>false</append>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- 业务逻辑几乎全在 service.impl（也是回归风险最集中的地方），单独盯住它 -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.bluemalic.repair.service.impl.*</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- 整包兜底：防止新增一个"整包零测试"的模块悄悄进来 -->
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
