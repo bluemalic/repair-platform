@@ -52,10 +52,19 @@ services:
           memory: ${MYSQL_MEM_LIMIT:-768M}
 
   redis:
-    # 官方镜像足够：缓存、Sa-Token 会话、延迟队列（ZSet）、限流计数都只用到核心命令，
+    # 官方镜像足够：Sa-Token 会话、延迟队列（ZSet）、限流计数、登录审计去重都只用到核心命令，
     # redis-stack 多出的 RediSearch 从未被 MODULE 加载过——M4 的 Schema 注入走的是
     # 全量拼提示词（docs/04 ADR-005 背景 + pom.xml），embedding 方案已放弃，
     # 那个 module 在 2C2G 上只是白占内存。
+    #
+    # 淘汰策略必须是 volatile-lru，**不要改回 allkeys-lru**（口令见 docs/04 ADR-016）：
+    #   volatile-lru 只淘汰"设了 TTL 的键"，而这台 Redis 上的键里唯独超时队列的两个 ZSet
+    #   （ticket:timeout:ACCEPT / ticket:timeout:EVAL）没有 TTL。它恰恰是唯一"丢了就永久丢"
+    #   的数据——成员被淘汰意味着那些工单再也不会被超时提醒 / 自动关闭，而且全程没有任何报错。
+    #   allkeys-lru 会连它一起淘汰。
+    # 代价（有意接受）：会话键是有 TTL 的，内存真满时会话可能先被淘汰 → 用户重新登录即可恢复；
+    #   这个降级比"静默丢掉超时任务"轻得多。
+    # 策略**故意不做成环境变量**：它是个安全开关，不该留一个能被误改成 allkeys-lru 的口子。
     image: redis:7-alpine
     container_name: repair-redis
     restart: unless-stopped
@@ -63,7 +72,7 @@ services:
       redis-server
       --appendonly yes
       --maxmemory ${REDIS_MAXMEMORY:-256mb}
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --requirepass ${REDIS_PASSWORD}
     volumes:
       - ./data/redis:/data
