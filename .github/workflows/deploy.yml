@@ -1,14 +1,30 @@
-# 持续部署（CD）：测试通过 → 构建镜像 → 推镜像仓库 → SSH 到服务器拉取重启
+# 持续部署（CD）：测试通过 → 同步源码 → 服务器本地构建镜像 → 重启 → 健康检查
 #
 # **现在仍是手动触发**（Actions 页面 → 左侧选 CD → Run workflow）。
-# 为什么没有直接放开 push 触发、以及启用前必须做掉的三件前置，写在 docs/05 §6——
-# 那里同时记着"为什么这件事拖到现在"的判断依据，别把它当成一个没做完的 TODO。
+# 启用前要做的三件前置写在 docs/05 §6，那里同时记着每次"为什么这么设计"的实测依据。
 #
-# 四个 job 的划分不是随手切的：
-#   verify → image → deploy-app    ：后端这条链，测试不过就上不了线
-#   frontend → deploy-frontend     ：前端这条链**独立**，与后端互不牵连
-# 后端与前端分开，是 AGENTS §3.1 第 4 条那条边界的延续：前端构建失败不该拦住后端发布
-# （反过来也一样）。两条链唯一的共同前提是 SSH 通。
+# 五个 job 的分工不是随手切的：
+#   verify → deploy-app            ：后端链，测试不过就上不了线
+#   frontend → deploy-frontend     ：前端链**独立**，与后端互不牵连
+# 两条链唯一的共同前提是 SSH 通。
+#
+# ============================================================
+# 为什么后端**不在 CI 里构建镜像**（2026-10-15 实测后改的，别再改回去）
+#
+# 原设计是 docker/build-push-action 构建镜像 → 推 TCR → 服务器拉取。实测下来这条路的
+# **跨境推镜像环节是瓶颈**：从 GitHub 的境外 runner 推 ccr.ccs.tencentyun.com，
+# 一层 141MB 推了 52 分钟只到 115MB（约 0.3 Mbps），两层 232MB 需要一个多小时。
+# 日志原文：`#22 pushing layer 2dc9e195c9e2 114.97MB / 141.61MB 3129.0s`
+#
+# 注意方向性：服务器**拉**镜像很快（实测 11 Mbps，见 §6.3），慢的是 CI 往境**推**。
+# 所以正确的做法是让"大流量的那一段"留在境内：
+#   - 源码包只有几 MB，跨境传得动
+#   - 服务器本地构建走它自己的 MAVEN_MIRROR（境内源）+ Docker 层缓存
+#   - 不需要镜像仓库，也不需要跨境的 500MB 流量
+#
+# 这也解释了为什么 TCR 那套凭据现在用不上（见文件末尾的说明）——不是配置错了，
+# 是那条路在这个网络拓扑下不划算。将来如果 CI 换成境内的 runner，再考虑切回去。
+# ============================================================
 
 name: CD
 
@@ -17,14 +33,11 @@ on:
   # push:
   #   branches: [main]
 
-env:
-  IMAGE: repair-app
-
 jobs:
   # ============================================================
   # 1. 测试与打包。这是"自动测试 + 自动上线"里的前半句：
-  #    它跑的就是本地那条 `mvn -B clean package`（含 JaCoCo 覆盖率门槛），
-  #    所以**覆盖率掉下来和测试红一样会拦住发布**。
+  #    跑的就是本地那条 `mvn -B clean package`（含 JaCoCo 覆盖率门槛），
+  #    所以测试红、覆盖率掉下来，都会直接拦住发布。
   # ============================================================
   verify:
     name: 测试与打包
@@ -110,89 +123,75 @@ jobs:
           retention-days: 7
 
   # ============================================================
-  # 2. 构建并推送后端镜像
+  # 2. 部署后端：同步源码 → 服务器本地构建 → 重启 → 健康检查 → 失败回滚
   # ============================================================
-  image:
-    name: 构建并推送镜像
+  deploy-app:
+    name: 部署后端到服务器
     runs-on: ubuntu-latest
     needs: verify
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 登录镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.REGISTRY_URL }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+      # 排除项每一条都有理由，尤其是前两条：
+      #   .env  —— 服务器上的 .env 才是真的（数据库口令、演示开关都在里面）。
+      #            打进包里会把本地/CI 的配置覆盖上去，那是灾难性的
+      #   data / logs —— 容器正在写的 MySQL 与 MinIO 数据目录，绝不能覆盖
+      # 其余是构建产物与本地环境（node_modules 几百 MB，传过去也没用）
+      - name: 打包源码
+        run: |
+          tar -czf source.tar.gz \
+            --exclude='./.git' \
+            --exclude='./.idea' \
+            --exclude='./.env' \
+            --exclude='./data' \
+            --exclude='./logs' \
+            --exclude='./target' \
+            --exclude='./web-admin/node_modules' \
+            --exclude='./web-admin/dist' \
+            --exclude='./miniapp-h5/node_modules' \
+            --exclude='./miniapp-h5/dist' \
+            .
+          ls -lh source.tar.gz
 
-      # 打两个标签是刻意的：
-      #   latest —— 给服务器 `docker compose pull app` 用（compose 里的 IMAGE_NAME 指向它）
-      #   sha    —— 回滚时的落点。只推 latest 的话，上一版镜像没有任何名字，
-      #             "回滚"就只能靠重新构建，那在故障时是最慢的一条路
-      - name: 构建并推送镜像
-        uses: docker/build-push-action@v6
+      - name: 上传源码包
+        uses: appleboy/scp-action@v1
         with:
-          context: .
-          push: true
-          # 关掉 attestation（provenance）。实测依据：在服务器上拉官方镜像时，层全部 Pull complete 之后
-          # 仍以非零退出，原因是镜像站的 referrers 接口 502（`unexpected status from GET ... /referrers/...`）。
-          # 我们的镜像不需要 SBOM / 签名，关掉这一项就绕开了"层拉全了但 pull 失败"这类兼容问题——
-          # 而部署脚本是 `set -e`，这种失败会直接中断整个部署。
-          provenance: false
-          tags: |
-            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:latest
-            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:${{ github.sha }}
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: source.tar.gz
+          target: /opt/app/repair
 
-  # ============================================================
-  # 3. 部署后端：拉镜像 → 重启 app 容器 → 健康检查 → 失败回滚
-  # ============================================================
-  deploy-app:
-    name: 部署后端到服务器
-    runs-on: ubuntu-latest
-    needs: image
-    steps:
-      # 部署前先把"当前正在跑的镜像"存成 previous 标签。
-      # 没有这一步，健康检查失败时没有任何可回退的目标——`docker compose pull` 已经把
-      # latest 覆盖成新版了。这是**故障时唯一来得及的那条路**，所以放在拉取之前。
-      - name: 拉取并重启（含记录回滚点）
+      - name: 构建并重启
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          # 服务器本地构建比拉取慢一些，但省掉跨境流量（见文件头）。给足超时。
+          command_timeout: 20m
           script: |
             set -e
             cd /opt/app/repair
-            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
-              ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-            IMAGE_FULL="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}"
 
-            # 回滚点必须趁旧容器还在时记：`up -d` 之后 compose 已按新镜像重建过，旧镜像就没名字了
+            # 回滚点必须在构建**之前**记：`docker compose build` 会把 repair-app:latest 覆盖掉，
+            # 那之后再想找"上一版"就没有名字了
             CURRENT=$(docker compose images -q app 2>/dev/null || true)
             if [ -n "$CURRENT" ]; then
-              docker tag "$CURRENT" "$IMAGE_FULL:previous"
-              echo "已记录回滚点：$IMAGE_FULL:previous"
+              docker tag "$CURRENT" repair-app:previous
+              echo "已记录回滚点：repair-app:previous"
             else
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # 按**完整镜像路径**拉，而不是 `docker compose pull app`：
-            # 后者要求 .env 里的 IMAGE_NAME 已经指向仓库，而首次启用时它还是本地镜像名——
-            # 那就成了先有鸡还是先有蛋。按完整路径拉把这个环解开。
-            docker pull "$IMAGE_FULL:latest"
+            # 解包（包里不含 .env / data / logs，排除项见 CI 那一步）
+            tar -xzf source.tar.gz
+            rm -f source.tar.gz
 
-            # 让 .env 指向仓库镜像。幂等，且**只碰这一行**（.env 里还有数据库口令等，
-            # CI 不碰别的）。顺序很要紧：必须**先拉到镜像再改这里**——若反过来，
-            # compose 会认为服务变了、先删旧容器，然后卡在"镜像拉不到"上，站点直接空窗。
-            if grep -q '^IMAGE_NAME=' .env; then
-              sed -i "s|^IMAGE_NAME=.*|IMAGE_NAME=$IMAGE_FULL:latest|" .env
-            else
-              echo "IMAGE_NAME=$IMAGE_FULL:latest" >> .env
-            fi
-            grep '^IMAGE_NAME=' .env
-
+            # 本地构建：有 Docker 层缓存，pom.xml 不变时不会重新下依赖；
+            # 依赖走 .env 里的 MAVEN_MIRROR（境内源），所以不会卡在 Maven Central 上
+            docker compose build app
             docker compose up -d --no-deps app
             docker image prune -f
             echo "部署完成：${{ github.sha }}"
@@ -202,8 +201,7 @@ jobs:
           sleep 15
           curl -fsS --max-time 20 http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
 
-      # 只在健康检查失败时跑：把 previous 重新标成 latest 再起，
-      # 不涉及镜像拉取（服务器本地就有），所以是秒级动作
+      # 只在健康检查失败时跑：把 previous 复位再起。镜像在服务器本地，不涉及任何网络拉取
       - name: 健康检查失败 → 回滚到 previous
         if: failure()
         uses: appleboy/ssh-action@v1
@@ -214,21 +212,20 @@ jobs:
           script: |
             set -e
             cd /opt/app/repair
-            IMAGE_FULL="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}"
-            if ! docker image inspect "$IMAGE_FULL:previous" >/dev/null 2>&1; then
+            if ! docker image inspect repair-app:previous >/dev/null 2>&1; then
               echo "没有 previous 镜像，无法自动回滚；需要人工处理" >&2
               exit 1
             fi
-            docker tag "$IMAGE_FULL:previous" "$IMAGE_FULL:latest"
+            docker tag repair-app:previous repair-app:latest
             docker compose up -d --no-deps app
             echo "已回滚到 previous"
 
   # ============================================================
-  # 4. 前端产物：**与后端完全独立的一条链**
+  # 3. 前端产物：**与后端完全独立的一条链**
   #
-  #    这一条是本次改动最要紧的地方：原来的工作流只管后端镜像，前端产物靠手工上传，
-  #    而手工步骤漏过一次东西（`VITE_DEMO_ACCOUNTS`，见 docs/05 §4.2）。
-  #    把它自动化，等于把"最容易漏的那一步"从流程里删掉——而不是靠人记得。
+  #    这一条解决的是"手工步骤最容易漏"的问题：原来前端产物靠手工上传，
+  #    漏过一次 `VITE_DEMO_ACCOUNTS`（见 docs/05 §4.2）。前端产物只有几 MB，
+  #    跨境传得动，所以这条链照旧走 scp。
   # ============================================================
   frontend:
     name: 构建两个前端产物
@@ -243,7 +240,7 @@ jobs:
           node-version: '22'
 
       # `VITE_DEMO_ACCOUNTS` 是**构建时**注入的（前端没有运行时配置），
-      # 所以它必须是构建流水线的一个输入，而不是"某次手工构建时记得加的那句"。
+      # 所以它必须是流水线的一个输入，而不是"某次手工构建时记得加的那句"。
       # 它含演示口令，所以走 Secret 而不是写进 workflow。
       - name: 构建管理端
         working-directory: web-admin
@@ -325,18 +322,16 @@ jobs:
             echo "前端产物已更新"
 
 # ============================================================
-# 启用前要配的 Secrets（仓库 Settings → Secrets and variables → Actions）
+# 需要的 Secrets（仓库 Settings → Secrets and variables → Actions）
 #
-#   REGISTRY_URL          镜像仓库地址（如 registry.cn-shenzhen.tencentcloudcr.com）
-#   REGISTRY_NAMESPACE    命名空间
-#   REGISTRY_USERNAME     仓库用户名
-#   REGISTRY_PASSWORD     仓库密码 / 访问令牌
+# 实际用到的（6 个）：
 #   SERVER_HOST           服务器 IP
-#   SERVER_USER           SSH 用户
+#   SERVER_USER           SSH 用户（ubuntu）
 #   SERVER_SSH_KEY        SSH 私钥（完整内容，含 BEGIN/END 行）
 #   VITE_DEMO_ACCOUNTS    演示站登录页那行账号提示（含演示口令，故走 Secret）
 #
-# 服务器侧还有两处必须对上，否则"部署成功但访问不对"，见 docs/05 §6：
-#   .env 里的 IMAGE_NAME 必须指向仓库里的镜像，否则 docker compose pull app 会去 Docker Hub 找
-#   .env 里要有 APP_MEM_LIMIT 等小内存机型的取值（§2.2），否则 2G 机器会 OOM
+# 配了但当前**用不到**的（4 个，可以留着也可以删）：
+#   REGISTRY_URL / REGISTRY_NAMESPACE / REGISTRY_USERNAME / REGISTRY_PASSWORD
+#   —— 那条"CI 构建镜像推仓库"的路已实测不划算（跨境推 0.3 Mbps，见文件头），
+#      改成了服务器本地构建。凭据留着不碍事，将来若 CI 迁到境内 runner 可以直接切回。
 # ============================================================
