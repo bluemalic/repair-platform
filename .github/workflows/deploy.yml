@@ -305,10 +305,16 @@ jobs:
           script: |
             set -e
             cd /opt/app/repair
-            # 解包前先删旧目录。手工部署是"往旧目录上解包"，历次构建的旧 chunk 会一直堆在里面
-            # （实测线上 dist 里同时存着三个版本的演示账号提示，其中一份还是占位符 `<你的口令>`）。
-            # 旧 chunk 不会被 index.html 引用、功能上无害，但会让"这个文件到底哪来的"变成难题。
-            rm -rf web-admin/dist miniapp-h5/dist
+            # 清掉上一次的产物再解包（手工部署是"往旧目录上解包"，历次构建的旧 chunk 会一直堆在里面：
+            # 实测线上 dist 里同时存着三个版本的演示账号提示，其中一份还是占位符 `<你的口令>`）。
+            #
+            # ⚠️ **必须清内容、不能删目录本身**。这两个目录是 bind mount 到 nginx 容器的源，
+            # 而 Docker 在**容器启动时**就固定了源路径对应的 inode。删掉目录再重建，容器手里还是
+            # 那个已被删除的旧 inode——它看到的是**空目录**，现象是全站 403
+            # （nginx 找不到 index.html 就退化成列目录，而 autoindex 是关的）。
+            # 2026-10-15 踩过一次：文件在宿主机上一切正常、`grep` 断言也通过，站点却打不开；
+            # 靠 `docker restart repair-nginx` 让它重新解析挂载路径才恢复。
+            rm -rf web-admin/dist/* miniapp-h5/dist/build/h5/*
             tar -xzf frontend-dist.tar.gz
             rm -f frontend-dist.tar.gz
             # 断言演示账号提示确实在**两个**产物里：这是唯一一处"构建成功、站点能打开、
@@ -320,6 +326,17 @@ jobs:
                 || { echo "H5 产物里没有演示账号提示，构建可能漏了 VITE_DEMO_ACCOUNTS" >&2; exit 1; }
             fi
             echo "前端产物已更新"
+
+      # 只在服务器上检查文件是不够的。上面那个 `grep` 断言通过只说明**文件在**，
+      # 不说明**能被访问到**——bind mount 那个坑就是这样漏过去的：文件在宿主机上完好、
+      # grep 通过、而站点 403。所以再补一道 HTTP 层验收，让"部署成功但站点打不开"必须报错。
+      - name: 验收：首页真的能打开
+        run: |
+          for path in "/" "/h5/index.html"; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://${{ secrets.SERVER_HOST }}:8080${path}")
+            echo "$path -> HTTP $code"
+            [ "$code" = "200" ] || { echo "首页返回 $code：前端产物没生效（查 bind mount 与 nginx）" >&2; exit 1; }
+          done
 
 # ============================================================
 # 需要的 Secrets（仓库 Settings → Secrets and variables → Actions）
