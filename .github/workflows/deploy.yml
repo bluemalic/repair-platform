@@ -1,10 +1,14 @@
-# 持续部署（CD）：构建镜像 → 推送镜像仓库 → SSH 部署到服务器
+# 持续部署（CD）：测试通过 → 构建镜像 → 推镜像仓库 → SSH 到服务器拉取重启
 #
-# 现在是**手动触发**（GitHub 仓库的 Actions 页面 → 左侧选本工作流 → Run workflow）。
-# 因为 docker 和 deploy 两个 job 依赖下面注释里列出的一批 Secrets，
-# 那些 Secret 是「阶段 7 部署」时才配置的 —— 没配之前本工作流不会自动运行，也不会报红。
+# **现在仍是手动触发**（Actions 页面 → 左侧选 CD → Run workflow）。
+# 为什么没有直接放开 push 触发、以及启用前必须做掉的三件前置，写在 docs/05 §6——
+# 那里同时记着"为什么这件事拖到现在"的判断依据，别把它当成一个没做完的 TODO。
 #
-# 配好 Secrets 之后，把下面的 push 触发打开，就能改成"推 main 自动部署"。
+# 四个 job 的划分不是随手切的：
+#   verify → image → deploy-app    ：后端这条链，测试不过就上不了线
+#   frontend → deploy-frontend     ：前端这条链**独立**，与后端互不牵连
+# 后端与前端分开，是 AGENTS §3.1 第 4 条那条边界的延续：前端构建失败不该拦住后端发布
+# （反过来也一样）。两条链唯一的共同前提是 SSH 通。
 
 name: CD
 
@@ -17,9 +21,101 @@ env:
   IMAGE: repair-app
 
 jobs:
-  docker:
+  # ============================================================
+  # 1. 测试与打包。这是"自动测试 + 自动上线"里的前半句：
+  #    它跑的就是本地那条 `mvn -B clean package`（含 JaCoCo 覆盖率门槛），
+  #    所以**覆盖率掉下来和测试红一样会拦住发布**。
+  # ============================================================
+  verify:
+    name: 测试与打包
+    runs-on: ubuntu-latest
+
+    # 与 ci.yml 一致：测试要连真实的 MySQL / Redis，否则 Hikari 懒连接会让它变成"假绿"
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: repair
+          TZ: Asia/Shanghai
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # MinIO 用 compose 起而不是 services：Actions 的 service 不支持覆盖启动命令，
+      # 而这个镜像不带 `server /data` 参数会直接退出。理由详见 ci.yml 里的长注释。
+      - name: 启动 MinIO（对象存储）
+        run: |
+          cat > .env <<'EOF'
+          MINIO_ROOT_USER=ci-minio-user
+          MINIO_ROOT_PASSWORD=ci-minio-password
+          MINIO_MEM_LIMIT=512M
+          EOF
+          docker compose up -d minio
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live; then break; fi
+            sleep 2
+          done
+          test -d ./data/minio/.minio.sys || { docker compose logs minio; exit 1; }
+
+      - name: 跑测试与打包（含覆盖率门槛）
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: '3306'
+          MYSQL_DATABASE: repair
+          MYSQL_USERNAME: root
+          MYSQL_PASSWORD: ci-root-password
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          MINIO_ENDPOINT: http://127.0.0.1:9000
+          MINIO_PUBLIC_BASE_URL: http://127.0.0.1:9000
+          MINIO_ACCESS_KEY: ci-minio-user
+          MINIO_SECRET_KEY: ci-minio-password
+          MINIO_BUCKET: repair-ci
+        run: mvn -B clean package
+
+      - name: 上传测试报告与覆盖率
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cd-test-reports
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          retention-days: 7
+
+  # ============================================================
+  # 2. 构建并推送后端镜像
+  # ============================================================
+  image:
     name: 构建并推送镜像
     runs-on: ubuntu-latest
+    needs: verify
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -31,6 +127,10 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      # 打两个标签是刻意的：
+      #   latest —— 给服务器 `docker compose pull app` 用（compose 里的 IMAGE_NAME 指向它）
+      #   sha    —— 回滚时的落点。只推 latest 的话，上一版镜像没有任何名字，
+      #             "回滚"就只能靠重新构建，那在故障时是最慢的一条路
       - name: 构建并推送镜像
         uses: docker/build-push-action@v6
         with:
@@ -40,12 +140,18 @@ jobs:
             ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:latest
             ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:${{ github.sha }}
 
-  deploy:
-    name: 部署到服务器
-    needs: docker
+  # ============================================================
+  # 3. 部署后端：拉镜像 → 重启 app 容器 → 健康检查 → 失败回滚
+  # ============================================================
+  deploy-app:
+    name: 部署后端到服务器
     runs-on: ubuntu-latest
+    needs: image
     steps:
-      - name: SSH 部署
+      # 部署前先把"当前正在跑的镜像"存成 previous 标签。
+      # 没有这一步，健康检查失败时没有任何可回退的目标——`docker compose pull` 已经把
+      # latest 覆盖成新版了。这是**故障时唯一来得及的那条路**，所以放在拉取之前。
+      - name: 拉取并重启（含记录回滚点）
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -56,6 +162,14 @@ jobs:
             cd /opt/app/repair
             echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
               ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+            IMAGE_FULL="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}"
+            CURRENT=$(docker compose images -q app 2>/dev/null || true)
+            if [ -n "$CURRENT" ]; then
+              docker tag "$CURRENT" "$IMAGE_FULL:previous"
+              echo "已记录回滚点：$IMAGE_FULL:previous"
+            else
+              echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
+            fi
             docker compose pull app
             docker compose up -d --no-deps app
             docker image prune -f
@@ -64,17 +178,133 @@ jobs:
       - name: 健康检查
         run: |
           sleep 15
-          curl -fsS http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
+          curl -fsS --max-time 20 http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
+
+      # 只在健康检查失败时跑：把 previous 重新标成 latest 再起，
+      # 不涉及镜像拉取（服务器本地就有），所以是秒级动作
+      - name: 健康检查失败 → 回滚到 previous
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/app/repair
+            IMAGE_FULL="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}"
+            if ! docker image inspect "$IMAGE_FULL:previous" >/dev/null 2>&1; then
+              echo "没有 previous 镜像，无法自动回滚；需要人工处理" >&2
+              exit 1
+            fi
+            docker tag "$IMAGE_FULL:previous" "$IMAGE_FULL:latest"
+            docker compose up -d --no-deps app
+            echo "已回滚到 previous"
+
+  # ============================================================
+  # 4. 前端产物：**与后端完全独立的一条链**
+  #
+  #    这一条是本次改动最要紧的地方：原来的工作流只管后端镜像，前端产物靠手工上传，
+  #    而手工步骤漏过一次东西（`VITE_DEMO_ACCOUNTS`，见 docs/05 §4.2）。
+  #    把它自动化，等于把"最容易漏的那一步"从流程里删掉——而不是靠人记得。
+  # ============================================================
+  frontend:
+    name: 构建两个前端产物
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # `VITE_DEMO_ACCOUNTS` 是**构建时**注入的（前端没有运行时配置），
+      # 所以它必须是构建流水线的一个输入，而不是"某次手工构建时记得加的那句"。
+      # 它含演示口令，所以走 Secret 而不是写进 workflow。
+      - name: 构建管理端
+        working-directory: web-admin
+        env:
+          VITE_DEMO_ACCOUNTS: ${{ secrets.VITE_DEMO_ACCOUNTS }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: 构建移动端（H5）
+        working-directory: miniapp-h5
+        run: |
+          npm ci
+          npm run build:h5
+
+      - name: 打包产物
+        run: |
+          tar -czf frontend-dist.tar.gz \
+            web-admin/dist \
+            miniapp-h5/dist/build/h5
+          ls -lh frontend-dist.tar.gz
+
+      - name: 上传产物（供下一个 job 取用）
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend-dist.tar.gz
+          retention-days: 3
+
+  deploy-frontend:
+    name: 部署前端产物到服务器
+    runs-on: ubuntu-latest
+    needs: frontend
+    steps:
+      - name: 下载产物
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+
+      - name: 上传并解包
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: frontend-dist.tar.gz
+          target: /opt/app/repair
+
+      # nginx 挂的是宿主机目录（./web-admin/dist 与 ./miniapp-h5/dist/build/h5），
+      # 所以**换掉文件就生效，不需要重启任何容器**——这也是前端这条链能和后端彻底分开的原因。
+      - name: 解包到 nginx 挂载目录
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/app/repair
+            rm -rf web-admin/dist miniapp-h5/dist
+            tar -xzf frontend-dist.tar.gz
+            rm -f frontend-dist.tar.gz
+            # 断言演示账号提示确实在产物里：这是唯一一处"构建成功但站点看起来不对"的地方，
+            # 用 grep 当验收（docs/05 §4.2 记着它被漏过一次）
+            if [ -n "${{ secrets.VITE_DEMO_ACCOUNTS }}" ]; then
+              grep -rq "演示账号" web-admin/dist/ \
+                || { echo "管理端产物里没有演示账号提示，构建可能漏了 VITE_DEMO_ACCOUNTS" >&2; exit 1; }
+            fi
+            echo "前端产物已更新"
 
 # ============================================================
-# 阶段 7 部署时，在仓库 Settings → Secrets and variables → Actions 配置：
-#   REGISTRY_URL         镜像仓库地址（如 registry.cn-shenzhen.aliyuncs.com）
-#   REGISTRY_NAMESPACE   命名空间
-#   REGISTRY_USERNAME    镜像仓库用户名
-#   REGISTRY_PASSWORD    镜像仓库密码
-#   SERVER_HOST          服务器 IP
-#   SERVER_USER          SSH 用户（非 root）
-#   SERVER_SSH_KEY       SSH 私钥
+# 启用前要配的 Secrets（仓库 Settings → Secrets and variables → Actions）
 #
-# 服务器上需提前放好：.env、docker-compose.yml、nginx/
+#   REGISTRY_URL          镜像仓库地址（如 registry.cn-shenzhen.tencentcloudcr.com）
+#   REGISTRY_NAMESPACE    命名空间
+#   REGISTRY_USERNAME     仓库用户名
+#   REGISTRY_PASSWORD     仓库密码 / 访问令牌
+#   SERVER_HOST           服务器 IP
+#   SERVER_USER           SSH 用户
+#   SERVER_SSH_KEY        SSH 私钥（完整内容，含 BEGIN/END 行）
+#   VITE_DEMO_ACCOUNTS    演示站登录页那行账号提示（含演示口令，故走 Secret）
+#
+# 服务器侧还有两处必须对上，否则"部署成功但访问不对"，见 docs/05 §6：
+#   .env 里的 IMAGE_NAME 必须指向仓库里的镜像，否则 docker compose pull app 会去 Docker Hub 找
+#   .env 里要有 APP_MEM_LIMIT 等小内存机型的取值（§2.2），否则 2G 机器会 OOM
 # ============================================================
