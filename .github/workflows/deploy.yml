@@ -168,6 +168,8 @@ jobs:
             echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
               ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
             IMAGE_FULL="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}"
+
+            # 回滚点必须趁旧容器还在时记：`up -d` 之后 compose 已按新镜像重建过，旧镜像就没名字了
             CURRENT=$(docker compose images -q app 2>/dev/null || true)
             if [ -n "$CURRENT" ]; then
               docker tag "$CURRENT" "$IMAGE_FULL:previous"
@@ -175,7 +177,22 @@ jobs:
             else
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
-            docker compose pull app
+
+            # 按**完整镜像路径**拉，而不是 `docker compose pull app`：
+            # 后者要求 .env 里的 IMAGE_NAME 已经指向仓库，而首次启用时它还是本地镜像名——
+            # 那就成了先有鸡还是先有蛋。按完整路径拉把这个环解开。
+            docker pull "$IMAGE_FULL:latest"
+
+            # 让 .env 指向仓库镜像。幂等，且**只碰这一行**（.env 里还有数据库口令等，
+            # CI 不碰别的）。顺序很要紧：必须**先拉到镜像再改这里**——若反过来，
+            # compose 会认为服务变了、先删旧容器，然后卡在"镜像拉不到"上，站点直接空窗。
+            if grep -q '^IMAGE_NAME=' .env; then
+              sed -i "s|^IMAGE_NAME=.*|IMAGE_NAME=$IMAGE_FULL:latest|" .env
+            else
+              echo "IMAGE_NAME=$IMAGE_FULL:latest" >> .env
+            fi
+            grep '^IMAGE_NAME=' .env
+
             docker compose up -d --no-deps app
             docker image prune -f
             echo "部署完成：${{ github.sha }}"
