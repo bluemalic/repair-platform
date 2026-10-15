@@ -136,6 +136,11 @@ jobs:
         with:
           context: .
           push: true
+          # 关掉 attestation（provenance）。实测依据：在服务器上拉官方镜像时，层全部 Pull complete 之后
+          # 仍以非零退出，原因是镜像站的 referrers 接口 502（`unexpected status from GET ... /referrers/...`）。
+          # 我们的镜像不需要 SBOM / 签名，关掉这一项就绕开了"层拉全了但 pull 失败"这类兼容问题——
+          # 而部署脚本是 `set -e`，这种失败会直接中断整个部署。
+          provenance: false
           tags: |
             ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:latest
             ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_NAMESPACE }}/${{ env.IMAGE }}:${{ github.sha }}
@@ -231,8 +236,13 @@ jobs:
           npm ci
           npm run build
 
+      # **两个前端都读这个变量**（web-admin/src/views/LoginView.vue 与
+      # miniapp-h5/src/pages/login/login.vue），所以 H5 这一步也必须注入——
+      # 漏了它的表现与后端无关：H5 登录页那行账号提示消失，构建照样成功。
       - name: 构建移动端（H5）
         working-directory: miniapp-h5
+        env:
+          VITE_DEMO_ACCOUNTS: ${{ secrets.VITE_DEMO_ACCOUNTS }}
         run: |
           npm ci
           npm run build:h5
@@ -281,14 +291,19 @@ jobs:
           script: |
             set -e
             cd /opt/app/repair
+            # 解包前先删旧目录。手工部署是"往旧目录上解包"，历次构建的旧 chunk 会一直堆在里面
+            # （实测线上 dist 里同时存着三个版本的演示账号提示，其中一份还是占位符 `<你的口令>`）。
+            # 旧 chunk 不会被 index.html 引用、功能上无害，但会让"这个文件到底哪来的"变成难题。
             rm -rf web-admin/dist miniapp-h5/dist
             tar -xzf frontend-dist.tar.gz
             rm -f frontend-dist.tar.gz
-            # 断言演示账号提示确实在产物里：这是唯一一处"构建成功但站点看起来不对"的地方，
-            # 用 grep 当验收（docs/05 §4.2 记着它被漏过一次）
+            # 断言演示账号提示确实在**两个**产物里：这是唯一一处"构建成功、站点能打开、
+            # 但页面就是不对"的失败模式，光看退出码发现不了（docs/05 §4.2 记着它被漏过一次）
             if [ -n "${{ secrets.VITE_DEMO_ACCOUNTS }}" ]; then
               grep -rq "演示账号" web-admin/dist/ \
                 || { echo "管理端产物里没有演示账号提示，构建可能漏了 VITE_DEMO_ACCOUNTS" >&2; exit 1; }
+              grep -rq "演示账号" miniapp-h5/dist/build/h5/ \
+                || { echo "H5 产物里没有演示账号提示，构建可能漏了 VITE_DEMO_ACCOUNTS" >&2; exit 1; }
             fi
             echo "前端产物已更新"
 
