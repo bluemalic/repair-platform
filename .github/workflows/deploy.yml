@@ -142,17 +142,24 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      # 排除项每条都有理由，尤其是前三条：
-      #   source.tar.gz —— **归档文件不能写进被归档的目录**，否则 tar 读到自己正在长大，
-      #                    报 `file changed as we read it` 并以 1 退出（2026-10-16 踩过）
-      #   .env         —— 服务器上的 .env 才是真的（数据库口令、演示开关都在里面）。
-      #                    打进包里会把 CI 的配置覆盖上去，那是灾难性的
-      #   data / logs  —— 容器正在写的 MySQL 与 MinIO 数据目录，绝不能覆盖
-      # 其余是构建产物与本地环境（node_modules 几百 MB，传过去也没用）
+      # 归档要写进一个**被排除的子目录**（`build-out/`），不能直接写 `source.tar.gz` 到仓库根。
+      #
+      # 踩过两次的坑，根因值得记：`tar -czf source.tar.gz ... .` 会失败在
+      # `tar: .: file changed as we read it`——**问题不在"归档文件被收进归档"**（加
+      # `--exclude='./source.tar.gz'` 没用，实测仍报错），而在**顶层目录 `.` 自身的 mtime
+      # 在 tar 读取期间变了**（因为往里创建了新文件）。写进一个预先创建好、又被排除的子目录，
+      # 变化的就只是那个子目录的 mtime，而 tar 不会去读它——本地实测两种写法：前者报错、后者通过。
+      #
+      # 排除项其余的理由：
+      #   .env        —— 服务器上的 .env 才是真的（数据库口令、演示开关都在里面），
+      #                  打进包里会把 CI 的配置覆盖上去，那是灾难性的
+      #   data / logs —— 容器正在写的 MySQL 与 MinIO 数据目录，绝不能覆盖
+      #   node_modules / dist —— 构建产物与本地环境，传过去没用（CI 上本来也不存在）
       - name: 打包源码
         run: |
-          tar -czf source.tar.gz \
-            --exclude='./source.tar.gz' \
+          mkdir -p build-out
+          tar -czf build-out/source.tar.gz \
+            --exclude='./build-out' \
             --exclude='./.git' \
             --exclude='./.idea' \
             --exclude='./.env' \
@@ -164,7 +171,9 @@ jobs:
             --exclude='./miniapp-h5/node_modules' \
             --exclude='./miniapp-h5/dist' \
             .
-          ls -lh source.tar.gz
+          ls -lh build-out/source.tar.gz
+          echo "--- 归档内容抽样（应该只有源码与配置）---"
+          tar -tzf build-out/source.tar.gz | head -8
 
       - name: 上传源码包
         uses: appleboy/scp-action@v1
@@ -172,7 +181,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: source.tar.gz
+          source: build-out/source.tar.gz
           target: /opt/app/repair
 
       - name: 构建并重启
@@ -198,9 +207,10 @@ jobs:
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # 解包源码。包里不含 .env / data / logs / 归档自身（排除项见 CI 那一步）
-            tar -xzf source.tar.gz
-            rm -f source.tar.gz
+            # 解包源码。归档在 build-out/ 下（CI 侧为了绕开 tar 的目录 mtime 问题放那儿），
+            # 解开之后连目录一起删掉——它只是为了跨机传输存在。
+            tar -xzf build-out/source.tar.gz
+            rm -rf build-out
 
             docker compose build app
             docker compose up -d --no-deps app
