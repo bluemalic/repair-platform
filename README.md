@@ -211,6 +211,24 @@ docker compose up -d
 
 访问接口文档 <http://localhost:8080/doc.html>。**库是空的、没有任何账号**——要能登录试接口，见下面的「演示账号」。
 
+> **在本机跑 `mvn -B clean package`（或在 IDE 里直接起应用）时要先导出 `.env` 里的口令**——
+> Spring 不读 `.env` 文件（那是给 `docker compose` 用的），它是从环境变量读的。少了它的症状不是
+> "某个用例失败"，而是 **Spring 上下文起不来、整批用例一起报错**：先是 Flyway 报
+> `Access denied for user 'root'@... (using password: NO)`（注意 `using password: NO` —— 说明口令压根没传进去），
+> 后面跟着一片 `ApplicationContext failure threshold (1) exceeded`。三条映射要顺手做掉（`.env` 里的名字与
+> 容器里的不同），测试会真连 MySQL / Redis / MinIO，所以这三个容器得先在跑：
+>
+> ```bash
+> set -a; . ./.env; set +a
+> export MYSQL_PASSWORD="$MYSQL_ROOT_PASSWORD"   # .env 里是 MYSQL_ROOT_PASSWORD，容器里是 MYSQL_PASSWORD
+> export MINIO_ACCESS_KEY="$MINIO_ROOT_USER" MINIO_SECRET_KEY="$MINIO_ROOT_PASSWORD"
+> # REDIS_PASSWORD 两边同名，不用改
+> ./mvnw.cmd -B clean package     # Windows；Linux/macOS 用 ./mvnw
+> ```
+>
+> 另外两条容易白折腾的：**跑打包前先停掉正在运行的应用**（`target/*.jar` 被占用时 `clean` 会失败，
+> 报"另一个程序正在使用此文件"）；`mvn clean` 会把 `target/` 整个删掉。
+
 ### 演示账号（可选，本地开发与演示用）
 
 迁移脚本只建表与基础数据，不含账号。需要时手动执行一次 `docs/dev-seed.sql`，得到三个账号，口令都是 `Repair@2026`：
