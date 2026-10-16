@@ -2,15 +2,21 @@
   "pages": [
     {
       "path": "pages/common/scan",
-      "style": { "navigationBarTitleText": "扫码" }
+      "style": {
+        "navigationBarTitleText": "扫码"
+      }
     },
     {
       "path": "pages/common/password",
-      "style": { "navigationBarTitleText": "修改密码" }
+      "style": {
+        "navigationBarTitleText": "修改密码"
+      }
     },
     {
       "path": "pages/login/login",
-      "style": { "navigationBarTitleText": "登录" }
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
     },
     {
       "path": "pages/student/home",
@@ -21,23 +27,39 @@
     },
     {
       "path": "pages/student/submit",
-      "style": { "navigationBarTitleText": "报修" }
+      "style": {
+        "navigationBarTitleText": "报修"
+      }
+    },
+    {
+      "path": "pages/student/agent",
+      "style": {
+        "navigationBarTitleText": "报修助手"
+      }
     },
     {
       "path": "pages/student/detail",
-      "style": { "navigationBarTitleText": "工单详情" }
+      "style": {
+        "navigationBarTitleText": "工单详情"
+      }
     },
     {
       "path": "pages/student/evaluate",
-      "style": { "navigationBarTitleText": "验收评价" }
+      "style": {
+        "navigationBarTitleText": "验收评价"
+      }
     },
     {
       "path": "pages/worker/detail",
-      "style": { "navigationBarTitleText": "工单处理" }
+      "style": {
+        "navigationBarTitleText": "工单处理"
+      }
     },
     {
       "path": "pages/worker/finish",
-      "style": { "navigationBarTitleText": "完工上报" }
+      "style": {
+        "navigationBarTitleText": "完工上报"
+      }
     },
     {
       "path": "pages/worker/home",
