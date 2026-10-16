@@ -9,27 +9,30 @@
 # 两条链唯一的共同前提是 SSH 通。
 #
 # ============================================================
-# 为什么后端**由 CI 编译、服务器只组装镜像**（2026-10-15/16 两次实测后定下来的，别再改回去）
+# 为什么后端**传源码、由服务器本地构建**（2026-10-15/16 试了四种做法后定下的，别再改回去）
 #
-# 这块设计换了两次，两次都是被实测推翻的，证据都留在下面：
+# 这块前后试了四次，**每一次都是真跑一次、被数据否掉**。证据按顺序留着，免得将来凭直觉改回去：
 #
-# 【第一次：CI 构建镜像 → 推 TCR → 服务器拉】
-#   瓶颈在"从境外往境内推"：一层 141MB 推了 52 分钟只到 115MB（约 0.3 Mbps），
-#   两层 232MB 要一个多小时。日志原文：`#22 pushing layer 2dc9e195c9e2 114.97MB / 141.61MB 3129.0s`。
-#   注意方向性——服务器**拉**很快（实测 11 Mbps），慢的是 CI 往境**推**。
+#  1) CI 构建镜像 → 推 TCR → 服务器拉
+#     跨境推 **0.3 Mbps**：一层 141MB 推了 52 分钟只到 115MB。
+#     日志原文：`#22 pushing layer 2dc9e195c9e2 114.97MB / 141.61MB 3129.0s`。
+#     注意方向性——服务器**拉**很快（实测 11 Mbps），慢的是 CI 往境**推**。
 #
-# 【第二次：传源码 → 服务器 `docker compose build`】
-#   避开了跨境大流量，但服务器得先有 `maven:3.9-eclipse-temurin-17`（约 500MB），
-#   而它用的 Docker Hub 镜像站（docker.m.daocloud.io）拉大镜像**间歇性 502**：实测连试两次
-#   都失败，而且失败会把已经下载的层**一起丢掉**。此外 2C2G 上再叠一次 Maven 编译有 OOM 风险。
+#  2) 传源码 → 服务器 `docker compose build`
+#     方向对了（跨境只有几 MB），但服务器缺 `maven:3.9-eclipse-temurin-17`（约 500MB），
+#     而它用的 Docker Hub 镜像站（docker.m.daocloud.io）拉大镜像**间歇性 502**：连试三次都失败，
+#     而且失败会把已经下载的层**一起丢掉**。
 #
-# 【现在：verify job 里 mvn 已经打好的 jar（约 60-80MB）→ scp 上传
-#        → 服务器用 `Dockerfile.deploy` 组装镜像（只 COPY，几秒）】
-#   三个好处：不依赖那个反复 502 的基础镜像、不在 2C2G 上跑 Maven、部署从几分钟变几秒。
-#   代价是多了一个文件（`Dockerfile.deploy`），它的运行阶段必须与 `Dockerfile` 保持一致
-#   ——两边都写了提示，改一处要同步另一处。
+#  3) CI 传 jar（约 60-80MB）→ 服务器只 COPY
+#     绕开了 maven 镜像，但**跨境传 60-80MB 同样慢**：实测那一步跑了 8 分钟仍未完成。
+#     （前端产物只有几 MB，所以前端那条链一直很快——只有大文件才暴露这个问题。）
 #
-# 将来若 CI 换成**境内**的 runner，可以切回"CI 构建镜像 + 推仓库"：那是服务器最省事的做法。
+#  4) 传源码（几 MB）→ 服务器本地构建 ← **当前**
+#     方向同 2)、基础镜像问题已解决：`maven` 镜像用**腾讯云内网镜像站**
+#     `mirror.ccs.tencentyun.com` 拉到了本地（daocloud 那个不可用），所以 2) 现在能走通。
+#
+# 一句话结论：**让大流量留在境内，让跨境流量保持在几 MB 量级**——这正是本文件里两条链的共同形态。
+# 将来若 CI 换成**境内**的 runner，第 1 种做法（CI 构建镜像 + 推仓库）是服务器最省事的，可以切回。
 # ============================================================
 
 name: CD
@@ -128,20 +131,8 @@ jobs:
             target/site/jacoco/
           retention-days: 7
 
-      # 这个 jar 是给部署 job 用的。既然这一步已经跑过 `mvn -B clean package`，jar 就是现成的，
-      # 传上去（约 60-80MB）比让服务器重新编译更稳——理由见 Dockerfile.deploy 的头注释。
-      #
-      # `target/*.jar` 不会把 Spring Boot 额外产出的 `.jar.original` 也捎上：那个的后缀是
-      # `.original`，不以 `.jar` 结尾。
-      - name: 上传 jar（供部署 job 使用）
-        uses: actions/upload-artifact@v7
-        with:
-          name: app-jar
-          path: target/*.jar
-          retention-days: 3
-
   # ============================================================
-  # 2. 部署后端：传 jar → 服务器组装镜像 → 重启 → 健康检查 → 失败回滚
+  # 2. 部署后端：传源码 → 服务器本地构建 → 重启 → 健康检查 → 失败回滚
   # ============================================================
   deploy-app:
     name: 部署后端到服务器
@@ -151,54 +142,53 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      # 组装一个"只有 Dockerfile 与 jar"的构建上下文。
-      # **不能**拿仓库根目录当上下文：那里有 `data/`（容器正在写的 MySQL 与 MinIO 数据，
-      # 可能好几个 GB），而 docker 构建时会把整个上下文打包给 daemon——又慢又没必要。
-      # 上下文越小，这一步越不可能出意外。
-      - name: 组装构建上下文（Dockerfile + jar）
+      # 排除项每条都有理由，尤其是前三条：
+      #   source.tar.gz —— **归档文件不能写进被归档的目录**，否则 tar 读到自己正在长大，
+      #                    报 `file changed as we read it` 并以 1 退出（2026-10-16 踩过）
+      #   .env         —— 服务器上的 .env 才是真的（数据库口令、演示开关都在里面）。
+      #                    打进包里会把 CI 的配置覆盖上去，那是灾难性的
+      #   data / logs  —— 容器正在写的 MySQL 与 MinIO 数据目录，绝不能覆盖
+      # 其余是构建产物与本地环境（node_modules 几百 MB，传过去也没用）
+      - name: 打包源码
         run: |
-          mkdir -p deploy
-          cp Dockerfile.deploy deploy/Dockerfile
+          tar -czf source.tar.gz \
+            --exclude='./source.tar.gz' \
+            --exclude='./.git' \
+            --exclude='./.idea' \
+            --exclude='./.env' \
+            --exclude='./data' \
+            --exclude='./logs' \
+            --exclude='./target' \
+            --exclude='./web-admin/node_modules' \
+            --exclude='./web-admin/dist' \
+            --exclude='./miniapp-h5/node_modules' \
+            --exclude='./miniapp-h5/dist' \
+            .
+          ls -lh source.tar.gz
 
-      - name: 下载 jar 产物
-        uses: actions/download-artifact@v7
-        with:
-          name: app-jar
-          path: deploy
-
-      # 产物里的文件名带版本号（`repair-platform-0.0.1-SNAPSHOT.jar`），镜像里统一叫 app.jar，
-      # 这样 Dockerfile.deploy 与 Dockerfile 的 COPY 目标能保持一致。
-      # 排除 `.original`（那是 Spring Boot 留下的未重打包版，不是可执行 jar）。
-      - name: 规范成 app.jar
-        run: |
-          cd deploy
-          jar_file=$(ls *.jar | grep -v '\.original$' | head -1)
-          [ -n "$jar_file" ] || { echo "没有找到可执行 jar" >&2; exit 1; }
-          mv "$jar_file" app.jar
-          ls -lh
-
-      - name: 上传构建上下文
+      - name: 上传源码包
         uses: appleboy/scp-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: deploy
+          source: source.tar.gz
           target: /opt/app/repair
 
-      - name: 组装镜像并重启
+      - name: 构建并重启
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          # 只 COPY 一个 jar，几秒的事；给 10 分钟是为了留余量，不是真需要
-          command_timeout: 10m
+          # 服务器本地构建：有 Docker 层缓存（pom.xml 不变时不重新下依赖），依赖走 .env 里的
+          # MAVEN_MIRROR（境内源）。给 20 分钟是因为 2C2G 上首次或依赖变化时确实慢。
+          command_timeout: 20m
           script: |
             set -e
             cd /opt/app/repair
 
-            # 回滚点必须在构建**之前**记：构建会覆盖 repair-app:latest，
+            # 回滚点必须在构建**之前**记：`docker compose build` 会覆盖 repair-app:latest，
             # 那之后再想找"上一版"就没有名字了
             CURRENT=$(docker compose images -q app 2>/dev/null || true)
             if [ -n "$CURRENT" ]; then
@@ -208,14 +198,11 @@ jobs:
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # 上下文就是 deploy/ 里那两个文件，不碰宿主机上其他任何东西
-            cd deploy
-            ls -lh
-            docker build -t repair-app:latest .
-            cd ..
+            # 解包源码。包里不含 .env / data / logs / 归档自身（排除项见 CI 那一步）
+            tar -xzf source.tar.gz
+            rm -f source.tar.gz
 
-            # compose 里 app 服务的镜像是 ${IMAGE_NAME:-repair-app:latest}，
-            # 所以 .env 里的 IMAGE_NAME 必须是这个本地镜像名（不能指向已放弃的仓库地址）
+            docker compose build app
             docker compose up -d --no-deps app
             docker image prune -f
             echo "部署完成：${{ github.sha }}"
