@@ -195,28 +195,41 @@ public class DemoResetServiceImpl implements DemoResetService {
         return result;
     }
 
+    /**
+     * 演示工单要落到哪几栋楼。
+     *
+     * <p><b>只在"这个租户一栋楼都没有"时才建演示楼栋，其余情况一律复用已有的。</b>
+     * 原来按名字逐个补建，看着更周到，实际会越用越糟（2026-10-16 改）：演示站上把 `1号楼`
+     * 改名成 `海定楼` 之后，下次重置按名字找不着 → 当成"缺了" → **又建一栋 `1号楼`**，
+     * 每改一次名就多一栋；更隐蔽的是返回时只按 `sort` 取前三栋，而新旧楼栋的 `sort` 会重号，
+     * 于是工单与维修工负责的楼栋可能每次重置都漂到另一批楼上。
+     *
+     * <p>代价是"被删掉一两栋不会补回来"，这是有意的取舍：**宁可少几栋楼，也不要每次重置都往
+     * 基础数据里加东西**——楼栋是学校自己的数据，重置只该动演示工单与演示账号。真被删光时仍然重建，
+     * 那时候报修表单里连楼栋都没得选，演示站等于是坏的。
+     */
     private List<Building> ensureBuildings(long tenantId) {
-        for (int i = 0; i < DEMO_BUILDINGS.size(); i++) {
-            String name = DEMO_BUILDINGS.get(i);
-            Long count = buildingMapper.selectCount(Wrappers.<Building>lambdaQuery()
-                    .eq(Building::getTenantId, tenantId)
-                    .eq(Building::getName, name));
-            if (count != null && count > 0) {
-                continue;
+        Long existing = buildingMapper.selectCount(Wrappers.<Building>lambdaQuery()
+                .eq(Building::getTenantId, tenantId));
+        if (existing == null || existing == 0) {
+            for (int i = 0; i < DEMO_BUILDINGS.size(); i++) {
+                Building building = new Building();
+                building.setTenantId(tenantId);
+                building.setName(DEMO_BUILDINGS.get(i));
+                building.setArea("东区");
+                building.setSort(i + 1);
+                building.setStatus(1);
+                buildingMapper.insert(building);
+                log.info("演示重置建楼栋（该租户一栋楼都没有）tenantId={} name={}", tenantId, building.getName());
             }
-            Building building = new Building();
-            building.setTenantId(tenantId);
-            building.setName(name);
-            building.setArea("东区");
-            building.setSort(i + 1);
-            building.setStatus(1);
-            buildingMapper.insert(building);
-            log.info("演示重置补建楼栋 tenantId={} name={}", tenantId, name);
         }
+        // 排序带 id 兜底：`sort` 会重号（种子数据与后来补建的各排各的），只按 `sort` 排的话，
+        // 同 `sort` 的那几行谁在前是**不确定**的 —— 每次重置可能挑到不同的三栋
         return buildingMapper.selectList(Wrappers.<Building>lambdaQuery()
                 .eq(Building::getTenantId, tenantId)
                 .orderByAsc(Building::getSort)
-                .last("LIMIT 3"));
+                .orderByAsc(Building::getId)
+                .last("LIMIT " + DEMO_BUILDINGS.size()));
     }
 
     // ==================== 演示账号 ====================
