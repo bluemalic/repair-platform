@@ -6,13 +6,10 @@ import com.bluemalic.repair.config.AiProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.util.List;
 
 /**
@@ -34,8 +31,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LangChainAiAssistant implements AiAssistant {
 
-    /** 模型侧超时：比数据库那 3 秒宽得多——生成 SQL 本来就要几秒，这是"等模型"不是"等查询"。 */
-    private static final Duration MODEL_TIMEOUT = Duration.ofSeconds(30);
 
     /** 给结论看的数据量上限：结论是一两句话，不需要把上千行都塞进提示词（那既费 token 也没用）。 */
     private static final int MAX_ROWS_FOR_CONCLUSION = 50;
@@ -46,7 +41,8 @@ public class LangChainAiAssistant implements AiAssistant {
 
     private final ObjectMapper objectMapper;
 
-    private volatile ChatModel chatModel;
+    /** 模型实例与"调用失败的异常口径"都收敛在 {@link AiChatModelProvider} 里（Agent 那层也用它）。 */
+    private final AiChatModelProvider chatModelProvider;
 
     @Override
     public QueryPlan plan(String question) {
@@ -88,14 +84,11 @@ public class LangChainAiAssistant implements AiAssistant {
     }
 
     private String chat(String modelName, String systemPrompt, String userMessage, String what) {
-        try {
-            return chatModel().chat(SystemMessage.from(systemPrompt), UserMessage.from(userMessage))
-                    .aiMessage().text();
-        } catch (Exception e) {
-            // 网络、鉴权（Key 不对）、限流、超时都会走到这里。对用户来说都是"模型这会儿用不了"
-            log.warn("调用模型失败（{}）model={} err={}", what, modelName, e.getMessage());
-            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE);
-        }
+        // 网络、鉴权（Key 不对）、限流、超时都会在 provider.call 里变成 AI_MODEL_UNAVAILABLE，
+        // 对用户来说都是"模型这会儿用不了"（真实原因留在 WARN 日志）
+        return chatModelProvider.call(what, () -> chatModelProvider.get()
+                .chat(SystemMessage.from(systemPrompt), UserMessage.from(userMessage))
+                .aiMessage().text());
     }
 
     /**
@@ -112,36 +105,6 @@ public class LangChainAiAssistant implements AiAssistant {
         }
     }
 
-    private ChatModel chatModel() {
-        ChatModel model = chatModel;
-        if (model == null) {
-            synchronized (this) {
-                if (chatModel == null) {
-                    if (!aiProperties.modelConfigured()) {
-                        throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
-                                "AI 问数未启用（服务器上没配 AI_MODEL_API_KEY）");
-                    }
-                    chatModel = OpenAiChatModel.builder()
-                            .apiKey(aiProperties.getApiKey())
-                            // DeepSeek 没有专用模块，官方推荐就是 open-ai 模块 + 自定义 baseUrl（ADR-005）
-                            .baseUrl(aiProperties.getBaseUrl())
-                            .modelName(aiProperties.getModelName())
-                            .timeout(MODEL_TIMEOUT)
-                            // 问数要的是确定性与可复现：同一个问题应给出同一个查询
-                            .temperature(0.0)
-                            // **不要打开**：提示词里带表结构（schema），回复里带业务数据，
-                            // 打进日志就等于把库里的东西抄进了日志文件（AGENTS §5.8）
-                            .logRequests(false)
-                            .logResponses(false)
-                            .build();
-                    model = chatModel;
-                } else {
-                    model = chatModel;
-                }
-            }
-        }
-        return model;
-    }
 
     /** 模型常把 JSON 包在 markdown 代码围栏里，剥掉再解析。 */
     private String stripCodeFence(String raw) {

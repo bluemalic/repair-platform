@@ -21,7 +21,10 @@ class LangChainAiAssistantTest {
     void withoutApiKeyFailsBeforeTouchingAnythingElse() {
         AiProperties notConfigured = new AiProperties("", "http://localhost", "test-model",
                 "ro", "ro-password", 3000, 1000, 10);
-        LangChainAiAssistant assistant = new LangChainAiAssistant(notConfigured, null, null);
+        // "没配 Key 就报错"这条守卫现在住在 AiChatModelProvider 里——模型实例与调用口径都收敛在那儿，
+        // 问数与 Agent 两条链路共用同一个入口。这里把 provider 显式传进去，测的还是同一件事。
+        LangChainAiAssistant assistant = new LangChainAiAssistant(notConfigured, null, null,
+                new AiChatModelProvider(notConfigured));
 
         assertThatThrownBy(() -> assistant.plan("有几栋楼"))
                 .isInstanceOf(BizException.class)
