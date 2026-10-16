@@ -210,16 +210,20 @@ jobs:
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # **先按归档的顶层清单清理，再解包**——不能"往旧树上解包"：仓库里删掉的文件
-            # 不会自己从服务器上消失。2026-10-16 就是这样失败的：服务器上残留着四域拆分时
-            # 已删除的 TicketServiceImpl.java，它引用的是旧版转换器签名，编译直接失败。
+            # **只清 src**：源码树里残留着仓库已删除的文件时，编译会直接失败——
+            # 2026-10-16 就是这样：残留的 TicketServiceImpl.java（四域拆分时已删除）引用旧版
+            # 转换器签名，服务器上那次构建报 `cannot be applied to given types`。
+            # `src` 是唯一会被编译的目录，清它就够。
             #
-            # 删除清单**直接取自归档本身**，所以不可能碰到 data / logs / .env 这些不在归档里的
-            # 目录（它们在 CI 侧打包时就被排除了）。本地模拟验证过：残留文件被清除、
-            # .env 与 data/logs 完好、新源码解包到位。
-            tar -tzf build-out/source.tar.gz | sed -e 's#^\./##' -e 's#/.*##' | sort -u | while read -r p; do
-              if [ -n "$p" ]; then rm -rf -- "$p"; fi
-            done
+            # ⚠️ **不要图省事改成"按归档清单把顶层条目全删掉"**（我试过，当天就出事）：
+            # `web-admin` / `miniapp-h5` / `nginx` 里挂着 bind mount 到 nginx 容器的路径
+            # （两个 dist 目录与 nginx.conf）。删掉目录再重建，容器手里还是失效的旧 inode
+            # → **全站 403**；更糟的是容器重启时 Docker 会**以 root 身份重建**不存在的挂载源，
+            # 于是 ubuntu 再也写不进去，运维侧要多一步才能恢复。
+            # 教训与前端链那句一样：**删内容 ≠ 删目录，动被挂载的目录要格外小心。**
+            #
+            # 其余路径（docs / nginx / 顶层文件）都是覆盖写，残留旧文件不影响构建。
+            rm -rf src
             tar -xzf build-out/source.tar.gz
             rm -rf build-out
 
@@ -365,6 +369,10 @@ jobs:
           script: |
             set -e
             cd /opt/app/repair
+            # 先确保两个目录存在**且属于当前用户**：如果上一次部署异常把它们删掉了，
+            # 容器重启时 Docker 会**以 root 身份重建**这个挂载源，之后 ubuntu 就再也写不进去
+            # （2026-10-16 踩过，恢复要靠一个临时容器去 chown）。先 mkdir 就绕开了这个坑。
+            mkdir -p web-admin/dist miniapp-h5/dist/build/h5
             # 清掉上一次的产物再解包（手工部署是"往旧目录上解包"，历次构建的旧 chunk 会一直堆在里面：
             # 实测线上 dist 里同时存着三个版本的演示账号提示，其中一份还是占位符 `<你的口令>`）。
             #
