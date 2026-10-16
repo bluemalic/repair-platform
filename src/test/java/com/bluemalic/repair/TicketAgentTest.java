@@ -158,6 +158,31 @@ class TicketAgentTest {
         assertThat(data.path("missing").toString()).contains("categoryId");
     }
 
+    /**
+     * 模型把 id 写成**带引号的字符串**时也必须能落地（2026-10-16 的 Agent 评测踩到）。
+     *
+     * <p>触发条件很隐蔽，值得写清楚：工具返回给模型的字典是应用自己的 {@code ObjectMapper}
+     * 序列化的，而它对 Long 一律走 {@code ToStringSerializer}——所以模型看到的是
+     * {@code {"id":"2103798706715316226","name":"1号楼"}}。于是它对**长 id** 照抄成字符串，
+     * 对短 id（{@code categoryId: 2}）才给数字。只认 {@code isNumber()} 的解析器会把长 id
+     * **静默**丢掉（连告警都没有，因为丢在核对之前），现象是"位置怎么补都补不上、ready 永远是 false"，
+     * 而模型在 reply 里还说"已记录：1号楼101，请确认"。
+     */
+    @Test
+    void 模型把id写成字符串时也要接受() throws Exception {
+        agentModel.willAnswer("""
+                {"reply":"请确认",
+                 "draft":{"categoryId":"%d","urgency":"2","buildingId":"%d","room":"1-101","description":"灯不亮"},"missing":[]}
+                """.formatted(categoryId, buildingId));
+
+        JsonNode data = intake(student, Map.of("message", "1 号楼 1-101 灯不亮")).path("data");
+
+        assertThat(data.path("ready").asBoolean()).isTrue();
+        assertThat(data.path("draft").path("categoryId").asLong()).isEqualTo(categoryId);
+        assertThat(data.path("draft").path("buildingId").asLong()).isEqualTo(buildingId);
+        assertThat(data.path("draft").path("urgency").asInt()).isEqualTo(2);
+    }
+
     /** 没排脚本就说明这个用例没打算走 AI：假模型抛"模型不可用"，接口要如实转达。 */
     @Test
     void 模型不可用时返回40004() throws Exception {

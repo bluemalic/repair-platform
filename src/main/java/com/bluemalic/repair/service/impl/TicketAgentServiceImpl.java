@@ -38,6 +38,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 受理与分诊的实现（ADR-017）。
@@ -60,6 +61,9 @@ public class TicketAgentServiceImpl implements TicketAgentService {
 
     /** 模型没按 JSON 回答时的兜底：不把"解析失败"暴露给用户，让他换个说法再说一遍。 */
     private static final String UNPARSED_REPLY = "我没太理解，能换一种说法再说一遍吗？";
+
+    /** 纯数字（可带负号）。用来认出"被引号包起来的整数"，见 {@link #numericOrNull}。 */
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("-?[0-9]+");
 
     private final AgentLoop agentLoop;
     private final AgentModel agentModel;
@@ -342,13 +346,43 @@ public class TicketAgentServiceImpl implements TicketAgentService {
     }
 
     private Long longOrNull(JsonNode node, String field) {
-        JsonNode value = node.path(field);
-        return value.isNumber() ? value.asLong() : null;
+        return numericOrNull(node.path(field));
     }
 
     private Integer intOrNull(JsonNode node, String field) {
-        JsonNode value = node.path(field);
-        return value.isNumber() ? value.asInt() : null;
+        Long value = numericOrNull(node.path(field));
+        return value == null ? null : value.intValue();
+    }
+
+    /**
+     * 读一个整数字段：**数字与"纯数字的字符串"都认**。
+     *
+     * <p>为什么必须容忍字符串：拿给模型的字典是用应用自己的 {@code ObjectMapper} 序列化的，
+     * 而它对 Long 一律走 {@code ToStringSerializer}（全局约定，见 docs/03 §2.2：防前端手里的 JS 丢精度），
+     * 于是工具返回的是 {@code {"id":"2103798706715316226","name":"1号楼"}}。模型对**长 id**
+     * 会照抄这个带引号的形状，对短 id（如 {@code categoryId: 2}）才给数字——
+     * 只认 {@code isNumber()} 的话，长 id 会被**静默**丢掉（连日志都没有，因为它在核对之前就没了），
+     * 现象是"位置怎么补都补不上、ready 永远是 false"，而模型在 reply 里还说"已记录：1号楼101"。
+     * 2026-10-16 的 Agent 评测踩到这一条（docs/07 §5）。
+     *
+     * <p>容忍字符串不会放松安全：id 拿到之后照样要回库核对（{@link #verifyIds}），
+     * 编造的 id 还是会被置空。
+     */
+    private Long numericOrNull(JsonNode value) {
+        if (value.isNumber()) {
+            return value.asLong();
+        }
+        if (value.isTextual()) {
+            String text = value.asText().trim();
+            if (NUMBER_PATTERN.matcher(text).matches()) {
+                try {
+                    return Long.parseLong(text);
+                } catch (NumberFormatException e) {
+                    return null;   // 位数超出 long 的范围：当作没给
+                }
+            }
+        }
+        return null;
     }
 
     private String textOrNull(JsonNode node, String field) {
