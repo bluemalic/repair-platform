@@ -117,3 +117,36 @@ export interface FileUploadVO {
   url: string
   objectKey: string
 }
+
+/** 报修受理 Agent 的一轮响应（docs/03 §5.2）。 */
+export interface AgentIntakeVO {
+  sessionId: string
+  /** 给用户看的一句话：追问，或"信息齐了，请确认" */
+  reply: string
+  /** 服务端算的：草稿完整到可以落单 */
+  ready: boolean
+  /** 还缺哪些字段：categoryId / description / location */
+  missing: string[]
+  draft?: AgentDraft | null
+  trace: AgentTraceStepVO[]
+}
+
+/** 工单草稿。字段与提交报修接口一一对应，可以原样提交。 */
+export interface AgentDraft {
+  categoryId?: string | null
+  categoryName?: string | null
+  buildingId?: string | null
+  buildingName?: string | null
+  room?: string | null
+  urgency?: number | null
+  description?: string | null
+  repairCode?: string | null
+}
+
+/** 轨迹一步：调了哪个工具、花了多久、拿到什么。 */
+export interface AgentTraceStepVO {
+  tool: string
+  ms: number
+  summary: string
+  rejected: boolean
+}

@@ -72,6 +72,10 @@ function openDetail(row: TicketVO) {
 function goSubmit() {
   uni.navigateTo({ url: '/pages/student/submit' })
 }
+
+function goAgent() {
+  uni.navigateTo({ url: '/pages/student/agent' })
+}
 </script>
 
 <template>
@@ -85,6 +89,8 @@ function goSubmit() {
     </view>
 
     <button class="primary" @click="goSubmit">我要报修</button>
+
+    <button class="secondary" @click="goAgent">跟助手说</button>
 
     <view v-if="rows.length === 0 && !loading" class="empty">
       <text>还没有报修记录</text>
@@ -210,5 +216,12 @@ function goSubmit() {
   text-align: center;
   font-size: 24rpx;
   color: #c0c4cc;
+}
+
+.secondary {
+  margin-top: 16rpx;
+  background: #fff;
+  color: #1f6feb;
+  border: 1rpx solid #cfe0ff;
 }
 </style>
