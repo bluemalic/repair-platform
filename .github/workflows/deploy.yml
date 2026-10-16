@@ -39,8 +39,31 @@ name: CD
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
+    # 只改文档的合并不该触发部署：部署会重建 app 容器（几秒访问中断），而文档不影响运行。
+    # `paths-ignore` 是**排除**语义——列在这里的路径改了就不触发，其余任何改动都触发；
+    # 一次 push 里只要有一个非排除路径（代码 / 配置 / 前端）就会触发。
+    #
+    # 注意 `docs/` 下不只有 md（还有 `dev-seed.sql` 之类），所以目录与扩展名都要列。
+    # **故意不排除 `deploy.yml` 自己**：改了流水线就顺带跑一次，正好验证它没被改坏。
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.dockerignore'
+      - '.env.example'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/frontend-ci.yml'
+      - '.github/workflows/miniapp-ci.yml'
+
+# 同一时刻只允许一个部署在跑。自动触发之后，连着两次合并会让两个部署交叉执行
+# （都在改同一份源码、重启同一个容器），串起来最稳。用 cancel-in-progress: false
+# 而不是 true：中断一次已经改到一半的部署，比让它跑完更危险。
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
 
 jobs:
   # ============================================================
