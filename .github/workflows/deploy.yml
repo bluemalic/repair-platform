@@ -228,15 +228,41 @@ jobs:
             docker image prune -f
             echo "部署完成：${{ github.sha }}"
 
+      # 健康检查用**轮询**，不是"睡一觉看一眼"。
+      # 实测这个应用的启动时间是 **23 秒**（Spring Boot + Flyway 迁移），加上容器启动约 35 秒——
+      # 原先的 `sleep 15` 必然失败：2026-10-16 就因此把一次**成功**的部署判成失败，
+      # 还触发了回滚，把已经起来的新容器换回了旧镜像。
       - name: 健康检查
         run: |
-          sleep 15
-          curl -fsS --max-time 20 http://${{ secrets.SERVER_HOST }}:8080/actuator/health || exit 1
+          for i in $(seq 1 24); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://${{ secrets.SERVER_HOST }}:8080/actuator/health" || true)
+            echo "第 $i 次探测：HTTP ${code:-无响应}"
+            if [ "$code" = "200" ]; then echo "健康检查通过（第 $i 次，约 $((i * 5)) 秒）"; exit 0; fi
+            sleep 5
+          done
+          echo "120 秒内仍未就绪" >&2
+          exit 1
 
-      # 只在健康检查失败时跑：把 previous 复位再起。镜像在服务器本地，不涉及任何网络拉取。
-      # 注意 `if: failure()` 对**任何**上游失败都成立（包括"还没走到部署就失败了"），
-      # 所以这里把"没有回滚点"当成**无事可做**而不是失败——那不是回滚失败，
-      # 而是"容器根本没被动过"。上一次它因此报了假错，把日志搅浑了。
+      # **必须排在回滚之前**：回滚会重建容器，被重建掉的那个容器日志就再也看不到了。
+      # 这一步是失败时唯一能看到原因的机会（默认只保留最近几次，够用）。
+      - name: 健康检查失败 → 导出应用日志
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            echo "=== 容器是否被 OOM 杀掉（2C2G 上最常见的死法，docker compose ps 只显示"退出了"）==="
+            docker inspect repair-app --format 'OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Status={{.State.Status}}' 2>&1 || true
+            echo "=== compose 状态 ==="
+            docker compose ps app 2>&1 || true
+            echo "=== repair-app 最后 100 行日志 ==="
+            docker logs repair-app --tail 100 2>&1 || true
+
+      # 只在真的部署过之后才回滚。注意 `if: failure()` 对**任何**上游失败都成立
+      # （包括"还没走到部署就失败了"），所以"没有回滚点"要当成**无事可做**而不是失败
+      # ——那不是回滚失败，而是容器根本没被动过。之前它因此报过假错，把日志搅浑了。
       - name: 健康检查失败 → 回滚到 previous
         if: failure()
         uses: appleboy/ssh-action@v1
