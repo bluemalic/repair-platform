@@ -197,6 +197,9 @@ jobs:
             set -e
             cd /opt/app/repair
 
+            # 防呆：下面有基于清单的 rm -rf，先确认真的站在项目目录里（走错目录就是灾难）
+            test -f docker-compose.yml || { echo "不在 /opt/app/repair（找不到 docker-compose.yml），中止" >&2; exit 1; }
+
             # 回滚点必须在构建**之前**记：`docker compose build` 会覆盖 repair-app:latest，
             # 那之后再想找"上一版"就没有名字了
             CURRENT=$(docker compose images -q app 2>/dev/null || true)
@@ -207,8 +210,16 @@ jobs:
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # 解包源码。归档在 build-out/ 下（CI 侧为了绕开 tar 的目录 mtime 问题放那儿），
-            # 解开之后连目录一起删掉——它只是为了跨机传输存在。
+            # **先按归档的顶层清单清理，再解包**——不能"往旧树上解包"：仓库里删掉的文件
+            # 不会自己从服务器上消失。2026-10-16 就是这样失败的：服务器上残留着四域拆分时
+            # 已删除的 TicketServiceImpl.java，它引用的是旧版转换器签名，编译直接失败。
+            #
+            # 删除清单**直接取自归档本身**，所以不可能碰到 data / logs / .env 这些不在归档里的
+            # 目录（它们在 CI 侧打包时就被排除了）。本地模拟验证过：残留文件被清除、
+            # .env 与 data/logs 完好、新源码解包到位。
+            tar -tzf build-out/source.tar.gz | sed -e 's#^\./##' -e 's#/.*##' | sort -u | while read -r p; do
+              if [ -n "$p" ]; then rm -rf -- "$p"; fi
+            done
             tar -xzf build-out/source.tar.gz
             rm -rf build-out
 
