@@ -230,6 +230,43 @@ class DemoResetTest {
         assertThat(tickets()).hasSize(12);
     }
 
+    /**
+     * 楼栋被改名后，重置**不该**再按名字补建出同名的（2026-10-16 踩到的那个坑）。
+     *
+     * <p>演示站上访客把 `1号楼` 改成 `海定楼`，旧行为是"名字对不上就当成缺了"→ 又建一栋 `1号楼`，
+     * 每改一次名多一栋；工单与维修工负责的楼栋还会漂到新建的那几栋上。现在改成"已有楼栋就复用"。
+     */
+    @Test
+    void renamedBuildingIsNotRecreated() {
+        Building first = buildings().get(0);
+        String renamed = first.getName() + "-访客改的名字";
+        first.setName(renamed);
+        buildingMapper.updateById(first);
+        int before = buildings().size();
+
+        demoResetService.reset();
+
+        assertThat(buildings()).hasSize(before);
+        assertThat(buildingMapper.selectById(first.getId()).getName()).isEqualTo(renamed);
+        // 工单照样落在已有的楼栋上（不是"没有楼栋可用"而落空）
+        assertThat(tickets()).isNotEmpty().allMatch(ticket -> ticket.getBuildingId() != null);
+    }
+
+    /**
+     * 但"一栋楼都不剩"时仍然要重建：那时候报修表单里连楼栋都没得选，演示站等于是坏的。
+     * 这是"不按名字补建"这条改动的**反面**，两条一起才说明改动是完整的。
+     */
+    @Test
+    void buildingsAreRebuiltWhenTenantHasNone() {
+        buildingMapper.delete(Wrappers.<Building>lambdaQuery().eq(Building::getTenantId, TENANT));
+        assertThat(buildings()).isEmpty();
+
+        demoResetService.reset();
+
+        assertThat(buildings()).hasSize(3);
+        assertThat(tickets()).isNotEmpty().allMatch(ticket -> ticket.getBuildingId() != null);
+    }
+
     @Test
     void resetNeverTouchesOtherTenants() {
         long otherTenant = 99L;
@@ -259,6 +296,13 @@ class DemoResetTest {
                 .eq(SysUser::getUsername, username));
         assertThat(user).as("演示账号 %s 应已创建", username).isNotNull();
         return user;
+    }
+
+    private List<Building> buildings() {
+        return buildingMapper.selectList(Wrappers.<Building>lambdaQuery()
+                .eq(Building::getTenantId, TENANT)
+                .orderByAsc(Building::getSort)
+                .orderByAsc(Building::getId));
     }
 
     private List<Ticket> tickets() {
