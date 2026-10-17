@@ -36,9 +36,17 @@ export function getPositionByCode(code: string) {
   return request<RepairCodeVO>({ url: `/tickets/by-code/${code}` })
 }
 
-/** 提交报修：带报修码，楼栋房间由服务端从码里取（前端不传）。 */
+/**
+ * 提交报修。位置有两条路，二选一（docs/01 §4.6）：
+ * · `repairCode`：扫码/手输码，楼栋房间由**服务端**从码里取（不信任前端传的位置）
+ * · `buildingId + room`：手动选位置——公共区域没有码可扫时走这条
+ *
+ * 两条路落到同一张工单表、同一套到场核验：位置清单里的每个位置都有一张码。
+ */
 export function createTicket(body: {
-  repairCode: string
+  repairCode?: string
+  buildingId?: string
+  room?: string
   categoryId: string
   description: string
   images?: string[]

@@ -68,6 +68,22 @@ export interface RepairCodeVO {
   buildingId: string
   buildingName: string
   room: string
+  /** 1 宿舍房间 / 2 公共区域 */
+  locationType: number
+}
+
+/** 一个楼栋下可报修的位置（只含有报修码的位置，与到场核验共用同一份数据）。 */
+export interface LocationVO {
+  buildingId: string
+  buildingName: string
+  locations: LocationItem[]
+}
+
+export interface LocationItem {
+  /** 房间号（宿舍）或区域名（公共区域，如 1F-大厅） */
+  room: string
+  /** 1 宿舍房间 / 2 公共区域 */
+  locationType: number
 }
 
 export interface TicketLogVO {

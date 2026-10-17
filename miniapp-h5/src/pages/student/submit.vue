@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { listEnabledCategories } from '@/api/category'
 import { uploadImage } from '@/api/file'
+import { getLocations } from '@/api/location'
 import { createTicket, getPositionByCode } from '@/api/ticket'
-import type { CategoryVO, RepairCodeVO } from '@/types'
+import type { CategoryVO, LocationItem, LocationVO, RepairCodeVO } from '@/types'
 
 /**
  * 扫码/手输报修。
@@ -16,6 +17,28 @@ import type { CategoryVO, RepairCodeVO } from '@/types'
 const code = ref('')
 const position = ref<RepairCodeVO | null>(null)
 const looking = ref(false)
+
+/**
+ * 位置输入有两条路（docs/01 §4.6）：
+ * · `code`：扫码 / 手输 6 位码（宿舍最快，且码是师傅到场的核验凭据）
+ * · `manual`：手动选位置——**公共区域没有码可扫**，不能逼人满楼找码
+ * 两条路最终落到同一张工单表、同一套到场核验（位置清单里的每个位置都有一张码）。
+ */
+const mode = ref<'code' | 'manual'>('code')
+const locations = ref<LocationVO[]>([])
+const buildingIndex = ref(-1)
+const locationIndex = ref(-1)
+const buildingNames = computed(() => locations.value.map((b) => b.buildingName))
+const currentBuilding = computed(() => (buildingIndex.value >= 0 ? locations.value[buildingIndex.value] : null))
+const currentLocation = computed<LocationItem | null>(() => {
+  const building = currentBuilding.value
+  return building && locationIndex.value >= 0 ? building.locations[locationIndex.value] : null
+})
+const locationLabels = computed(() =>
+  (currentBuilding.value?.locations ?? []).map((item) =>
+    item.locationType === 2 ? `${item.room}（公共区域）` : item.room,
+  ),
+)
 
 const categories = ref<CategoryVO[]>([])
 const categoryIndex = ref(-1)
@@ -50,6 +73,27 @@ function onScanResult(scanned: string) {
 
 function goScan() {
   uni.navigateTo({ url: '/pages/common/scan' })
+}
+
+/** 切到手动模式时才拉位置清单（多数人扫码报修，不该为它多一次请求）。 */
+async function switchMode(next: 'code' | 'manual') {
+  mode.value = next
+  if (next === 'manual' && locations.value.length === 0) {
+    try {
+      locations.value = await getLocations()
+    } catch {
+      // request 里已提示；用户可再点一次
+    }
+  }
+}
+
+function onBuildingChange(event: { detail: { value: number | string } }) {
+  buildingIndex.value = Number(event.detail.value)
+  locationIndex.value = -1
+}
+
+function onLocationChange(event: { detail: { value: number | string } }) {
+  locationIndex.value = Number(event.detail.value)
 }
 
 /** 查位置：拿到楼栋+房间后前端只做展示，提交时只把码给后端（服务端再解一次，不信任前端）。 */
@@ -107,8 +151,12 @@ function removeImage(index: number) {
 }
 
 async function submit() {
-  if (!position.value) {
+  if (mode.value === 'code' && !position.value) {
     uni.showToast({ title: '请先扫码或输入报修码', icon: 'none' })
+    return
+  }
+  if (mode.value === 'manual' && !currentLocation.value) {
+    uni.showToast({ title: '请选择楼栋与位置', icon: 'none' })
     return
   }
   if (categoryIndex.value < 0) {
@@ -121,8 +169,12 @@ async function submit() {
   }
   submitting.value = true
   try {
+    const locationPart =
+      mode.value === 'manual'
+        ? { buildingId: currentBuilding.value!.buildingId, room: currentLocation.value!.room }
+        : { repairCode: code.value.trim() }
     await createTicket({
-      repairCode: code.value.trim(),
+      ...locationPart,
       categoryId: categories.value[categoryIndex.value].id,
       description: description.value.trim(),
       images: imageUrls.value.length ? imageUrls.value : undefined,
@@ -141,20 +193,43 @@ async function submit() {
 <template>
   <view class="page">
     <view class="card">
-      <view class="field">
-        <text class="label">报修码</text>
-        <view class="code-row">
-          <input v-model="code" class="input" type="number" maxlength="6" placeholder="房间门口贴的 6 位数字" />
-          <button class="lookup" :loading="looking" :disabled="looking" @click="lookup">定位</button>
-        </view>
-        <button class="scan" @click="goScan">扫二维码</button>
-        <text class="hint">扫不出来就手输：摄像头需要 HTTPS 或 localhost，且要授权</text>
+      <view class="mode">
+        <view :class="['mode-item', mode === 'code' ? 'active' : '']" @click="switchMode('code')">扫码 / 输码</view>
+        <view :class="['mode-item', mode === 'manual' ? 'active' : '']" @click="switchMode('manual')">手动选位置</view>
       </view>
 
-      <view v-if="position" class="position">
-        <text class="position-title">{{ position.buildingName }} {{ position.room }}</text>
-        <text class="hint">位置由报修码确定，不需要手填</text>
-      </view>
+      <template v-if="mode === 'code'">
+        <view class="field">
+          <text class="label">报修码</text>
+          <view class="code-row">
+            <input v-model="code" class="input" type="number" maxlength="6" placeholder="房间门口贴的 6 位数字" />
+            <button class="lookup" :loading="looking" :disabled="looking" @click="lookup">定位</button>
+          </view>
+          <button class="scan" @click="goScan">扫二维码</button>
+          <text class="hint">扫不出来就手输：摄像头需要 HTTPS 或 localhost，且要授权</text>
+        </view>
+
+        <view v-if="position" class="position">
+          <text class="position-title">{{ position.buildingName }} {{ position.room }}</text>
+          <text class="hint">位置由报修码确定，不需要手填</text>
+        </view>
+      </template>
+
+      <template v-else>
+        <view class="field">
+          <text class="label">楼栋</text>
+          <picker mode="selector" :range="buildingNames" @change="onBuildingChange">
+            <view class="picker">{{ currentBuilding ? currentBuilding.buildingName : '请选择楼栋' }}</view>
+          </picker>
+        </view>
+        <view class="field">
+          <text class="label">位置</text>
+          <picker mode="selector" :range="locationLabels" @change="onLocationChange">
+            <view class="picker">{{ currentLocation ? locationLabels[locationIndex] : '请选择位置' }}</view>
+          </picker>
+          <text class="hint">公共区域（走廊 / 大厅 / 公共卫生间）也在列表里——不用去找码</text>
+        </view>
+      </template>
     </view>
 
     <view class="card">
@@ -243,6 +318,26 @@ async function submit() {
   line-height: 80rpx;
   background: #2c6cf6;
   border-radius: 8rpx;
+}
+.mode {
+  display: flex;
+  margin-bottom: 24rpx;
+  padding: 6rpx;
+  background: #f5f6f8;
+  border-radius: 10rpx;
+}
+.mode-item {
+  flex: 1;
+  padding: 14rpx 0;
+  font-size: 28rpx;
+  color: #606266;
+  text-align: center;
+  border-radius: 8rpx;
+}
+.mode-item.active {
+  color: #2c6cf6;
+  font-weight: 600;
+  background: #fff;
 }
 .scan {
   margin-top: 16rpx;
