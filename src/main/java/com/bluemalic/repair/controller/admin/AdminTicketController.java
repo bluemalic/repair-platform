@@ -9,9 +9,11 @@ import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.TicketAgentService;
+import com.bluemalic.repair.service.DispatchScoreService;
 import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketAssignmentService;
 import com.bluemalic.repair.service.TicketFlowService;
+import com.bluemalic.repair.vo.DispatchCandidateVO;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -30,6 +32,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 后勤管理端工单接口。数据范围 = 本租户全部工单。
  */
@@ -41,6 +45,7 @@ public class AdminTicketController {
 
     private final TicketAssignmentService assignmentService;
     private final TicketQueryService ticketQueryService;
+    private final DispatchScoreService dispatchScoreService;
     private final TicketFlowService flowService;
     private final TicketAgentService ticketAgentService;
 
@@ -71,6 +76,15 @@ public class AdminTicketController {
     @PostMapping("/{id}/triage")
     public Result<TriageSuggestionVO> triage(@Parameter(description = "工单ID") @PathVariable long id) {
         return Result.ok(ticketAgentService.triage(id));
+    }
+
+    @Operation(summary = "派单候选",
+            description = "给这张单算一份师傅排名（阶段 3 · ADR-019）：技能 / 满意度 / 负载 / 距离四项加权，"
+                    + "每人带逐项得分与一句话理由。**只排序、不派单**——派单仍走 `/dispatch` 由人确认")
+    @SaCheckPermission("ticket:dispatch")
+    @GetMapping("/{id}/dispatch-candidates")
+    public Result<List<DispatchCandidateVO>> dispatchCandidates(@Parameter(description = "工单ID") @PathVariable long id) {
+        return Result.ok(dispatchScoreService.candidates(id));
     }
 
     @Operation(summary = "派单", description = "待派单/已驳回 → 待接单。**已有维修工的单不能走这里**：换人用转派")

@@ -2,6 +2,7 @@ package com.bluemalic.repair.service;
 
 import com.bluemalic.repair.dto.WorkerBuildingsDTO;
 import com.bluemalic.repair.dto.WorkerCreateDTO;
+import com.bluemalic.repair.dto.WorkerSkillsDTO;
 import com.bluemalic.repair.dto.WorkerUpdateDTO;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.WorkerVO;
@@ -21,4 +22,7 @@ public interface WorkerService {
 
     /** 设置负责楼栋（全量替换）。这是数据权限的物理依据，见 ADR-002 / ADR-008。 */
     void setBuildings(long id, WorkerBuildingsDTO dto);
+
+    /** 设置擅长类别（派单评分的技能维度）。语义与 {@link #setBuildings} 一致：提交最终状态，空数组=清空。 */
+    void setSkills(long id, WorkerSkillsDTO dto);
 }

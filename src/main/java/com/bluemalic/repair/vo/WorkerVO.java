@@ -37,4 +37,9 @@ public class WorkerVO {
 
     @Schema(description = "负责的楼栋名称列表")
     private List<String> buildingNames = Collections.emptyList();
+
+    /** 擅长类别（派单评分的技能维度，阶段 3 · ADR-019） */
+    private List<Long> skillCategoryIds = Collections.emptyList();
+
+    private List<String> skillCategoryNames = Collections.emptyList();
 }
