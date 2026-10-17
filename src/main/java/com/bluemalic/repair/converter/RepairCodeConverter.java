@@ -25,6 +25,7 @@ public class RepairCodeConverter {
         vo.setBuildingId(repairCode.getBuildingId());
         vo.setBuildingName(buildingName);
         vo.setRoom(repairCode.getRoom());
+        vo.setLocationType(repairCode.getLocationType());
         vo.setStatus(repairCode.getStatus());
         vo.setCreateTime(repairCode.getCreateTime());
         return vo;

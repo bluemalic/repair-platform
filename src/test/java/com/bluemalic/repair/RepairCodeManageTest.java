@@ -204,10 +204,10 @@ class RepairCodeManageTest {
         putJson(admin, "/api/admin/repair-codes/" + stoppedId, Map.of(
                 "room", "2-601", "status", 0)).andExpect(jsonPath("$.code").value(0));
 
-        // 按楼栋筛：2 号楼在种子里有一条码（751204），加上刚建的共 2 条
+        // 按楼栋筛：2 号楼在种子里有两条码（宿舍 751204 + 公共区域 1F-公共卫生间），加上刚建的共 3 条
         JsonNode byBuilding = getJson(admin, "/api/admin/repair-codes",
                 "buildingId", String.valueOf(BUILDING_2));
-        assertThat(byBuilding.path("data").path("total").asInt()).isEqualTo(2);
+        assertThat(byBuilding.path("data").path("total").asInt()).isEqualTo(3);
         assertThat(StreamSupport.stream(byBuilding.path("data").path("list").spliterator(), false)
                 .map(node -> node.path("buildingId").asText()).distinct().toList())
                 .containsExactly(String.valueOf(BUILDING_2));

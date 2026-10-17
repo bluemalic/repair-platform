@@ -2,6 +2,8 @@ package com.bluemalic.repair.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -24,4 +26,9 @@ public class RepairCodeCreateDTO {
     @NotBlank(message = "房间号不能为空")
     @Size(max = 32, message = "房间号最长 32 位")
     private String room;
+
+    @Schema(description = "1 宿舍房间（默认，room 填房间号）/ 2 公共区域（room 填区域名，如 1F-大厅）")
+    @Min(value = 1, message = "位置类型只能是 1（宿舍房间）或 2（公共区域）")
+    @Max(value = 2, message = "位置类型只能是 1（宿舍房间）或 2（公共区域）")
+    private Integer locationType;
 }

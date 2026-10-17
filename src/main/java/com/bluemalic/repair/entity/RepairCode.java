@@ -21,6 +21,9 @@ public class RepairCode {
 
     private String room;
 
+    /** 1 宿舍房间（room=房间号）/ 2 公共区域（room=区域名，如 1F-大厅；docs/01 §4.6） */
+    private Integer locationType;
+
     private Integer status;
 
     private Integer deleted;

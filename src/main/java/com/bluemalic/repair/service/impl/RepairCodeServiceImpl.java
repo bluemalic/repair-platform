@@ -59,6 +59,12 @@ public class RepairCodeServiceImpl implements RepairCodeService {
 
     private static final int STATUS_ENABLED = 1;
 
+    /** 位置类型：1 宿舍房间 / 2 公共区域（与 `repair_code.location_type` 一致，docs/01 §4.6） */
+    private static final int LOCATION_ROOM = 1;
+
+    /** 公共区域（room 存区域名） */
+    private static final int LOCATION_AREA = 2;
+
     private final RepairCodeMapper repairCodeMapper;
     private final BuildingMapper buildingMapper;
     private final CurrentTenantService currentTenantService;
@@ -95,12 +101,15 @@ public class RepairCodeServiceImpl implements RepairCodeService {
     public RepairCodeDetailVO create(RepairCodeCreateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
         Building building = requireBuilding(dto.getBuildingId(), tenantId);
-        requireRoomFree(tenantId, dto.getBuildingId(), dto.getRoom(), null);
+        requireRoomFree(tenantId, dto.getBuildingId(), dto.getRoom(), null,
+                dto.getLocationType() == null ? LOCATION_ROOM : dto.getLocationType());
 
         RepairCode entity = new RepairCode();
         entity.setTenantId(tenantId);
         entity.setBuildingId(dto.getBuildingId());
         entity.setRoom(dto.getRoom());
+        // 1 宿舍房间 / 2 公共区域；不传按宿舍房间处理（老前端的兼容路径）
+        entity.setLocationType(dto.getLocationType() == null ? LOCATION_ROOM : dto.getLocationType());
         entity.setStatus(STATUS_ENABLED);
         entity.setCode(nextCode(tenantId));
         insertCode(entity);
@@ -125,7 +134,9 @@ public class RepairCodeServiceImpl implements RepairCodeService {
     public void update(long id, RepairCodeUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
         RepairCode existing = requireCode(id, tenantId);
-        requireRoomFree(tenantId, existing.getBuildingId(), dto.getRoom(), id);
+        // 修改时不改类型（类型在生成时定），所以文案跟既有条目的类型走
+        int locationType = existing.getLocationType() == null ? LOCATION_ROOM : existing.getLocationType();
+        requireRoomFree(tenantId, existing.getBuildingId(), dto.getRoom(), id, locationType);
 
         boolean regenerate = Boolean.TRUE.equals(dto.getRegenerate());
         String newCode = regenerate ? nextCode(tenantId) : existing.getCode();
@@ -198,15 +209,17 @@ public class RepairCodeServiceImpl implements RepairCodeService {
      * <p>停用的码也算占用——否则同一房间会留下两行，"一房一码"就名存实亡。
      * 想换码请在原码上「重新生成」（`PUT` 带 `regenerate=true`），不要新建一条。
      */
-    private void requireRoomFree(long tenantId, Long buildingId, String room, Long excludeId) {
+    private void requireRoomFree(long tenantId, Long buildingId, String room, Long excludeId, int locationType) {
         Long count = repairCodeMapper.selectCount(Wrappers.<RepairCode>lambdaQuery()
                 .eq(RepairCode::getTenantId, tenantId)
                 .eq(RepairCode::getBuildingId, buildingId)
                 .eq(RepairCode::getRoom, room)
                 .ne(excludeId != null, RepairCode::getId, excludeId));
         if (count != null && count > 0) {
+            // 公共区域的位置是"区域名"（如 1F-走廊），文案跟着类型走；宿舍还是说"房间"
+            String what = locationType == LOCATION_AREA ? "区域" : "房间";
             throw new BizException(ErrorCode.PARAM_INVALID,
-                    "该房间已有报修码；换码请在原码上重新生成，不要新建");
+                    "该" + what + "已有报修码；换码请在原码上重新生成，不要新建");
         }
     }
 

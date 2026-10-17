@@ -15,4 +15,7 @@ public class RepairCodeVO {
 
     @Schema(description = "房间号")
     private String room;
+
+    /** 1 宿舍房间 / 2 公共区域 */
+    private Integer locationType;
 }
