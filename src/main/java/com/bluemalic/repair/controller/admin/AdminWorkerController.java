@@ -3,6 +3,7 @@ package com.bluemalic.repair.controller.admin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.WorkerBuildingsDTO;
+import com.bluemalic.repair.dto.WorkerSkillsDTO;
 import com.bluemalic.repair.dto.WorkerCreateDTO;
 import com.bluemalic.repair.dto.WorkerUpdateDTO;
 import com.bluemalic.repair.service.WorkerService;
@@ -75,6 +76,16 @@ public class AdminWorkerController {
     public Result<Void> setBuildings(@Parameter(description = "维修工用户ID") @PathVariable long id,
                                      @Valid @RequestBody WorkerBuildingsDTO dto) {
         workerService.setBuildings(id, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "设置擅长类别",
+            description = "派单评分的技能维度（ADR-019）：按报修类别标注，提交最终状态（空数组=清空）。"
+                    + "不影响可见范围——负责楼栋才影响数据权限")
+    @PutMapping("/{id}/skills")
+    public Result<Void> setSkills(@Parameter(description = "维修工用户ID") @PathVariable long id,
+                                  @Valid @RequestBody WorkerSkillsDTO dto) {
+        workerService.setSkills(id, dto);
         return Result.ok();
     }
 }

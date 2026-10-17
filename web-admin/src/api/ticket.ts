@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { PageResult, TicketDetailVO, TicketVO } from '@/types'
+import type { DispatchCandidateVO, PageResult, TicketDetailVO, TicketVO } from '@/types'
 
 export interface TicketQuery {
   pageNum: number
@@ -16,6 +16,11 @@ export function pageTickets(query: TicketQuery) {
 /** 详情：含流转时间线、验收评价与图片 */
 export function getTicketDetail(id: string) {
   return http.get<TicketDetailVO>(`/admin/tickets/${id}`)
+}
+
+/** 派单候选（阶段 3 · ADR-019）：只排序、不派单，最终仍由人点确认。 */
+export function getDispatchCandidates(ticketId: string) {
+  return http.get<DispatchCandidateVO[]>(`/admin/tickets/${ticketId}/dispatch-candidates`)
 }
 
 export function dispatchTicket(id: string, workerId: string) {

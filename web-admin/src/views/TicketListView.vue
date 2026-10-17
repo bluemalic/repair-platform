@@ -2,11 +2,11 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { closeTicket, dispatchTicket, getTicketDetail, pageTickets, rejectTicket, transferTicket } from '@/api/ticket'
+import { closeTicket, dispatchTicket, getDispatchCandidates, getTicketDetail, pageTickets, rejectTicket, transferTicket } from '@/api/ticket'
 import { addCollaborator, removeCollaborator, splitTicket } from '@/api/ticket'
 import { listCategories } from '@/api/category'
 import { pageWorkers } from '@/api/worker'
-import type { CategoryVO, TicketDetailVO, TicketVO, WorkerVO } from '@/types'
+import type { CategoryVO, DispatchCandidateVO, TicketDetailVO, TicketVO, WorkerVO } from '@/types'
 
 /** 状态字典：与后端 TicketStatus 一一对应（docs/02）。 */
 const STATUS: Record<number, { label: string; type: 'info' | 'warning' | 'primary' | 'success' | 'danger' }> = {
@@ -72,6 +72,9 @@ const dispatchVisible = ref(false)
 const dispatchTarget = ref<TicketVO | null>(null)
 const selectedWorkerId = ref<string | undefined>(undefined)
 const workerOptions = ref<WorkerVO[]>([])
+/** 派单模式的候选排名（阶段 3 · ADR-019）；转派/加协作者仍走服务端搜索 */
+const candidates = ref<DispatchCandidateVO[]>([])
+const candidatesLoading = ref(false)
 const workerSearching = ref(false)
 /** 命中总数：下拉里只放前 N 条，超过时提示"用关键字继续搜"，避免让人以为就这么多 */
 const workerTotal = ref(0)
@@ -109,8 +112,26 @@ const dialogTitle = computed(() => {
 async function openWorkerPicker(row: TicketVO) {
   dispatchTarget.value = row
   selectedWorkerId.value = undefined
+  candidates.value = []
   dispatchVisible.value = true
-  await searchWorkers('')
+  if (dispatchMode.value === 'dispatch') {
+    await loadCandidates(row.id)
+  } else {
+    await searchWorkers('')
+  }
+}
+
+/**
+ * 派单候选：后端按「技能 / 满意度 / 负载 / 距离」加权排序，每项都带得分与理由。
+ * 候选就是这所学校全部启用中的师傅，排序已经把该看的排前面，所以这里不做搜索框。
+ */
+async function loadCandidates(ticketId: string) {
+  candidatesLoading.value = true
+  try {
+    candidates.value = await getDispatchCandidates(ticketId)
+  } finally {
+    candidatesLoading.value = false
+  }
 }
 
 /**
@@ -157,14 +178,17 @@ async function confirmDispatch() {
     return
   }
 
+  const candidate = candidates.value.find((item) => item.workerId === workerId)
   const worker = workerOptions.value.find((item) => item.id === workerId)
-  const covered = !worker || worker.buildingIds.includes(target.buildingId)
+  const covered = candidate
+    ? candidate.responsibleForBuilding
+    : !worker || worker.buildingIds.includes(target.buildingId)
   // 加协作者不做跨楼栋确认："来帮忙的人不负责本楼栋"正是这个功能要解决的场景，
   // 每次都弹一遍确认等于把正常操作包装成异常（派单/转派才需要，那是越过了楼栋约束）
   if (!covered && !collaborating) {
     const where = target.buildingName ? `${target.buildingName} ${target.room}` : `工单 ${target.ticketNo}`
     await ElMessageBox.confirm(
-      `${worker.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋${transferring ? '转派' : '强制派单'}（紧急抽调），确认继续？`,
+      `${candidate?.workerName ?? worker?.realName} 不负责 ${where} 所在的楼栋。这属于跨楼栋${transferring ? '转派' : '强制派单'}（紧急抽调），确认继续？`,
       transferring ? '跨楼栋转派' : '跨楼栋派单',
       { type: 'warning', confirmButtonText: '确认继续', cancelButtonText: '换人' },
     )
@@ -439,7 +463,7 @@ onMounted(async () => {
       </template>
     </el-drawer>
 
-    <el-dialog v-model="dispatchVisible" :title="dialogTitle" width="520px">
+    <el-dialog v-model="dispatchVisible" :title="dialogTitle" width="640px">
       <el-form label-width="80px">
         <el-form-item label="工单">
           <span>
@@ -456,7 +480,36 @@ onMounted(async () => {
             placeholder="会发给原师傅，例如：张师傅临时请假，改由你上门"
           />
         </el-form-item>
-        <el-form-item :label="dispatchMode === 'transfer' ? '改派给' : '维修工'">
+        <el-form-item v-if="dispatchMode === 'dispatch'" label="推荐师傅">
+          <div v-loading="candidatesLoading" class="candidates">
+            <div
+              v-for="c in candidates"
+              :key="c.workerId"
+              :class="['candidate', selectedWorkerId === c.workerId ? 'active' : '']"
+              @click="selectedWorkerId = c.workerId"
+            >
+              <div class="candidate-head">
+                <span class="candidate-name">{{ c.workerName }}（{{ c.username }}）</span>
+                <el-tag size="small" type="primary">{{ c.score.toFixed(2) }}</el-tag>
+                <el-tag v-if="c.responsibleForBuilding" size="small" type="success">负责本楼栋</el-tag>
+                <el-tag v-else-if="!c.buildingNames.length" size="small" type="warning">未配楼栋</el-tag>
+              </div>
+              <div class="candidate-reason">{{ c.reason }}</div>
+              <div class="candidate-bars">
+                <div v-for="item in c.items" :key="item.key" class="bar">
+                  <span class="bar-label">{{ item.label }}</span>
+                  <div class="bar-track"><div class="bar-fill" :style="{ width: `${Math.round(item.score * 100)}%` }" /></div>
+                  <span class="bar-score">{{ item.score.toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="!candidatesLoading && !candidates.length" class="hint">没有可用的师傅（未维护账号或全部停用）</div>
+          </div>
+          <div class="hint">
+            按「技能 / 满意度 / 负载 / 距离」四项加权排序，只是建议——点下面的确认才真正派单
+          </div>
+        </el-form-item>
+        <el-form-item v-else :label="dispatchMode === 'transfer' ? '改派给' : '维修工'">
           <el-select
             v-model="selectedWorkerId"
             filterable
@@ -529,6 +582,77 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+  width: 100%;
+}
+.candidate {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.candidate:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+.candidate.active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.candidate-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.candidate-name {
+  font-weight: 600;
+}
+.candidate-reason {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+.candidate-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 14px;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bar-label {
+  width: 92px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--el-fill-color-light);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--el-color-primary);
+}
+.bar-score {
+  width: 30px;
+  font-size: 12px;
+  text-align: right;
+  color: var(--el-text-color-regular);
+}
+
 .toolbar {
   display: flex;
   gap: 8px;
