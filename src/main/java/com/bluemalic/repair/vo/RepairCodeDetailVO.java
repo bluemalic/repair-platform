@@ -36,6 +36,9 @@ public class RepairCodeDetailVO {
     @Schema(description = "房间号")
     private String room;
 
+    /** 1 宿舍房间 / 2 公共区域 */
+    private Integer locationType;
+
     @Schema(description = "状态 1启用 0停用")
     private Integer status;
 

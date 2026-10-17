@@ -70,6 +70,7 @@ public class TicketQueryServiceImpl implements TicketQueryService {
         vo.setBuildingId(repairCode.getBuildingId());
         vo.setBuildingName(building == null ? null : building.getName());
         vo.setRoom(repairCode.getRoom());
+        vo.setLocationType(repairCode.getLocationType());
         return vo;
     }
 
