@@ -119,6 +119,32 @@ export interface FileUploadVO {
 }
 
 /** 报修受理 Agent 的一轮响应（docs/03 §5.2）。 */
+export interface KnowledgeAdviceVO {
+  /** 一句话：最可能是什么、先做什么（知识库没有相关条目时是固定话术） */
+  suggestion: string
+  steps: KnowledgeAdviceStep[]
+  /** 本次检索命中的条目（建议的依据） */
+  sources: KnowledgeAdviceSource[]
+  /** 检索方式：keyword（将来会有 vector） */
+  retriever: string
+  /** false = 知识库里没命中，**没有调模型** */
+  generated: boolean
+}
+
+export interface KnowledgeAdviceStep {
+  text: string
+  /** 引用的条目 id（服务端核对过：引不到的不在这里） */
+  citations: string[]
+  /** false = 这条步骤没有知识库依据，界面上要标出来 */
+  cited: boolean
+}
+
+export interface KnowledgeAdviceSource {
+  id: string
+  title: string
+  score: number
+}
+
 export interface AgentIntakeVO {
   sessionId: string
   /** 给用户看的一句话：追问，或"信息齐了，请确认" */

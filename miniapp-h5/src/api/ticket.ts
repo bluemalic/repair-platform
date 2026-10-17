@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { PageResult, RepairCodeVO, TicketDetailVO, TicketVO } from '@/types'
+import type { KnowledgeAdviceVO, PageResult, RepairCodeVO, TicketDetailVO, TicketVO } from '@/types'
 
 /** 学生：我的报修（可见范围由后端数据权限拦截器按"本人"注入） */
 export function pageMyTickets(pageNum: number, pageSize = 10) {
@@ -114,5 +114,21 @@ export function reworkTicket(id: string, reason: string) {
     url: `/student/tickets/${id}/rework`,
     method: 'POST',
     data: { reason },
+  })
+}
+
+/**
+ * 维修工：某张工单的「AI 排查建议」（阶段 2 · ADR-018）。
+ *
+ * <p>建议的**依据是本校知识库里检索到的条目**：命中的条目与每一步的引用都随响应回来，
+ * 界面上要显示出来——师傅据此判断这条建议值不值得信。知识库里没有相关条目时
+ * 后端不会再调模型，`generated=false` 并给一句说明。
+ *
+ * <p>它不写库：看完怎么做仍然是师傅的判断。
+ */
+export function getAdvice(ticketId: string) {
+  return request<KnowledgeAdviceVO>({
+    url: `/worker/tickets/${ticketId}/advice`,
+    method: 'POST',
   })
 }

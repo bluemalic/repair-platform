@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import TicketDetail from '@/components/TicketDetail.vue'
-import { acceptTicket, arriveTicket, getWorkerTicketDetail, rejectTicket } from '@/api/ticket'
-import type { TicketDetailVO } from '@/types'
+import { acceptTicket, arriveTicket, getAdvice, getWorkerTicketDetail, rejectTicket } from '@/api/ticket'
+import type { KnowledgeAdviceVO, TicketDetailVO } from '@/types'
 
 /**
  * 维修工侧的工单详情与三个动作：**接单 → 到场打卡 → 完工上报**（外加驳回）。
@@ -108,6 +108,27 @@ async function doArrive() {
 function goFinish() {
   uni.navigateTo({ url: `/pages/worker/finish?id=${ticketId.value}` })
 }
+
+/**
+ * AI 排查建议（阶段 2 · ADR-018）：**按需触发**，不做成自动加载——
+ * 每次都要花钱，而且师傅多数时候不需要它。失败（含模型不可用 40004）由 request 统一提示。
+ */
+const advice = ref<KnowledgeAdviceVO | null>(null)
+const adviceLoading = ref(false)
+
+async function loadAdvice() {
+  if (adviceLoading.value) {
+    return
+  }
+  adviceLoading.value = true
+  try {
+    advice.value = await getAdvice(ticketId.value)
+  } catch {
+    // request 已提示；保持 advice 为 null，师傅可以再点一次
+  } finally {
+    adviceLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -116,6 +137,35 @@ function goFinish() {
 
     <template v-else-if="detail">
       <TicketDetail :detail="detail" />
+
+      <!-- 排查建议：依据是本校知识库里检索到的条目，引用都摆出来（哪来的、匹配度多少） -->
+      <view class="card">
+        <text class="label">AI 排查建议</text>
+        <text class="hint">按这张单的描述，去本校维修知识库里找处理办法；给不出依据的地方会标出来</text>
+        <button v-if="!advice" class="advice-btn" :disabled="adviceLoading" @click="loadAdvice">
+          {{ adviceLoading ? '正在查知识库…' : '让助手看看' }}
+        </button>
+
+        <template v-else>
+          <text class="advice-suggestion">{{ advice.suggestion }}</text>
+
+          <view v-for="(step, index) in advice.steps" :key="index" class="step">
+            <text class="step-text">{{ index + 1 }}. {{ step.text }}</text>
+            <view class="cites">
+              <text v-if="!step.cited" class="cite-warn">没有知识库依据</text>
+              <text v-for="cid in step.citations" :key="cid" class="cite">依据 #{{ cid }}</text>
+            </view>
+          </view>
+
+          <view v-if="advice.sources.length" class="sources">
+            <text class="sources-title">参考的条目（匹配度）</text>
+            <text v-for="source in advice.sources" :key="source.id" class="source">
+              · {{ source.title }}（{{ source.score.toFixed(1) }}）
+            </text>
+          </view>
+          <text v-else class="hint">这次没有检索到相关条目</text>
+        </template>
+      </view>
 
       <!-- 到场打卡：单独一块输入，因为它是"人要真的到房间"的凭据，不该做成一个随手可点的按钮 -->
       <view v-if="canArrive" class="card">
@@ -183,6 +233,67 @@ function goFinish() {
   font-size: 28rpx;
   background: #f0f7ff;
   border-radius: 8rpx;
+}
+.advice-btn {
+  margin-top: 4rpx;
+  color: #2c6cf6;
+  font-size: 28rpx;
+  background: #f0f7ff;
+  border-radius: 8rpx;
+}
+.advice-suggestion {
+  display: block;
+  margin-bottom: 16rpx;
+  font-size: 28rpx;
+  color: #303133;
+  line-height: 1.6;
+}
+.step {
+  padding: 16rpx 0;
+  border-top: 1rpx solid #f0f2f5;
+}
+.step-text {
+  display: block;
+  font-size: 28rpx;
+  color: #303133;
+  line-height: 1.6;
+}
+.cites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 8rpx;
+}
+.cite {
+  padding: 2rpx 12rpx;
+  font-size: 22rpx;
+  color: #2c6cf6;
+  background: #f0f7ff;
+  border-radius: 6rpx;
+}
+.cite-warn {
+  padding: 2rpx 12rpx;
+  font-size: 22rpx;
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-radius: 6rpx;
+}
+.sources {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #f0f2f5;
+}
+.sources-title {
+  display: block;
+  margin-bottom: 8rpx;
+  font-size: 24rpx;
+  color: #909399;
+}
+.source {
+  display: block;
+  font-size: 24rpx;
+  color: #606266;
+  line-height: 1.6;
 }
 .actions {
   display: flex;
