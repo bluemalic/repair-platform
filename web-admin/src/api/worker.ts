@@ -38,6 +38,10 @@ export function updateWorker(id: string, body: WorkerUpdateBody) {
 }
 
 /** 设置负责楼栋（全量替换：传什么就是他的全部；空数组 = 不负责任何楼栋）。 */
+export function setWorkerSkills(id: string, categoryIds: string[]) {
+  return http.put<void>(`/admin/workers/${id}/skills`, { categoryIds })
+}
+
 export function setWorkerBuildings(id: string, buildingIds: string[]) {
   return http.put<void>(`/admin/workers/${id}/buildings`, { buildingIds })
 }
