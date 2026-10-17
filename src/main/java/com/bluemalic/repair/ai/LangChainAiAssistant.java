@@ -96,7 +96,7 @@ public class LangChainAiAssistant implements AiAssistant {
      * 而这属于"模型没照格式答"，让用户再问一次更便宜也更可控。
      */
     private QueryPlan parsePlan(String reply) {
-        String json = stripCodeFence(reply);
+        String json = ModelReplies.stripFence(reply);
         try {
             return objectMapper.readValue(json, QueryPlan.class);
         } catch (Exception e) {
@@ -105,21 +105,6 @@ public class LangChainAiAssistant implements AiAssistant {
         }
     }
 
-
-    /** 模型常把 JSON 包在 markdown 代码围栏里，剥掉再解析。 */
-    private String stripCodeFence(String raw) {
-        String text = raw == null ? "" : raw.trim();
-        if (text.startsWith("```")) {
-            int firstLineEnd = text.indexOf('\n');
-            if (firstLineEnd > 0) {
-                text = text.substring(firstLineEnd + 1).trim();
-            }
-            if (text.endsWith("```")) {
-                text = text.substring(0, text.length() - 3).trim();
-            }
-        }
-        return text;
-    }
 
     private String toJson(Object value) {
         try {
