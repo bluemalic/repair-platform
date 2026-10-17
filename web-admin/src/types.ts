@@ -94,6 +94,34 @@ export interface WorkerVO {
   status: number
   buildingIds: string[]
   buildingNames: string[]
+  /** 擅长类别（派单评分的技能维度，阶段 3） */
+  skillCategoryIds: string[]
+  skillCategoryNames: string[]
+}
+
+/** 派单候选（阶段 3 · ADR-019）：总分 + 四项明细 + 一句话理由。 */
+export interface DispatchCandidateVO {
+  workerId: string
+  username: string
+  workerName: string
+  buildingNames: string[]
+  skillCategoryNames: string[]
+  /** 是否负责工单所在楼栋：不负责时前端要弹「跨楼栋强制派单」确认 */
+  responsibleForBuilding: boolean
+  activeCount: number
+  avgScore: number | null
+  /** 加权总分 0~1 */
+  score: number
+  items: DispatchScoreItemVO[]
+  reason: string
+}
+
+export interface DispatchScoreItemVO {
+  key: string
+  label: string
+  score: number
+  weight: number
+  detail: string
 }
 
 export interface StudentVO {

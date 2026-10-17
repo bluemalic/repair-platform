@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { createWorker, pageWorkers, setWorkerBuildings, updateWorker } from '@/api/worker'
+import { createWorker, pageWorkers, setWorkerBuildings, setWorkerSkills, updateWorker } from '@/api/worker'
 import { listBuildings } from '@/api/building'
-import type { BuildingVO, WorkerVO } from '@/types'
+import { listCategories } from '@/api/category'
+import type { BuildingVO, CategoryVO, WorkerVO } from '@/types'
 
 const loading = ref(false)
 const rows = ref<WorkerVO[]>([])
@@ -41,6 +42,17 @@ const buildings = ref<BuildingVO[]>([])
 
 async function loadBuildings() {
   buildings.value = await listBuildings()
+}
+
+/**
+ * 擅长类别（派单评分的技能维度，阶段 3 · ADR-019）。
+ * 与楼栋同理**不过滤停用状态**：设置是"全量替换"，下拉里少了某个已停用的类别，
+ * 编辑一次就会把它悄悄抹掉。类别停用不影响已有技能记录。
+ */
+const categories = ref<CategoryVO[]>([])
+
+async function loadCategories() {
+  categories.value = await listCategories()
 }
 
 function buildingLabel(building: BuildingVO): string {
@@ -153,8 +165,28 @@ async function submitScope() {
   await load()
 }
 
+// ==================== 设置擅长类别 ====================
+
+const skillVisible = ref(false)
+const skillTarget = ref<WorkerVO | null>(null)
+const skillCategoryIds = ref<string[]>([])
+
+function openSkills(row: WorkerVO) {
+  skillTarget.value = row
+  skillCategoryIds.value = [...row.skillCategoryIds]
+  skillVisible.value = true
+}
+
+async function submitSkills() {
+  if (!skillTarget.value) return
+  await setWorkerSkills(skillTarget.value.id, skillCategoryIds.value)
+  ElMessage.success(skillCategoryIds.value.length ? '已保存擅长类别' : '已清空擅长类别（派单评分会按中性分处理）')
+  skillVisible.value = false
+  await load()
+}
+
 onMounted(async () => {
-  await Promise.all([load(), loadBuildings()])
+  await Promise.all([load(), loadBuildings(), loadCategories()])
 })
 </script>
 
@@ -194,10 +226,21 @@ onMounted(async () => {
           <span v-else class="muted">未配置（他看不到任何工单）</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="擅长类别" min-width="160">
+        <template #default="{ row }">
+          <template v-if="row.skillCategoryNames.length">
+            <el-tag v-for="name in row.skillCategoryNames" :key="name" size="small" style="margin-right: 4px">
+              {{ name }}
+            </el-tag>
+          </template>
+          <span v-else class="muted">未配置</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" @click="openScope(row)">负责楼栋</el-button>
+          <el-button link type="primary" @click="openSkills(row)">擅长类别</el-button>
           <el-button link :type="row.status === 1 ? 'danger' : 'success'" @click="toggleStatus(row)">
             {{ row.status === 1 ? '停用' : '启用' }}
           </el-button>
@@ -257,6 +300,20 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="scopeVisible = false">取消</el-button>
         <el-button type="primary" @click="submitScope">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="skillVisible" title="设置擅长类别" width="520px">
+      <p class="dialog-tip">
+        派单评分里的「技能」维度：擅长这张单的类别会加分。
+        <strong>全量替换</strong>；一个都不选表示"未维护"，评分按中性分处理（不会被当成不擅长）。
+      </p>
+      <el-select v-model="skillCategoryIds" multiple filterable placeholder="选择擅长类别" style="width: 100%">
+        <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
+      </el-select>
+      <template #footer>
+        <el-button @click="skillVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitSkills">保存</el-button>
       </template>
     </el-dialog>
   </div>
