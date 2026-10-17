@@ -129,6 +129,22 @@ export interface BuildingVO {
 }
 
 /** 报修类别（docs/03 §5.4 基础数据）。defaultUrgency 是学生没选紧急度时的默认值。 */
+export interface KnowledgeEntryVO {
+  id: string
+  title: string
+  /** 现象 / 适用场景——检索主字段 */
+  symptom: string
+  /** 处理步骤，一行一步 */
+  solution: string
+  categoryId: string | null
+  categoryName: string | null
+  /** 关键词（空格分隔），用来补同义词 */
+  tags: string | null
+  /** 1启用 0停用 */
+  status: number
+  updateTime: string
+}
+
 export interface CategoryVO {
   id: string
   name: string
