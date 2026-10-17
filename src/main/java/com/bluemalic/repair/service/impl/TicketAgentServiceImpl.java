@@ -2,6 +2,7 @@ package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.bluemalic.repair.ai.ModelReplies;
 import com.bluemalic.repair.ai.agent.AgentLoop;
 import com.bluemalic.repair.ai.agent.AgentModel;
 import com.bluemalic.repair.ai.agent.AgentPrompts;
@@ -289,7 +290,7 @@ public class TicketAgentServiceImpl implements TicketAgentService {
      * 因为受理场景里"模型说了句人话但没给 JSON"是常态，不是故障。
      */
     private ModelAnswer parseIntake(String raw) {
-        String json = stripCodeFence(raw);
+        String json = ModelReplies.stripFence(raw);
         try {
             JsonNode node = objectMapper.readTree(json);
             String reply = node.path("reply").asText("");
@@ -314,7 +315,7 @@ public class TicketAgentServiceImpl implements TicketAgentService {
      * 两者都用同一个解析器会得到"字段全空、建议值为 0"——测试抓过这个 bug。
      */
     private ModelAnswer parseTriage(String raw) {
-        String json = stripCodeFence(raw);
+        String json = ModelReplies.stripFence(raw);
         try {
             JsonNode node = objectMapper.readTree(json);
             String reason = node.path("reason").asText("");
@@ -328,21 +329,6 @@ public class TicketAgentServiceImpl implements TicketAgentService {
             return new ModelAnswer(StringUtils.hasText(raw) ? raw.trim() : UNPARSED_REPLY,
                     AgentSession.Draft.empty());
         }
-    }
-
-    /** 模型常把 JSON 包在 markdown 围栏里，剥掉再解析（与问数那条链同一个口径）。 */
-    private String stripCodeFence(String raw) {
-        String text = raw == null ? "" : raw.trim();
-        if (text.startsWith("```")) {
-            int firstLineEnd = text.indexOf('\n');
-            if (firstLineEnd > 0) {
-                text = text.substring(firstLineEnd + 1).trim();
-            }
-            if (text.endsWith("```")) {
-                text = text.substring(0, text.length() - 3).trim();
-            }
-        }
-        return text;
     }
 
     private Long longOrNull(JsonNode node, String field) {
