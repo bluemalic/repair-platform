@@ -166,6 +166,8 @@ export interface RepairCodeDetailVO {
   buildingId: string
   buildingName: string
   room: string
+  /** 1 宿舍房间（room=房间号）/ 2 公共区域（room=区域名，如 1F-大厅） */
+  locationType: number
   /** 1启用 0停用 */
   status: number
   createTime: string

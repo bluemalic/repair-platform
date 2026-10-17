@@ -36,29 +36,37 @@ function search() {
 
 const createVisible = ref(false)
 const createFormRef = ref<FormInstance>()
-const createForm = reactive({ buildingId: undefined as string | undefined, room: '' })
+const createForm = reactive({
+  buildingId: undefined as string | undefined,
+  room: '',
+  /** 1 宿舍房间 / 2 公共区域：公共区域是「一个区域一张码」，room 填区域名 */
+  locationType: 1,
+})
 const createRules: FormRules = {
   buildingId: [{ required: true, message: '请选择楼栋', trigger: 'change' }],
-  room: [{ required: true, message: '请填写房间号', trigger: 'blur' }],
+  room: [{ required: true, message: '请填写位置名称', trigger: 'blur' }],
 }
 
 function openCreate() {
-  Object.assign(createForm, { buildingId: undefined, room: '' })
+  Object.assign(createForm, { buildingId: undefined, room: '', locationType: 1 })
   createVisible.value = true
 }
 
 async function submitCreate() {
   if (!createFormRef.value) return
   await createFormRef.value.validate()
-  const created = await createRepairCode(createForm.buildingId as string, createForm.room)
+  const created = await createRepairCode(
+    createForm.buildingId as string,
+    createForm.room,
+    createForm.locationType,
+  )
   // 码是随机生成的，所以必须把结果亮出来——管理员要把它抄到贴纸上
   ElMessageBox.alert(
-    `房间 ${created.buildingName} ${created.room} 的报修码是：${created.code}\n\n二维码内容就是这个 6 位数字，前端渲染打印后贴在房间门口。`,
+    `${created.locationType === 2 ? '公共区域' : '房间'} ${created.buildingName} ${created.room} 的报修码是：${created.code}\n\n` +
+      `二维码内容就是这个 6 位数字，前端渲染打印后贴在${created.locationType === 2 ? '区域入口' : '房间门口'}。`,
     '生成成功',
     { confirmButtonText: '知道了' },
   )
-  createVisible.value = false
-  await search()
 }
 
 // ==================== 修改（房间 / 启停 / 重新生成） ====================
@@ -139,8 +147,11 @@ onMounted(async () => {
           <el-button link type="primary" @click="copyCode(row.code)">{{ row.code }}</el-button>
         </template>
       </el-table-column>
-      <el-table-column label="位置" min-width="180">
-        <template #default="{ row }">{{ row.buildingName }} {{ row.room }}</template>
+      <el-table-column label="位置" min-width="200">
+        <template #default="{ row }">
+          {{ row.buildingName }} {{ row.room }}
+          <el-tag v-if="row.locationType === 2" size="small" type="warning" style="margin-left: 6px">公共区域</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
@@ -171,8 +182,18 @@ onMounted(async () => {
             <el-option v-for="b in buildings" :key="b.id" :label="b.name" :value="b.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="房间号" prop="room">
-          <el-input v-model="createForm.room" placeholder="如 3-412" />
+        <el-form-item label="位置类型">
+          <el-radio-group v-model="createForm.locationType">
+            <el-radio :value="1">宿舍房间</el-radio>
+            <el-radio :value="2">公共区域</el-radio>
+          </el-radio-group>
+          <div class="hint">公共区域是「一个区域一张码」：贴在楼层电梯口 / 大厅入口等必经之处，供到场核验</div>
+        </el-form-item>
+        <el-form-item :label="createForm.locationType === 2 ? '区域名' : '房间号'" prop="room">
+          <el-input
+            v-model="createForm.room"
+            :placeholder="createForm.locationType === 2 ? '如 1F-大厅、3F-走廊' : '如 3-412'"
+          />
         </el-form-item>
       </el-form>
       <p class="dialog-tip">
