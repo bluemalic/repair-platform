@@ -13,13 +13,18 @@ import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.converter.WorkerConverter;
 import com.bluemalic.repair.dto.WorkerBuildingsDTO;
 import com.bluemalic.repair.dto.WorkerCreateDTO;
+import com.bluemalic.repair.dto.WorkerSkillsDTO;
 import com.bluemalic.repair.dto.WorkerUpdateDTO;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.SysUser;
+import com.bluemalic.repair.entity.TicketCategory;
 import com.bluemalic.repair.entity.WorkerBuilding;
+import com.bluemalic.repair.entity.WorkerSkill;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
+import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
+import com.bluemalic.repair.mapper.WorkerSkillMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
@@ -59,6 +64,8 @@ public class WorkerServiceImpl implements WorkerService {
 
     private final SysUserMapper sysUserMapper;
     private final WorkerBuildingMapper workerBuildingMapper;
+    private final WorkerSkillMapper workerSkillMapper;
+    private final TicketCategoryMapper ticketCategoryMapper;
     private final BuildingMapper buildingMapper;
     private final AccountService accountService;
 
@@ -88,13 +95,19 @@ public class WorkerServiceImpl implements WorkerService {
         Map<Long, List<Long>> buildingIdsByWorker = buildingIdsByWorker(tenantId, workerIds);
         Map<Long, String> buildingNames = buildingNames(buildingIdsByWorker.values().stream()
                 .flatMap(List::stream).distinct().toList());
+        Map<Long, List<Long>> skillIdsByWorker = skillIdsByWorker(tenantId, workerIds);
+        Map<Long, String> skillCategoryNames = categoryNames(skillIdsByWorker.values().stream()
+                .flatMap(List::stream).distinct().toList());
 
         Page<WorkerVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream()
                 .map(worker -> {
                     List<Long> ids = buildingIdsByWorker.getOrDefault(worker.getId(), List.of());
+                    List<Long> skillIds = skillIdsByWorker.getOrDefault(worker.getId(), List.of());
                     return WorkerConverter.toVO(worker, ids,
-                            ids.stream().map(buildingNames::get).filter(Objects::nonNull).toList());
+                            ids.stream().map(buildingNames::get).filter(Objects::nonNull).toList(),
+                            skillIds,
+                            skillIds.stream().map(skillCategoryNames::get).filter(Objects::nonNull).toList());
                 })
                 .toList());
         return PageResult.of(voPage);
@@ -118,7 +131,7 @@ public class WorkerServiceImpl implements WorkerService {
                 worker.getId(), worker.getUsername(), StpUtil.getLoginIdAsLong());
         auditService.record(AuditAction.WORKER_CREATE, AuditTarget.WORKER, worker.getId(), worker.getUsername(),
                 "新增维修工 " + worker.getUsername() + "（" + dto.getRealName() + "）");
-        return WorkerConverter.toVO(worker, List.of(), List.of());
+        return WorkerConverter.toVO(worker, List.of(), List.of(), List.of(), List.of());
     }
 
     @Override
@@ -220,6 +233,65 @@ public class WorkerServiceImpl implements WorkerService {
     }
 
     /** worker_id → 负责的楼栋 ID 列表（一次查完，避免逐行回库）。 */
+    @Override
+    @Transactional
+    public void setSkills(long id, WorkerSkillsDTO dto) {
+        long tenantId = currentTenantService.requireTenantId();
+        SysUser worker = accountService.require(id, tenantId, UserType.WORKER.getCode(), ACCOUNT_LABEL);
+
+        List<Long> categoryIds = dto.getCategoryIds().stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (!categoryIds.isEmpty()) {
+            List<TicketCategory> categories = ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
+                    .in(TicketCategory::getId, categoryIds)
+                    .eq(TicketCategory::getTenantId, tenantId));
+            if (categories.size() != categoryIds.size()) {
+                // 与楼栋一致：不区分"不存在"与"是别家租户的"，都当作不存在
+                throw new BizException(ErrorCode.PARAM_INVALID, "类别不存在或不属于本租户");
+            }
+        }
+
+        // 纯关联表、真删除：设置技能 = 提交最终状态（与负责楼栋同一套语义）
+        workerSkillMapper.delete(Wrappers.<WorkerSkill>lambdaQuery()
+                .eq(WorkerSkill::getWorkerId, id)
+                .eq(WorkerSkill::getTenantId, tenantId));
+        for (Long categoryId : categoryIds) {
+            WorkerSkill link = new WorkerSkill();
+            link.setTenantId(tenantId);
+            link.setWorkerId(id);
+            link.setCategoryId(categoryId);
+            workerSkillMapper.insert(link);
+        }
+
+        // 不进审计：它**不影响可见范围**（负责楼栋才影响数据权限），只是派单排序的输入（ADR-019）
+        log.info("设置擅长类别 workerId={} categoryIds={} operator={}",
+                id, categoryIds, StpUtil.getLoginIdAsLong());
+    }
+
+    private Map<Long, List<Long>> skillIdsByWorker(long tenantId, List<Long> workerIds) {
+        if (workerIds.isEmpty()) {
+            return Map.of();
+        }
+        return workerSkillMapper.selectList(Wrappers.<WorkerSkill>lambdaQuery()
+                        .eq(WorkerSkill::getTenantId, tenantId)
+                        .in(WorkerSkill::getWorkerId, workerIds))
+                .stream()
+                .collect(Collectors.groupingBy(WorkerSkill::getWorkerId,
+                        Collectors.mapping(WorkerSkill::getCategoryId, Collectors.toList())));
+    }
+
+    private Map<Long, String> categoryNames(List<Long> categoryIds) {
+        if (categoryIds.isEmpty()) {
+            return Map.of();
+        }
+        return ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
+                        .in(TicketCategory::getId, categoryIds))
+                .stream()
+                .collect(Collectors.toMap(TicketCategory::getId, TicketCategory::getName));
+    }
+
     private Map<Long, List<Long>> buildingIdsByWorker(long tenantId, List<Long> workerIds) {
         if (workerIds.isEmpty()) {
             return Map.of();

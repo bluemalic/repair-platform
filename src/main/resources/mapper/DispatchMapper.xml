@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  派单评分的批量统计（ADR-019）。
+
+  一条 SQL 同时取两个指标，原因：
+  · 候选人是**一批**（这所学校所有启用中的师傅），分两条 SQL 就是两次往返；
+    更糟的是很容易写成"每个候选人查一次"的 N+1——评分接口必须批量。
+  · `ticket_evaluation` 与工单是 1:1（uk_ticket），LEFT JOIN 不会让行数翻倍；
+    所以 COUNT(DISTINCT CASE ...) 与 AVG 可以放在同一个 GROUP BY 里。
+  · LEFT JOIN + AVG：**没有评价的师傅 avgScore 是 NULL，不是 0**。这个区别很重要——
+    0 分会把新师傅永久排在最后，NULL 才能在服务层按"中性 0.5"处理（ADR-019 的降级规则）。
+
+  `deleted = 0` 必须显式写：这是给派单用的统计，逻辑删除的工单不能算进负载与满意度。
+  tenant_id 同样显式写：ticket 虽然在拦截器名单里，但**无登录态的定时任务之外**，
+  评分是在登录态下调用的；显式带上租户条件让这条 SQL 自己就是安全的（不依赖上下文）。
+-->
+<mapper namespace="com.bluemalic.repair.mapper.DispatchMapper">
+
+    <select id="loadStats" resultType="com.bluemalic.repair.vo.WorkerScoreStatVO">
+        SELECT t.worker_id                                                             AS workerId,
+               COUNT(DISTINCT CASE WHEN t.status IN (20, 30, 40) THEN t.id END)        AS activeCount,
+               AVG(e.score)                                                            AS avgScore
+        FROM ticket t
+                 LEFT JOIN ticket_evaluation e ON e.ticket_id = t.id
+        WHERE t.tenant_id = #{tenantId}
+          AND t.deleted = 0
+          AND t.worker_id IN
+          <foreach collection="workerIds" item="workerId" open="(" separator="," close=")">
+              #{workerId}
+          </foreach>
+        GROUP BY t.worker_id
+    </select>
+
+</mapper>
