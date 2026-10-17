@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  知识库的中文关键词检索（ADR-018）。
+
+  三处容易写错、都写了注释的地方：
+
+  1. **MATCH 的列必须与 ft_knowledge 完全一致**（title, symptom, tags）——
+     少一列或多一列都会报 "Can't find FULLTEXT index matching the column list"。
+  2. **`> 0` 不能省**：自然语言模式下不匹配的行也会被返回（分数为 0），
+     不过滤就会出现"随便问什么都返回一堆条目"，而建议是建立在"检索到了什么"之上的。
+  3. **租户与状态条件必须显式写**：knowledge_entry 不在数据权限拦截器的名单里（AGENTS §5.6），
+     这里漏了 tenant_id 就是跨租户读别校的知识库——这条 SQL 是全项目最需要盯的几处之一。
+
+  排序：`categoryRank` 让"工单类别的条目"排在"通用条目"前面（同类别的更贴题），
+  再按相关度、再按 sort、最后按 id —— 最后两级是为了让**同分的顺序稳定**，
+  否则同一张工单两次调用可能给出不同的条目顺序，而"结果不稳定"本身就是可解释性的敌人。
+-->
+<mapper namespace="com.bluemalic.repair.mapper.KnowledgeEntryMapper">
+
+    <select id="searchByKeyword" resultType="com.bluemalic.repair.ai.knowledge.KnowledgeHit">
+        SELECT e.id,
+               e.category_id,
+               e.title,
+               e.symptom,
+               e.solution,
+               e.tags,
+               MATCH(e.title, e.symptom, e.tags) AGAINST (#{query} IN NATURAL LANGUAGE MODE) AS score
+        FROM knowledge_entry e
+        WHERE e.tenant_id = #{tenantId}
+          AND e.status = 1
+          AND e.deleted = 0
+          <if test="categoryId != null">
+              AND (e.category_id IS NULL OR e.category_id = #{categoryId})
+          </if>
+          AND MATCH(e.title, e.symptom, e.tags) AGAINST (#{query} IN NATURAL LANGUAGE MODE) &gt; 0
+        ORDER BY
+            <if test="categoryId != null">
+                (e.category_id = #{categoryId}) DESC,
+            </if>
+            score DESC, e.sort ASC, e.id ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>
