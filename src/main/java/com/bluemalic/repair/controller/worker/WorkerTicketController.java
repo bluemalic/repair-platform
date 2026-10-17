@@ -7,8 +7,10 @@ import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
+import com.bluemalic.repair.service.KnowledgeAdviceService;
 import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketFlowService;
+import com.bluemalic.repair.vo.KnowledgeAdviceVO;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -40,6 +42,7 @@ public class WorkerTicketController {
 
     private final TicketQueryService ticketQueryService;
     private final TicketFlowService flowService;
+    private final KnowledgeAdviceService knowledgeAdviceService;
 
     @Operation(summary = "我的任务",
             description = "两个视图：scope=mine（默认）只给派给我的单，默认状态为待接单/处理中/待验收；"
@@ -99,5 +102,16 @@ public class WorkerTicketController {
                                @Valid @RequestBody TicketFinishDTO dto) {
         flowService.finish(id, dto);
         return Result.ok();
+    }
+
+    @Operation(summary = "AI 排查建议",
+            description = "按工单的描述与类别检索本租户维修知识库，给出**带引用来源**的排查步骤（ADR-018）。"
+                    + "**不写库**；知识库里没有相关条目时不调模型，直接如实说没有。"
+                    + "权限沿用「能看这张单才能要建议」（与分诊用 ticket:dispatch 是同一个口径）")
+    @SaCheckPermission("ticket:list:assigned")
+    @RateLimit(key = "ai")
+    @PostMapping("/{id}/advice")
+    public Result<KnowledgeAdviceVO> advice(@Parameter(description = "工单ID") @PathVariable long id) {
+        return Result.ok(knowledgeAdviceService.advice(id));
     }
 }
