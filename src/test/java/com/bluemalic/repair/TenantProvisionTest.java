@@ -12,14 +12,18 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.AccountService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -84,13 +88,20 @@ class TenantProvisionTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private TenantTestCleanup cleanup;
+
+    /** 本类里开通过的学校编码：跨库的用例不在测试事务里，跑完要自己连库带行清掉 */
+    private final List<String> provisionedCodes = new ArrayList<>();
+
     // ==================== 开通学校 ====================
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void provisionCreatesTenantAndFirstAdmin() throws Exception {
         String platform = givenPlatformToken("test-plat-provision");
 
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-1", "test-uni-1-admin"))
+        provision(platform, "test-uni-1", "test-uni-1-admin")
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.code").value("test-uni-1"))
                 // create_time 是库里的默认值，回查一次才拿得到（否则开通接口比列表接口少一列）
@@ -99,7 +110,7 @@ class TenantProvisionTest {
         Tenant tenant = tenantByCode("test-uni-1");
         assertThat(tenant.getStatus()).isEqualTo(1);
 
-        SysUser admin = userBy(tenant.getId(), "test-uni-1-admin");
+        SysUser admin = userInTenant(schemaOf(tenant.getId()), tenant.getId(), "test-uni-1-admin");
         assertThat(admin.getUserType()).isEqualTo(UserType.ADMIN.getCode());
         // 平台告诉学校的口令是一次性凭证：建出来就必须带"首登改密"
         assertThat(admin.getMustChangePassword()).isEqualTo(1);
@@ -115,13 +126,14 @@ class TenantProvisionTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void duplicateTenantCodeIsRejected() throws Exception {
         String platform = givenPlatformToken("test-plat-dup");
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-dup", "test-uni-dup-admin"))
+        provision(platform, "test-uni-dup", "test-uni-dup-admin")
                 .andExpect(jsonPath("$.code").value(0));
 
         // 同一个编码再开一次：uk_code 兜底，报明确的业务错误而不是 500
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-dup", "test-uni-dup-admin2"))
+        provision(platform, "test-uni-dup", "test-uni-dup-admin2")
                 .andExpect(jsonPath("$.code").value(10001))
                 .andExpect(jsonPath("$.message").value("学校编码已存在"));
     }
@@ -131,7 +143,7 @@ class TenantProvisionTest {
         String platform = givenPlatformToken("test-plat-badcode");
 
         // 编码是师生天天输入的登录参数，不允许出现大写/空格/中文这类容易打错的东西
-        postJson(platform, "/api/platform/tenants", tenantBody("Test_Uni", "test-uni-bad-admin"))
+        provision(platform, "Test_Uni", "test-uni-bad-admin")
                 .andExpect(jsonPath("$.code").value(10001))
                 .andExpect(jsonPath("$.message").value(
                         org.hamcrest.Matchers.containsString("小写字母")));
@@ -140,12 +152,13 @@ class TenantProvisionTest {
     // ==================== 数据隔离（端到端） ====================
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void newTenantAdminCannotSeeOtherTenantTickets() throws Exception {
         // 租户 1 里有一条别人的工单
         givenTicket(TENANT_GD0U, 999999L, "test-other-tenant-room");
 
         String platform = givenPlatformToken("test-plat-isolation");
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-iso", "test-uni-iso-admin"))
+        provision(platform, "test-uni-iso", "test-uni-iso-admin")
                 .andExpect(jsonPath("$.code").value(0));
 
         // 新租户的管理员先改掉初始口令，才过得了强制改密那一关
@@ -245,9 +258,10 @@ class TenantProvisionTest {
     // ==================== 停用租户 ====================
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void disableTenantBlocksLoginAndKicksOutOnlineUsers() throws Exception {
         String platform = givenPlatformToken("test-plat-disable");
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-off", "test-uni-off-admin"))
+        provision(platform, "test-uni-off", "test-uni-off-admin")
                 .andExpect(jsonPath("$.code").value(0));
         long tenantId = tenantByCode("test-uni-off").getId();
 
@@ -282,19 +296,21 @@ class TenantProvisionTest {
     // ==================== 管理员口令 ====================
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void platformResetsAdminPasswordAndForcesChange() throws Exception {
         String platform = givenPlatformToken("test-plat-reset");
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-reset", "test-uni-reset-admin"))
+        provision(platform, "test-uni-reset", "test-uni-reset-admin")
                 .andExpect(jsonPath("$.code").value(0));
         long tenantId = tenantByCode("test-uni-reset").getId();
-        long adminId = userBy(tenantId, "test-uni-reset-admin").getId();
+        long adminId = userInTenant(schemaOf(tenantId), tenantId, "test-uni-reset-admin").getId();
 
         putJson(platform, "/api/platform/tenants/" + tenantId + "/admins/" + adminId + "/password",
                 Map.of("password", "Reset@123456"))
                 .andExpect(jsonPath("$.code").value(0));
 
         // 旧口令失效、新口令可用，且重置出来的口令同样是一次性的
-        assertThat(userBy(tenantId, "test-uni-reset-admin").getMustChangePassword()).isEqualTo(1);
+        assertThat(userInTenant(schemaOf(tenantId), tenantId, "test-uni-reset-admin").getMustChangePassword())
+                .isEqualTo(1);
         String token = login("test-uni-reset", "test-uni-reset-admin", "Reset@123456");
         mockMvc.perform(get("/api/admin/tickets").header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.code").value(10003))
@@ -308,9 +324,10 @@ class TenantProvisionTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void addAdminToExistingTenant() throws Exception {
         String platform = givenPlatformToken("test-plat-addadmin");
-        postJson(platform, "/api/platform/tenants", tenantBody("test-uni-add", "test-uni-add-admin"))
+        provision(platform, "test-uni-add", "test-uni-add-admin")
                 .andExpect(jsonPath("$.code").value(0));
         long tenantId = tenantByCode("test-uni-add").getId();
 
@@ -376,6 +393,49 @@ class TenantProvisionTest {
 
     // ==================== 工具 ====================
 
+    /**
+     * 开通一所学校，并把编码登记进清理清单。
+     *
+     * <p>这六个用例都标了 {@code NOT_SUPPORTED}：开通要跨两个 database（平台库落租户行、租户库建管理员），
+     * 塞不进一个测试事务；而且 MySQL 的 REPEATABLE READ 下，测试事务的读视图看不到"开通那个事务刚提交"
+     * 的租户行——那样连登录都会失败。代价是留下的东西不会被回滚，所以 {@link #cleanUpProvisionedData()}
+     * 必须把库和行都清掉。
+     */
+    private org.springframework.test.web.servlet.ResultActions provision(String platform, String code,
+                                                                        String adminUsername) throws Exception {
+        provisionedCodes.add(code);
+        return postJson(platform, "/api/platform/tenants", tenantBody(code, adminUsername));
+    }
+
+    /** 租户库名（平台库读；`tenant` 表只在那里） */
+    private String schemaOf(long tenantId) {
+        return TenantRoutingContext.callControl(() -> tenantMapper.selectById(tenantId)).getDbSchema();
+    }
+
+    /** 租户自己库里的账号：账号跟着学校走，平台库里没有它的行 */
+    private SysUser userInTenant(String schema, long tenantId, String username) {
+        SysUser user = TenantRoutingContext.call(schema, () -> sysUserMapper.selectOne(
+                Wrappers.<SysUser>lambdaQuery()
+                        .eq(SysUser::getTenantId, tenantId)
+                        .eq(SysUser::getUsername, username)));
+        assertThat(user).as("租户库里的账号 %s 应存在", username).isNotNull();
+        return user;
+    }
+
+    /**
+     * 把本类开出来的东西收拾干净。
+     *
+     * <p>测试账号按前缀删（`test-plat-*` 平台账号、`test-uni-*` gdou 里的账号——gdou 还没搬家，
+     * 它的账号就在平台库）；开通出来的学校连库带行一起删，由开通流程建的管理员在**租户库**里，
+     * 随库消失。
+     */
+    @AfterEach
+    void cleanUpProvisionedData() {
+        cleanup.dropTenants(provisionedCodes);
+        cleanup.dropAccounts("test-plat-", "test-uni-");
+        provisionedCodes.clear();
+    }
+
     private Map<String, String> tenantBody(String code, String adminUsername) {
         return Map.of("name", "测试大学-" + code, "code", code,
                 "contact", "后勤处", "phone", "0759-1111111",
@@ -438,14 +498,6 @@ class TenantProvisionTest {
         Tenant tenant = tenantMapper.selectById(id);
         assertThat(tenant).as("租户 %s 应存在", id).isNotNull();
         return tenant;
-    }
-
-    private SysUser userBy(long tenantId, String username) {
-        SysUser user = sysUserMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
-                .eq(SysUser::getTenantId, tenantId)
-                .eq(SysUser::getUsername, username));
-        assertThat(user).as("账号 %s 应存在", username).isNotNull();
-        return user;
     }
 
     private List<Long> roleIdsOf(long userId) {
