@@ -21,6 +21,7 @@ import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.TenantDatabaseService;
 import com.bluemalic.repair.tenancy.TenantDataMigrator;
+import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.vo.TenantDatabaseVO;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -90,6 +91,9 @@ class TenantDataMigrationTest {
 
     @Autowired
     private TenantDataMigrator migrator;
+
+    @Autowired
+    private TenantSchemaCatalog schemaCatalog;
 
     @Autowired
     private TenantMapper tenantMapper;
@@ -228,6 +232,19 @@ class TenantDataMigrationTest {
         assertThat(copyAgain.path("message").asText()).contains("已经在它自己的库里");
         JsonNode switchAgain = platformPost("/api/platform/tenants/" + tenantId + "/database/switch", platform);
         assertThat(switchAgain.path("code").asInt()).isEqualTo(10001);
+
+        // ⑦ 回退演练：把 db_schema 改回空（+ 让目录缓存失效）→ 数据重新走平台库。
+        //    代价在这里看得很清楚：切换后写进新库的那条类别"看不见了"（它不在平台库那份快照里），
+        //    所以回退窗口只到学校真正开始使用为止（ADR-021 / docs/05 §5.4）
+        TenantRoutingContext.callControl(() -> tenantMapper.update(null,
+                com.baomidou.mybatisplus.core.toolkit.Wrappers.<Tenant>lambdaUpdate()
+                        .eq(Tenant::getId, tenantId)
+                        .set(Tenant::getDbSchema, null)));
+        schemaCatalog.refresh(tenantId);
+        assertThat(tenantDatabaseService.status(tenantId).getMode()).as("回退后回到 SHARED").isEqualTo("SHARED");
+        mockMvc.perform(get("/api/categories").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(1));
     }
 
     // ==================== 接口调用 ====================

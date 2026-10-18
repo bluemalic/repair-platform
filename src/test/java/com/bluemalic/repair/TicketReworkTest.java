@@ -100,7 +100,8 @@ class TicketReworkTest {
         assertThat(logRemarks(ticketId)).contains("水管还在滴，接头没拧紧");
         assertThat(actionsOf(ticketId)).contains("REWORK");
         // 打回后重新登记"未处理升级"（基准仍是派单时间）
-        assertThat(stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS", ticketId))
+        // 成员是「租户|工单」（阶段 6 第 3 步 · ADR-021）：本类的账号都挂在种子租户 1 上
+        assertThat(stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS", "1|" + ticketId))
                 .as("打回后应重新登记处理超时节点").isNotNull();
 
         // 师傅侧：这单回到他的「我的任务」，能再次完工
