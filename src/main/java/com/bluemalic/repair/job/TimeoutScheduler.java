@@ -1,6 +1,7 @@
 package com.bluemalic.repair.job;
 
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import lombok.RequiredArgsConstructor;
@@ -95,42 +96,46 @@ public class TimeoutScheduler {
         }
     }
 
-    private void closeDue(List<Long> ticketIds) {
-        for (Long ticketId : ticketIds) {
+    private void closeDue(List<DueTicket> due) {
+        for (DueTicket task : due) {
             try {
-                timeoutHandler.autoClose(ticketId);
-                log.info("超时自动关闭 ticketId={}", ticketId);
+                timeoutHandler.autoClose(task);
+                log.info("超时自动关闭 tenantId={} ticketId={}", task.tenantId(), task.ticketId());
             } catch (BizException e) {
                 // 状态已不是 50（人工关闭/撤单/已被另一实例处理）→ 正常跳过，不算失败
-                log.info("超时任务跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
+                log.info("超时任务跳过（工单已流转） tenantId={} ticketId={} reason={}",
+                        task.tenantId(), task.ticketId(), e.getMessage());
             } catch (Exception e) {
                 // 单工单失败不影响本轮其余任务
-                log.warn("超时自动关闭失败 ticketId={}", ticketId, e);
+                log.warn("超时自动关闭失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
             }
         }
     }
 
-    private void remindDue(List<Long> ticketIds) {
-        for (Long ticketId : ticketIds) {
+    private void remindDue(List<DueTicket> due) {
+        for (DueTicket task : due) {
             try {
-                // 幂等与"是否还该提醒"都在 remindAcceptTimeout 里判定（状态 + ticket_log）
-                timeoutHandler.remindAcceptTimeout(ticketId);
+                // 幂等与"是否还该提醒"都在 remindAcceptTimeout 里判定（状态 + ticket_log）；
+                // 按租户钉库也在 handler 里做（任务带着租户，见 DueTicket）
+                timeoutHandler.remindAcceptTimeout(task);
             } catch (BizException e) {
-                log.info("接单提醒跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
+                log.info("接单提醒跳过（工单已流转） tenantId={} ticketId={} reason={}",
+                        task.tenantId(), task.ticketId(), e.getMessage());
             } catch (Exception e) {
-                log.warn("接单提醒失败 ticketId={}", ticketId, e);
+                log.warn("接单提醒失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
             }
         }
     }
 
-    private void escalateDue(List<Long> ticketIds) {
-        for (Long ticketId : ticketIds) {
+    private void escalateDue(List<DueTicket> due) {
+        for (DueTicket task : due) {
             try {
-                timeoutHandler.escalateProcessTimeout(ticketId);
+                timeoutHandler.escalateProcessTimeout(task);
             } catch (BizException e) {
-                log.info("处理超时升级跳过（工单已流转） ticketId={} reason={}", ticketId, e.getMessage());
+                log.info("处理超时升级跳过（工单已流转） tenantId={} ticketId={} reason={}",
+                        task.tenantId(), task.ticketId(), e.getMessage());
             } catch (Exception e) {
-                log.warn("处理超时升级失败 ticketId={}", ticketId, e);
+                log.warn("处理超时升级失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
             }
         }
     }

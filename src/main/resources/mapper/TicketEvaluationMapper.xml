@@ -3,20 +3,25 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <!--
-  兜底扫描的查询。三个约束缺一不可（评审点出过：少了前两个会随时间恶化）：
+  兜底扫描的查询（阶段 6 第 3 步起按"库"扫：调用方对每个库各跑一次，见 TimeoutServiceImpl#scanTargets）。
+  四个约束缺一不可（评审点出过：少了前两个会随时间恶化）：
   1. JOIN ticket 限定 status = 50 —— 处理过的工单会离开结果集，N 不会单调增长
-  2. 只取主键
+  2. 只取主键与租户（返回值是"租户|工单"成员，与 Redis ZSet 的成员同形）
   3. LIMIT —— 单轮上限，剩下的下一分钟继续
+  4. 查询不带 tenant_id：它要在一整个库里找，租户归属由返回的 tenant_id 带回来
+  （消费时再按租户解析成**当前**的库名——所以扫到搬家前留在平台库的旧副本也没关系，
+   处理会落到那所学校现在的库上）
   另外两点：
-  · 定时任务没有租户上下文，这里**故意不带 tenant_id**（兜底要跨租户处理）
   · **故意不写 ORDER BY**：status 过滤已保证处理过的工单会离开结果集（不会饿死），
     而排序会让 MySQL 先物化+filesort 整个候选集（EXPLAIN 实测 Using temporary; Using filesort），
     成本远大于"先处理哪几条"带来的公平性收益
+  · 成员格式（`租户|工单`）与 TimeoutServiceImpl 里的 MEMBER_SEPARATOR 是同一处约定，
+    改一边要改另一边；解析失败会直接抛错（不会静默跳过）
 -->
 <mapper namespace="com.bluemalic.repair.mapper.TicketEvaluationMapper">
 
-    <select id="selectOverdueOpenTicketIds" resultType="java.lang.Long">
-        SELECT t.id
+    <select id="selectOverdueOpenTicketMembers" resultType="java.lang.String">
+        SELECT CONCAT(t.tenant_id, '|', t.id)
         FROM ticket_evaluation e
                  JOIN ticket t ON t.id = e.ticket_id
         WHERE e.create_time &lt; #{cutoff}
