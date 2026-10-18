@@ -60,10 +60,19 @@ public class TenantTestCleanup {
                 if (tenantId != null) {
                     deleteWhere(connection, "DELETE FROM audit_log WHERE target_id = ? AND target_type = 'TENANT'",
                             tenantId);
-                    // 还没搬家的租户，它的账号确实在平台库里；搬过的那些在租户库里，随库一起消失
+                    // 这个租户在**平台库**里的业务行：直接插租户（不经开通接口）造出来的存量租户，
+                    // 它的数据就在平台库里，不删会一直堆在本地库里
+                    // （开通接口造出来的学校，数据在它自己的库里，随 DROP DATABASE 一起消失）
+                    for (String table : TENANT_SIDE_TABLES) {
+                        deleteWhere(connection, "DELETE FROM " + table + " WHERE tenant_id = ?", tenantId);
+                    }
+                    // 关联表没有 tenant_id，按各自的引用链删（先关联、后主表）
                     deleteWhere(connection, "DELETE FROM sys_user_role WHERE user_id IN"
                             + " (SELECT id FROM sys_user WHERE tenant_id = ?)", tenantId);
+                    deleteWhere(connection, "DELETE FROM sys_role_permission WHERE role_id IN"
+                            + " (SELECT id FROM sys_role WHERE tenant_id = ?)", tenantId);
                     deleteWhere(connection, "DELETE FROM sys_user WHERE tenant_id = ?", tenantId);
+                    deleteWhere(connection, "DELETE FROM sys_role WHERE tenant_id = ?", tenantId);
                     deleteWhere(connection, "DELETE FROM tenant WHERE id = ?", tenantId);
                 }
             }
@@ -93,6 +102,18 @@ public class TenantTestCleanup {
             throw new IllegalStateException("清理测试账号失败（测试数据没收拾干净）", e);
         }
     }
+
+    /**
+     * 带 `tenant_id` 的租户侧表（清理时要按租户删一遍）。
+     *
+     * <p>与 `TenantDataMigrator` 的搬运计划是同一批表，但**不能共用那份清单**：那里的两条过滤条件
+     * 是按引用链写的（`sys_user_role` / `sys_role_permission` 没有 `tenant_id` 列），
+     * 直接拿去拼 DELETE 会报"未知列"。所以这里显式列一遍，改表结构时两处一起看。
+     */
+    private static final java.util.List<String> TENANT_SIDE_TABLES = java.util.List.of(
+            "building", "worker_building", "worker_skill", "ticket_category", "repair_code",
+            "ticket", "ticket_log", "ticket_evaluation", "ticket_collaborator",
+            "notification", "audit_log", "knowledge_entry");
 
     /** 前缀里只允许字母/数字/连字符/下划线，避免把通配符拼进 LIKE 里误删 */
     private String escapeLike(String prefix) {
