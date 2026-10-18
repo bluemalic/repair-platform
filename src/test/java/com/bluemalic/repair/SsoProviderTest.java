@@ -198,7 +198,7 @@ class SsoProviderTest {
     }
 
     private SsoHttpClient httpClient() {
-        return new SsoHttpClient(new SsoProperties(false, 300, 120, 1000, 5));
+        return new SsoHttpClient(new SsoProperties(false, 300, 120, 1000, 5, ""));
     }
 
     private TenantSsoConfig oauth2Config(String usernameAttribute) {

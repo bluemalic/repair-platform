@@ -218,8 +218,16 @@ public class SsoServiceImpl implements SsoService {
         return normalized;
     }
 
-    /** 回调地址由当前请求推导（nginx 会把真实的 scheme/host 透传过来，见 application.yml 的 forward-headers-strategy）。 */
+    /**
+     * 回调地址。
+     *
+     * <p>优先用配置的 `repair.sso.public-base-url`：反代在非标准端口时，nginx 的 `Host` 不带端口，
+     * 按请求推导会丢掉端口（演示站 :8080 实测）。没配时才退回当前请求（直连 / 标准端口够用）。
+     */
     private String callbackUrl() {
+        if (StringUtils.hasText(properties.getPublicBaseUrl())) {
+            return properties.getPublicBaseUrl() + "/api/auth/sso/callback";
+        }
         return ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/api/auth/sso/callback").build().toUriString();
     }
