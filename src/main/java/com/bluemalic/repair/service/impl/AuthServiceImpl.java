@@ -102,10 +102,26 @@ public class AuthServiceImpl implements AuthService {
             throw new BizException(ErrorCode.ACCOUNT_DISABLED);
         }
 
+        return completeLogin(tenant, user);
+    }
+
+    /**
+     * 把"**已经验证过身份**"的用户变成一次登录（阶段 7 · ADR-022：账号密码与统一认证共用这一步）。
+     *
+     * <p>它只做登录机制本身：发 token、把租户与各类标记写进 Session、记登录日志与审计。
+     * **调用方负责"证明这个人是谁"**（校验口令，或从学校 IdP 拿到身份）并确认账号存在且启用。
+     *
+     * <p>调用方必须已经在**这所学校自己的库**的路由键下（登录审计要写进它的库）；
+     * SSO 那条路径由 {@code SsoServiceImpl#exchange} 负责钉住。
+     */
+    @Override
+    public LoginVO completeLogin(Tenant tenant, SysUser user) {
         StpUtil.login(user.getId());
         // 把租户写进 Session：数据权限拦截器每个请求都要用，从 Session 读可省掉每请求一次查库
         currentTenantService.bind(tenant.getId());
-        // 待改密标记也放 Session：拦截器每个请求都要读它，放这里同样省掉每请求一次查库
+        // 待改密标记也放 Session：拦截器每个请求都要读它，放这里同样省掉每请求一次查库。
+        // 统一认证登录**同样受这条约束**：账号的本地口令可能还是管理员设的初始口令，
+        // "从 IdP 进来"不等于"本地口令已经换过"——但改密接口本身是可以调的（白名单里有 /api/auth/**）
         boolean mustChangePassword = Integer.valueOf(1).equals(user.getMustChangePassword());
         StpUtil.getSession().set(MustChangePasswordInterceptor.SESSION_KEY, mustChangePassword);
         // 用户类型同理：平台域收口拦截器每个请求都要判"这是不是平台账号"，

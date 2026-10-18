@@ -43,6 +43,8 @@ public final class AuditAction {
     public static final String TENANT_DATABASE_COPY = "TENANT_DATABASE_COPY";
     /** 把某所学校切到它自己的库（`tenant.db_schema` 落值那一刻） */
     public static final String TENANT_DATABASE_SWITCH = "TENANT_DATABASE_SWITCH";
+    /** 修改某所学校的统一认证配置（阶段 7 · ADR-022） */
+    public static final String TENANT_SSO_UPDATE = "TENANT_SSO_UPDATE";
 
     // ---------- 登录事件（独立的一类，docs/01 §4.4）----------
     public static final String LOGIN_SUCCESS = "LOGIN_SUCCESS";
@@ -84,6 +86,7 @@ public final class AuditAction {
             Map.entry(TENANT_ADMIN_PASSWORD_RESET, "重置学校管理员口令"),
             Map.entry(TENANT_DATABASE_COPY, "搬迁学校数据"),
             Map.entry(TENANT_DATABASE_SWITCH, "学校切到独立库"),
+            Map.entry(TENANT_SSO_UPDATE, "修改学校统一认证配置"),
             Map.entry(LOGIN_SUCCESS, "登录成功"),
             Map.entry(LOGIN_FAILED, "登录失败"),
             Map.entry(LOGIN_DISABLED, "停用账号尝试登录"));
