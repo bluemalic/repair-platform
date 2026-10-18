@@ -112,7 +112,7 @@ public class SsoServiceImpl implements SsoService {
             // 两种协议把凭据放在不同的参数里：OAuth2 = code，CAS = ticket（CAS 追加在 service 后）
             String credential = protocol == SsoProtocol.CAS ? ticket : code;
             SsoIdentity identity = providerFactory.of(protocol)
-                    .authenticate(config, credential, callbackUrl(), pending.codeVerifier());
+                    .authenticate(config, credential, callbackUrl(), state, pending.codeVerifier());
             SysUser user = findUser(tenant, identity.username());
             if (user == null) {
                 log.info("统一认证通过但平台里没有对应账号 tenantId={} username={}",

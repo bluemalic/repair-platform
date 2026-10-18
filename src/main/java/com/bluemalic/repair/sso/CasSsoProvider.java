@@ -50,24 +50,24 @@ public class CasSsoProvider implements SsoProvider {
         // CAS 只回 ticket，不会把 state 带回来——所以把 state 嵌进 service 的查询串，
         // 回调时从 URL 里取（CAS 会在 service 后面追加 &ticket=...）。
         // 注意：这要求学校的 CAS 对 service 的登记允许带查询串（多数按前缀/正则匹配，允许）
-        String service = UriComponentsBuilder.fromUriString(redirectUri)
-                .queryParam("state", state)
-                .build().encode().toUriString();
         return UriComponentsBuilder.fromUriString(config.getCasLoginUrl())
-                .queryParam("service", service)
+                .queryParam("service", serviceUri(redirectUri, state))
                 .build().encode().toUriString();
     }
 
     @Override
-    public SsoIdentity authenticate(TenantSsoConfig config, String ticket, String redirectUri, String codeVerifier) {
+    public SsoIdentity authenticate(TenantSsoConfig config, String ticket, String redirectUri,
+                                    String state, String codeVerifier) {
         if (!StringUtils.hasText(ticket)) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "统一认证失败：没有收到 ticket");
         }
         if (!StringUtils.hasText(config.getCasValidateUrl())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "这所学校的统一认证还没配好：CAS 校验地址");
         }
+        // **必须与授权时的 service 完全一致**：CAS 的 ticket 是绑定在 service 上的，
+        // 少一个 state 参数都会判成 INVALID_TICKET（演示站实测踩到）
         String url = UriComponentsBuilder.fromUriString(config.getCasValidateUrl())
-                .queryParam("service", redirectUri)
+                .queryParam("service", serviceUri(redirectUri, state))
                 .queryParam("ticket", ticket)
                 .queryParam("format", "JSON")
                 .build().encode().toUriString();
@@ -75,6 +75,13 @@ public class CasSsoProvider implements SsoProvider {
 
         String username = parseUsername(body, config.getTenantId());
         return new SsoIdentity(username, username.trim(), null);
+    }
+
+    /** authorize 与 validate 用的同一个 service 字符串（含 state）。 */
+    private String serviceUri(String redirectUri, String state) {
+        return UriComponentsBuilder.fromUriString(redirectUri)
+                .queryParam("state", state)
+                .build().encode().toUriString();
     }
 
     /** 先按 JSON 取 {@code serviceResponse.authenticationSuccess.user}，取不到再按 XML 兜底。 */

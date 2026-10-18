@@ -56,7 +56,8 @@ public class OAuth2SsoProvider implements SsoProvider {
     }
 
     @Override
-    public SsoIdentity authenticate(TenantSsoConfig config, String code, String redirectUri, String codeVerifier) {
+    public SsoIdentity authenticate(TenantSsoConfig config, String code, String redirectUri,
+                                    String state, String codeVerifier) {
         if (!StringUtils.hasText(code)) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "统一认证失败：没有收到授权码");
         }

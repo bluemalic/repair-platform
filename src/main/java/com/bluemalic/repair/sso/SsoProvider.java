@@ -28,9 +28,12 @@ public interface SsoProvider {
     /**
      * 用回调参数换出身份。
      *
-     * @param code          OAuth2 的授权码；CAS 的 ticket（同一个参数位置）
-     * @param redirectUri   与授权时一致的地址（OAuth2 校验用）
+     * @param credential    OAuth2 的授权码；CAS 的 ticket（同一个参数位置）
+     * @param redirectUri   不带 state 的回调地址（OAuth2 的 redirect_uri 必须与登记的一致）
+     * @param state         本次登录的 state。**CAS 需要它**：ticket 绑定在 authorize 时的 service 上
+     *                      （state 就嵌在 service 里），校验时必须用同一个字符串
      * @param codeVerifier  PKCE 的原文（OAuth2 用；CAS 传空）
      */
-    SsoIdentity authenticate(TenantSsoConfig config, String code, String redirectUri, String codeVerifier);
+    SsoIdentity authenticate(TenantSsoConfig config, String credential, String redirectUri,
+                             String state, String codeVerifier);
 }

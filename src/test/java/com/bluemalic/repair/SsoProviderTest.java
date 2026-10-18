@@ -76,7 +76,8 @@ class SsoProviderTest {
         server.createContext("/cas/validate", exchange -> {
             String query = exchange.getRequestURI().getQuery();
             Map<String, String> params = parseForm(query);
-            if (!"the-ticket".equals(params.get("ticket")) || !"http://front.test/cb".equals(params.get("service"))) {
+            if (!"the-ticket".equals(params.get("ticket"))
+                    || !"http://front.test/cb?state=state-1".equals(params.get("service"))) {
                 respond(exchange, 200, "{\"serviceResponse\":{\"authenticationFailure\":{\"code\":\"INVALID_TICKET\"}}}");
                 return;
             }
@@ -116,7 +117,7 @@ class SsoProviderTest {
         userinfo = Map.of("sub", "u-1", "studentNo", "20260001", "name", "王小二");
 
         SsoIdentity identity = oauth2Provider().authenticate(
-                oauth2Config("studentNo"), "the-code", "http://front.test/cb", "verifier-1");
+                oauth2Config("studentNo"), "the-code", "http://front.test/cb", "state-1", "verifier-1");
 
         assertThat(identity.username()).isEqualTo("20260001");
         assertThat(identity.subject()).isEqualTo("u-1");
@@ -129,7 +130,8 @@ class SsoProviderTest {
         userinfo = Map.of("sub", "u-1", "username", "20260001");
 
         assertThatThrownBy(() -> oauth2Provider().authenticate(
-                oauth2Config("username"), "the-code", "http://front.test/cb", "wrong-verifier"))
+                oauth2Config("username"), "the-code", "http://front.test/cb", "state-1",
+                        "wrong-verifier"))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("统一认证失败");
     }
@@ -140,7 +142,8 @@ class SsoProviderTest {
         userinfo = Map.of("sub", "u-1", "name", "没有登录名字段");
 
         assertThatThrownBy(() -> oauth2Provider().authenticate(
-                oauth2Config("username"), "the-code", "http://front.test/cb", "verifier-1"))
+                oauth2Config("username"), "the-code", "http://front.test/cb", "state-1",
+                        "verifier-1"))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("没有返回登录名");
     }
@@ -164,7 +167,7 @@ class SsoProviderTest {
         casBody = "{\"serviceResponse\":{\"authenticationSuccess\":{\"user\":\"20260001\"}}}";
 
         SsoIdentity identity = new CasSsoProvider(httpClient(), objectMapper)
-                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", "");
+                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", "state-1", "");
 
         assertThat(identity.username()).isEqualTo("20260001");
     }
@@ -176,7 +179,7 @@ class SsoProviderTest {
                 + "</cas:serviceResponse>";
 
         SsoIdentity identity = new CasSsoProvider(httpClient(), objectMapper)
-                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", "");
+                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", "state-1", "");
 
         assertThat(identity.username()).isEqualTo("worker01");
     }
@@ -186,7 +189,7 @@ class SsoProviderTest {
         casBody = "{\"serviceResponse\":{\"authenticationFailure\":{\"code\":\"INVALID_TICKET\"}}}";
 
         assertThatThrownBy(() -> new CasSsoProvider(httpClient(), objectMapper)
-                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", ""))
+                .authenticate(casConfig(), "the-ticket", "http://front.test/cb", "state-1", ""))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("统一认证失败");
     }
