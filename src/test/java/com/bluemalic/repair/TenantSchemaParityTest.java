@@ -1,5 +1,6 @@
 package com.bluemalic.repair;
 
+import com.bluemalic.repair.tenancy.PlatformOnlyTables;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 
@@ -52,7 +53,8 @@ class TenantSchemaParityTest {
      * <p>`tenant`（学校名录）：登录时还不知道该去哪个租户库，必须先按学校编码在平台库里查到租户行、
      * 才知道路由到哪——把这张表放进租户库等于"先猜库"，而且它一旦有两份就会有两份真相。
      */
-    private static final Set<String> CONTROL_ONLY = Set.of("flyway_schema_history", "tenant");
+    /** 只存在于平台库的表（与搬迁计划、文档同源，见 PlatformOnlyTables） */
+    private static final Set<String> CONTROL_ONLY = PlatformOnlyTables.TABLES;
 
     /** 结构比对时排除放行清单里的表（它们本来就只在平台库）——与 {@link #CONTROL_ONLY} 同一份清单 */
     private static final String CONTROL_ONLY_FILTER = " AND TABLE_NAME NOT IN ("

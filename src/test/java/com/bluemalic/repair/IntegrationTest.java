@@ -43,7 +43,11 @@ import java.lang.annotation.Target;
         // 让问数链路能走到真正连库那一步。模型那一侧由测试作用域的 TestAiAssistant 顶替，
         // 所以 CI 既不调模型也不花钱。
         "AI_DB_USERNAME=test_ai_ci",
-        "AI_DB_PASSWORD=Test@123456"
+        "AI_DB_PASSWORD=Test@123456",
+        // 统一认证：限流放宽到 1000（一个测试类里会连着发起十几次授权/回调，默认 30/分钟会把自己挡住），
+        // 并打开演示用的 Mock IdP——它的端点要能在共享上下文里被测试直接驱动
+        "repair.sso.max-attempts-per-minute=1000",
+        "repair.sso.mock-idp-enabled=true"
 })
 @AutoConfigureMockMvc
 // Spring Boot 3 在 @SpringBootTest 里**默认关闭可观测性导出**（ObservabilityContextCustomizer），
