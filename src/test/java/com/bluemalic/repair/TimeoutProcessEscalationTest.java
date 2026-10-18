@@ -13,6 +13,7 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.config.TimeoutRule;
+import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import org.junit.jupiter.api.AfterEach;
@@ -76,7 +77,7 @@ class TimeoutProcessEscalationTest {
 
     @AfterEach
     void cleanZSetMembers() {
-        createdTickets.forEach(timeoutService::cancel);
+        createdTickets.forEach(id -> timeoutService.cancel(id, TENANT_ID));
     }
 
     @Test
@@ -84,7 +85,7 @@ class TimeoutProcessEscalationTest {
         long adminId = givenAdmin();
         Ticket overdue = ticketAt(30, LocalDateTime.now().minusHours(49));
         createdTickets.add(overdue.getId());
-        timeoutService.registerProcessDeadline(overdue.getId(), Instant.now().minusSeconds(60));
+        timeoutService.registerProcessDeadline(overdue.getId(), TENANT_ID, Instant.now().minusSeconds(60));
 
         timeoutService.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
 
@@ -92,7 +93,7 @@ class TimeoutProcessEscalationTest {
         assertThat(noticesTo(adminId)).isEqualTo(1);
 
         // 幂等：兜底扫描路径再触发一次，不应产生第二条
-        ticketService.escalateProcessTimeout(overdue.getId());
+        ticketService.escalateProcessTimeout(dueTicket(overdue.getId()));
         assertLogCount(overdue.getId(), TicketAction.PROCESS_TIMEOUT, 1);
         assertThat(noticesTo(adminId)).isEqualTo(1);
     }
@@ -104,12 +105,13 @@ class TimeoutProcessEscalationTest {
         // 未到期：到期判定在扫描/队列侧
         Ticket fresh = ticketAt(30, LocalDateTime.now().minusMinutes(5));
         createdTickets.add(fresh.getId());
-        assertThat(timeoutService.backstopScanProcess()).doesNotContain(fresh.getId());
+        assertThat(timeoutService.backstopScanProcess()).extracting(DueTicket::ticketId)
+                .doesNotContain(fresh.getId());
 
         // 已完工（40 待验收）：即使派单时间很早、队列也到期了，也不该升级
         Ticket finished = ticketAt(40, LocalDateTime.now().minusHours(49));
         createdTickets.add(finished.getId());
-        timeoutService.registerProcessDeadline(finished.getId(), Instant.now().minusSeconds(60));
+        timeoutService.registerProcessDeadline(finished.getId(), TENANT_ID, Instant.now().minusSeconds(60));
         timeoutService.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
         assertLogCount(finished.getId(), TicketAction.PROCESS_TIMEOUT, 0);
         assertThat(noticesTo(adminId)).isZero();
@@ -121,9 +123,11 @@ class TimeoutProcessEscalationTest {
         Ticket ticket = ticketAt(30, dispatchAt);
         createdTickets.add(ticket.getId());
 
-        timeoutService.registerProcess(ticket.getId(), ticket.getDispatchTime());
+        timeoutService.registerProcess(ticket.getId(), ticket.getTenantId(), ticket.getDispatchTime());
 
-        Double score = stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS", String.valueOf(ticket.getId()));
+        // 成员是「租户|工单」（阶段 6 第 3 步 · ADR-021）：定时任务靠它知道去哪个库处理
+        Double score = stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS",
+                ticket.getTenantId() + "|" + ticket.getId());
         assertThat(score).isNotNull();
         // 与兜底扫描同基准：派单时间 + 阈值（若用"现在 + 阈值"就会比这里晚 30 小时）
         long expected = dispatchAt.plus(timeoutRule.processDuration())
@@ -135,10 +139,15 @@ class TimeoutProcessEscalationTest {
     void backstopFindsOverdueProcessingTickets() {
         Ticket overdue = ticketAt(30, LocalDateTime.now().minusHours(49));
         createdTickets.add(overdue.getId());
-        assertThat(timeoutService.backstopScanProcess()).contains(overdue.getId());
+        assertThat(timeoutService.backstopScanProcess()).extracting(DueTicket::ticketId).contains(overdue.getId());
     }
 
     // ==================== 工具 ====================
+
+    /** 测试里的超时任务：本类造的工单都属于种子租户（tenant 1） */
+    private DueTicket dueTicket(long ticketId) {
+        return new DueTicket(TENANT_ID, ticketId);
+    }
 
     private long givenAdmin() {
         SysUser admin = new SysUser();

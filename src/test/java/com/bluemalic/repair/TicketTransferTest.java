@@ -88,7 +88,9 @@ class TicketTransferTest {
         String to = givenToken("test-tf-to", 2, ROLE_WORKER, List.of(1L));
         String ticketId = dispatchedTicket(student, admin, "test-tf-from", "test-tf-from");
 
-        Double beforeScore = stringRedisTemplate.opsForZSet().score(ACCEPT_NODE, ticketId);
+        // 成员是「租户|工单」（阶段 6 第 3 步 · ADR-021）：本类的账号都挂在种子租户 1 上
+        String member = "1|" + ticketId;
+        Double beforeScore = stringRedisTemplate.opsForZSet().score(ACCEPT_NODE, member);
         // 把派单时间往回拨一小时：DATETIME 只到秒，而派单与转派在测试里同一秒内发生，
         // 不断言"新值更晚"就分不清"重置了"还是"根本没动"
         LocalDateTime backdated = LocalDateTime.now().minusHours(1).withNano(0);
@@ -107,7 +109,7 @@ class TicketTransferTest {
 
         // 计时从头开始：派单时间被重置到现在，未接单提醒的到期点也跟着往后挪
         assertThat(after.getDispatchTime()).isAfter(backdated);
-        assertThat(stringRedisTemplate.opsForZSet().score(ACCEPT_NODE, ticketId))
+        assertThat(stringRedisTemplate.opsForZSet().score(ACCEPT_NODE, member))
                 .as("转派后未接单提醒应按新的派单时间重登记").isGreaterThan(beforeScore);
 
         // 台账：一条 TRANSFER，理由与新师傅都写在备注里；不是 DISPATCH

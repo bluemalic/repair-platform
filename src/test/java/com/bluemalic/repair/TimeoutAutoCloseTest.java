@@ -9,6 +9,7 @@ import com.bluemalic.repair.mapper.NotificationMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import org.junit.jupiter.api.AfterEach;
@@ -40,6 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @IntegrationTest
 class TimeoutAutoCloseTest {
+
+    private static final long TENANT_ID = 1L;
 
     @Autowired
     private TicketMapper ticketMapper;
@@ -78,20 +81,20 @@ class TimeoutAutoCloseTest {
     @AfterEach
     void cleanZSetMembers() {
         // 测试自身写入的 ZSet 成员不随事务回滚，逐个取消，避免影响其他测试与真实调度器
-        createdTickets.forEach(timeoutService::cancel);
+        createdTickets.forEach(id -> timeoutService.cancel(id, TENANT_ID));
     }
 
     @Test
     void dueDeadlineIsConsumedAndAutoClosed() {
         Ticket ticket = ticketAt(50, LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(25));
         createdTickets.add(ticket.getId());
-        timeoutService.registerEvalDeadline(ticket.getId(), Instant.now().minusSeconds(60));
+        timeoutService.registerEvalDeadline(ticket.getId(), TENANT_ID, Instant.now().minusSeconds(60));
 
         // 模拟调度器：消费到期成员 → 执行 autoClose。
         // 只处理自己造的那条：Redis 不回滚，早先失败运行可能留下"工单已回滚、成员还在"的幽灵 id
-        List<Long> due = timeoutService.handleDueEval();
-        assertThat(due).contains(ticket.getId());
-        ticketService.autoClose(ticket.getId());
+        List<DueTicket> due = timeoutService.handleDueEval();
+        assertThat(due).extracting(DueTicket::ticketId).contains(ticket.getId());
+        ticketService.autoClose(dueTicket(ticket.getId()));
 
         Ticket closed = ticketMapper.selectById(ticket.getId());
         assertThat(closed.getStatus()).isEqualTo(60);
@@ -105,7 +108,7 @@ class TimeoutAutoCloseTest {
 
         // 幂等：再消费一次不产生第二条日志/通知（成员已被 ZREM、状态已是 60）
         timeoutService.handleDueEval().stream()
-                .filter(id -> id.equals(ticket.getId()))
+                .filter(task -> task.ticketId() == ticket.getId())
                 .forEach(ticketService::autoClose);
         assertLogCount(ticket.getId(), TicketAction.AUTO_CLOSE, 1);
     }
@@ -114,17 +117,17 @@ class TimeoutAutoCloseTest {
     void futureOrAlreadyClosedTicketsAreSkipped() {
         Ticket notDue = ticketAt(50, LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(25));
         createdTickets.add(notDue.getId());
-        timeoutService.registerEvalDeadline(notDue.getId(), Instant.now().plusSeconds(3600));
-        timeoutService.handleDueEval().forEach(id -> ticketService.autoClose(id));
+        timeoutService.registerEvalDeadline(notDue.getId(), TENANT_ID, Instant.now().plusSeconds(3600));
+        timeoutService.handleDueEval().forEach(ticketService::autoClose);
         assertThat(ticketMapper.selectById(notDue.getId()).getStatus()).isEqualTo(50);
 
         Ticket alreadyClosed = ticketAt(60, LocalDateTime.now().minusHours(25), LocalDateTime.now().minusHours(25));
         createdTickets.add(alreadyClosed.getId());
-        timeoutService.registerEvalDeadline(alreadyClosed.getId(), Instant.now().minusSeconds(60));
+        timeoutService.registerEvalDeadline(alreadyClosed.getId(), TENANT_ID, Instant.now().minusSeconds(60));
         // 与调度器行为一致：成员被消费，但对 60 执行 autoClose 会抛"状态不允许"，被捕获跳过
-        assertThat(timeoutService.handleDueEval()).contains(alreadyClosed.getId());
+        assertThat(timeoutService.handleDueEval()).extracting(DueTicket::ticketId).contains(alreadyClosed.getId());
         try {
-            ticketService.autoClose(alreadyClosed.getId());
+            ticketService.autoClose(dueTicket(alreadyClosed.getId()));
         } catch (com.bluemalic.repair.common.BizException expected) {
             assertThat(expected.getErrorCode()).isEqualTo(com.bluemalic.repair.common.ErrorCode.TICKET_STATUS_NOT_ALLOWED);
         }
@@ -147,24 +150,30 @@ class TimeoutAutoCloseTest {
         createdTickets.add(alreadyClosed.getId());
         givenEvaluation(alreadyClosed, LocalDateTime.now().minusDays(3));
 
-        List<Long> due = timeoutService.backstopScanEval();
-        assertThat(due).contains(overdue.getId())
+        List<DueTicket> due = timeoutService.backstopScanEval();
+        assertThat(due).extracting(DueTicket::ticketId)
+                .contains(overdue.getId())
                 .doesNotContain(fresh.getId())
                 .doesNotContain(alreadyClosed.getId());
 
         // 只处理自己造的那条：兜底扫描是**全表跨租户**的（调度器要处理所有超期工单），
         // 它会扫到库里遗留的真实数据——那些工单可能已被人工关闭，autoClose 会抛异常
         // （生产中由调度器 catch 后跳过，见 TimeoutScheduler.closeDue）
-        ticketService.autoClose(overdue.getId());
+        ticketService.autoClose(dueTicket(overdue.getId()));
         assertThat(ticketMapper.selectById(overdue.getId()).getStatus()).isEqualTo(60);
         assertThat(ticketMapper.selectById(fresh.getId()).getStatus()).isEqualTo(50);
     }
 
     // ==================== 工具 ====================
 
+    /** 测试里的超时任务：本类造的工单都属于种子租户（tenant 1） */
+    private DueTicket dueTicket(long ticketId) {
+        return new DueTicket(TENANT_ID, ticketId);
+    }
+
     private Ticket ticketAt(int status, LocalDateTime submitAt, LocalDateTime finishAt) {
         Ticket ticket = new Ticket();
-        ticket.setTenantId(1L);
+        ticket.setTenantId(TENANT_ID);
         ticket.setTicketNo("TAC" + System.nanoTime());
         ticket.setStudentId(900000L); // 不必是真实用户：通知接收人只是落库字段
         ticket.setBuildingId(1L);
