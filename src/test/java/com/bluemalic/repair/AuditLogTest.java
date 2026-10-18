@@ -13,16 +13,20 @@ import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -67,6 +71,12 @@ class AuditLogTest {
 
     @Autowired
     private TenantMapper tenantMapper;
+
+    @Autowired
+    private TenantTestCleanup cleanup;
+
+    /** 本类开通过的学校编码：开通跨两个库、跑不进测试事务，跑完得自己清（阶段 6 · ADR-021） */
+    private final List<String> provisionedCodes = new ArrayList<>();
 
     @Autowired
     private AuditLogMapper auditLogMapper;
@@ -170,6 +180,7 @@ class AuditLogTest {
     // ==================== 平台运营：记在 tenant_id = 0 上 ====================
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void platformOperationsAreAuditedUnderTenantZero() throws Exception {
         SysUser platformUser = accountService.ensurePlatformAccount("test-au-platform", PASSWORD, "平台运营测试");
         // 引导建的平台账号带"首登强制改密"，而那个拦截器只放行 /api/auth/**（否则会拿到 10003）
@@ -183,6 +194,7 @@ class AuditLogTest {
         String platform = readJson(loginResult).path("data").path("tokenValue").asText();
 
         String code = "test-au-school-" + System.nanoTime() % 100000;
+        provisionedCodes.add(code);
         postJson(platform, "/api/platform/tenants", Map.of(
                         "name", "审计测试学校", "code", code,
                         "adminUsername", "test-au-school-admin", "adminRealName", "测试管理员",
@@ -342,5 +354,12 @@ class AuditLogTest {
 
     private JsonNode readJson(MvcResult result) throws Exception {
         return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    @AfterEach
+    void cleanUpProvisionedData() {
+        cleanup.dropTenants(provisionedCodes);
+        cleanup.dropAccounts("test-au-");
+        provisionedCodes.clear();
     }
 }
