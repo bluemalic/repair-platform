@@ -125,11 +125,7 @@ public class TenantDatabaseServiceImpl implements TenantDatabaseService {
         log.info("租户已切换到独立库 tenantId={} code={} schema={} 操作人={}",
                 tenant.getId(), tenant.getCode(), schema, cn.dev33.satoken.stp.StpUtil.getLoginIdAsLong());
         auditService.record(AuditAction.TENANT_DATABASE_SWITCH, AuditTarget.TENANT, tenant.getId(), tenant.getName(),
-                "学校 " + tenant.getName() + " 切换到它自己的库 " + schema + "（源库那份保留，确认后再归档）");
-        // 与开通学校同一条边界提醒：无登录态的定时任务（超时升级 / 兜底扫描）目前只扫平台库
-        log.warn("提醒：这所学校的超时自动升级 / 兜底扫描尚未生效 tenantId={} schema={}（阶段 6 第 3 步覆盖，ADR-021）",
-                tenant.getId(), schema);
-        return report(tenant, false);
+                "学校 " + tenant.getName() + " 切换到它自己的库 " + schema + "（源库那份保留，确认后再归档）");        return report(tenant, false);
     }
 
     // ==================== 报告 ====================

@@ -211,12 +211,6 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
         // 5) 只读账号（AI 问数）的授权要把新库纳入进来；失败只记日志，不影响开通
         databaseProvisioner.ensureAiReadOnlyOnAllDatabases();
 
-        // 阶段 6 第 1 步的**边界**（ADR-021「落地时的修正」）：无登录态的定时任务（超时升级 / 兜底扫描）
-        // 目前只扫平台库，独立库的学校还没被纳入遍历。留一行 WARN 而不是静默——这所学校会缺这块功能，
-        // 而"少了一块功能却没声音"是最难发现的那类问题。补齐在阶段 6 第 3 步。
-        log.warn("提醒：这所学校的超时自动升级 / 兜底扫描尚未生效 tenantId={} schema={}（阶段 6 第 3 步覆盖，ADR-021）",
-                tenant.getId(), schema);
-
         log.info("开通学校 tenantId={} code={} schema={} 操作人={}",
                 tenant.getId(), tenant.getCode(), schema, StpUtil.getLoginIdAsLong());
         // 回查一次：create_time 是数据库默认值填的，插入后的实体里那个字段还是 null，
