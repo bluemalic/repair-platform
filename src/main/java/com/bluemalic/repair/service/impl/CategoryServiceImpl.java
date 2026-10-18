@@ -3,6 +3,7 @@ package com.bluemalic.repair.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.AuditAction;
+import com.bluemalic.repair.config.CacheConfig;
 import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
@@ -18,7 +19,9 @@ import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.CategoryVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,7 +61,21 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     @Override
+    @Cacheable(cacheNames = CacheConfig.CACHE_ENABLED_CATEGORIES, key = "#tenantId")
+    public List<CategoryVO> listEnabled(long tenantId) {
+        return ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
+                        .eq(TicketCategory::getTenantId, tenantId)
+                        .eq(TicketCategory::getStatus, STATUS_ENABLED)
+                        .orderByAsc(TicketCategory::getSort)
+                        .orderByAsc(TicketCategory::getId))
+                .stream()
+                .map(CategoryConverter::toVO)
+                .toList();
+    }
+
+    @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.CACHE_ENABLED_CATEGORIES, allEntries = true)
     public CategoryVO create(CategoryCreateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
         requireNameNotUsed(tenantId, dto.getName(), null);
@@ -80,6 +97,7 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.CACHE_ENABLED_CATEGORIES, allEntries = true)
     public void update(long id, CategoryUpdateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
         TicketCategory before = requireCategory(id, tenantId);
@@ -109,6 +127,7 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheConfig.CACHE_ENABLED_CATEGORIES, allEntries = true)
     public void delete(long id) {
         long tenantId = currentTenantService.requireTenantId();
         TicketCategory category = requireCategory(id, tenantId);
