@@ -1,6 +1,7 @@
 package com.bluemalic.repair.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -32,4 +33,12 @@ public class TenantUpdateDTO {
     @Schema(description = "联系电话")
     @Size(max = 20, message = "联系电话最长 20 位")
     private String phone;
+
+    @Schema(description = "学生账号上限；0 = 不限")
+    @Min(value = 0, message = "学生账号上限不能为负数")
+    private Integer maxStudents;
+
+    @Schema(description = "维修工账号上限；0 = 不限")
+    @Min(value = 0, message = "维修工账号上限不能为负数")
+    private Integer maxWorkers;
 }

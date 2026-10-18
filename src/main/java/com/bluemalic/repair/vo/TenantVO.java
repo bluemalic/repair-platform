@@ -30,6 +30,18 @@ public class TenantVO {
     private String phone;
 
     @Schema(description = "状态 1启用 0停用")
+    /** 学生账号上限；0 = 不限 */
+    private Integer maxStudents;
+
+    /** 维修工账号上限；0 = 不限 */
+    private Integer maxWorkers;
+
+    /** 已用学生账号数（含停用；平台页展示用） */
+    private Long studentCount;
+
+    /** 已用维修工账号数（含停用） */
+    private Long workerCount;
+
     private Integer status;
 
     @Schema(description = "开通时间")

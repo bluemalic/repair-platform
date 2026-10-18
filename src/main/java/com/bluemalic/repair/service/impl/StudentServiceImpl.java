@@ -18,6 +18,7 @@ import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
+import com.bluemalic.repair.service.TenantQuotaService;
 import com.bluemalic.repair.service.StudentService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.StudentImportVO;
@@ -74,6 +75,7 @@ public class StudentServiceImpl implements StudentService {
     private final AuditService auditService;
 
     private final CurrentTenantService currentTenantService;
+    private final TenantQuotaService tenantQuotaService;
 
     @Override
     public PageResult<StudentVO> page(long pageNum, long pageSize, Integer status, String keyword) {
@@ -100,6 +102,8 @@ public class StudentServiceImpl implements StudentService {
     @Transactional
     public StudentVO create(StudentCreateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
+        // 配额校验放在最前面：批量导入是把库撑坏的主要动作（ADR-020），单个建号也要过同一道闸
+        tenantQuotaService.requireStudentSeats(tenantId, 1);
         SysUser student = accountService.create(newAccount(tenantId, dto.getUsername(),
                 dto.getRealName(), dto.getPhone(), dto.getPassword()));
         log.info("新增学生 studentId={} username={} operator={}",
@@ -178,6 +182,10 @@ public class StudentServiceImpl implements StudentService {
 
         // 一次查出已存在的学号，避免逐行回库（500 行就是 500 次查询）
         Set<String> existing = existingUsernames(tenantId, parsed.accounts().keySet());
+
+        // 只按"真正会新建的"校验：名单里重复出现的已存在学号会被跳过，不该占配额
+        int toCreate = (int) parsed.accounts().keySet().stream().filter(username -> !existing.contains(username)).count();
+        tenantQuotaService.requireStudentSeats(tenantId, toCreate);
 
         List<String> skippedUsernames = new ArrayList<>();
         int created = 0;
