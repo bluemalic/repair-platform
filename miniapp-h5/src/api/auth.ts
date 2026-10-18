@@ -22,3 +22,28 @@ export function changePassword(oldPassword: string, newPassword: string) {
     data: { oldPassword, newPassword },
   })
 }
+
+/** 学校统一认证的可用性（登录页据此决定是否显示入口） */
+export interface SsoAvailability {
+  tenantName?: string
+  enabled: boolean
+  protocol?: string | null
+}
+
+export function ssoAvailable(tenantCode: string) {
+  return request<SsoAvailability>({
+    url: '/auth/sso/available',
+    auth: false,
+    data: { tenantCode },
+  })
+}
+
+/** 用统一认证回调带回来的一次性登录码换 token（码一次有效） */
+export function ssoExchange(code: string) {
+  return request<LoginVO>({
+    url: '/auth/sso/exchange',
+    method: 'POST',
+    auth: false,
+    data: { code },
+  })
+}
