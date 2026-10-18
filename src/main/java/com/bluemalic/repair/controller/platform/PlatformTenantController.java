@@ -5,13 +5,16 @@ import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TenantAdminCreateDTO;
 import com.bluemalic.repair.dto.TenantAdminPasswordDTO;
 import com.bluemalic.repair.dto.TenantCreateDTO;
+import com.bluemalic.repair.dto.TenantSsoConfigDTO;
 import com.bluemalic.repair.dto.TenantStatusDTO;
 import com.bluemalic.repair.dto.TenantUpdateDTO;
 import com.bluemalic.repair.service.TenantDatabaseService;
 import com.bluemalic.repair.service.TenantProvisionService;
+import com.bluemalic.repair.service.TenantSsoConfigService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TenantAdminVO;
 import com.bluemalic.repair.vo.TenantDatabaseVO;
+import com.bluemalic.repair.vo.TenantSsoConfigVO;
 import com.bluemalic.repair.vo.TenantVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -52,6 +55,8 @@ public class PlatformTenantController {
     private final TenantProvisionService tenantProvisionService;
 
     private final TenantDatabaseService tenantDatabaseService;
+
+    private final TenantSsoConfigService tenantSsoConfigService;
 
     @Operation(summary = "租户列表",
             description = "分页；可按状态筛选、按学校名称或编码模糊搜索。**不含平台自身**（它不是学校）")
@@ -114,6 +119,22 @@ public class PlatformTenantController {
     @PostMapping("/{id}/database/switch")
     public Result<TenantDatabaseVO> switchDatabase(@Parameter(description = "租户ID") @PathVariable long id) {
         return Result.ok(tenantDatabaseService.switchToDedicated(id));
+    }
+
+    @Operation(summary = "学校统一认证配置",
+            description = "读这所学校的 SSO 配置。**不含密钥**，只回「是否已配置」；从未配置过时 configured=false")
+    @GetMapping("/{id}/sso")
+    public Result<TenantSsoConfigVO> sso(@Parameter(description = "租户ID") @PathVariable long id) {
+        return Result.ok(tenantSsoConfigService.get(id));
+    }
+
+    @Operation(summary = "保存学校统一认证配置",
+            description = "有就改、没有就建。`clientSecret` 留空表示不修改；启用时至少要有一个登录成功后的跳转地址。"
+                    + "写审计，摘要里不含密钥")
+    @PutMapping("/{id}/sso")
+    public Result<TenantSsoConfigVO> updateSso(@Parameter(description = "租户ID") @PathVariable long id,
+                                               @Valid @RequestBody TenantSsoConfigDTO dto) {
+        return Result.ok(tenantSsoConfigService.update(id, dto));
     }
 
     @Operation(summary = "学校的后勤管理员列表",

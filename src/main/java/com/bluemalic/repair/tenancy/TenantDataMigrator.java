@@ -55,6 +55,9 @@ public class TenantDataMigrator {
      *
      * <p>**没有 `sys_permission`**：权限点是平台定义的数据，两边都由种子脚本保证（`TenantSchemaParityTest`
      * 逐行比对过），搬它不是"搬这个租户的数据"，而是把平台的定义复制一份。
+     *
+     * <p>**没有 `tenant_sso_config` 与 `tenant`**：它们是"登录之前就要读"的平台专属表
+     * （见 {@code PlatformOnlyTables}），租户库里根本没有这两张表。
      */
     private static final List<CopyTable> PLAN = List.of(
             new CopyTable("sys_role", "tenant_id = ?"),
