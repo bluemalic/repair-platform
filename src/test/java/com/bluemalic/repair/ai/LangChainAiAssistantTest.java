@@ -2,7 +2,9 @@ package com.bluemalic.repair.ai;
 
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.config.AiProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,7 +26,7 @@ class LangChainAiAssistantTest {
         // "没配 Key 就报错"这条守卫现在住在 AiChatModelProvider 里——模型实例与调用口径都收敛在那儿，
         // 问数与 Agent 两条链路共用同一个入口。这里把 provider 显式传进去，测的还是同一件事。
         LangChainAiAssistant assistant = new LangChainAiAssistant(notConfigured, null, null,
-                new AiChatModelProvider(notConfigured));
+                new AiChatModelProvider(notConfigured, new MetricsRecorder(new SimpleMeterRegistry())));
 
         assertThatThrownBy(() -> assistant.plan("有几栋楼"))
                 .isInstanceOf(BizException.class)

@@ -1,6 +1,7 @@
 package com.bluemalic.repair.service.impl;
 
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.UserType;
@@ -68,6 +69,7 @@ class TicketTransitionSupport {
     private static final DateTimeFormatter TICKET_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private final TicketLogMapper ticketLogMapper;
     private final NotificationService notificationService;
+    private final MetricsRecorder metricsRecorder;
 
     /** 状态变更通知的规格：类型、标题、正文后缀、默认接收方。满载等新动作加一行即可。 */
     record NoticeSpec(String type, String title, String suffix, boolean toStudent) {
@@ -143,6 +145,8 @@ class TicketTransitionSupport {
         }
         writeLog(tenantId, id, fromStatus, toStatus, action, operatorId,
                 logRemark != null ? logRemark : entity.getRejectReason());
+        // 指标只在**落库成功之后**记：并发失败（rows=0 已抛异常）与非法跃迁都不该算"发生了一次"
+        metricsRecorder.ticketEvent(action, tenantId == null ? 0L : tenantId);
     }
 
     void writeLog(Long tenantId, long ticketId, Integer fromStatus, int toStatus,

@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.converter.TicketConverter;
@@ -55,6 +56,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TicketTransitionSupport transitions;
+    private final MetricsRecorder metricsRecorder;
 
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
@@ -94,6 +96,8 @@ public class TicketFlowServiceImpl implements TicketFlowService {
 
         transitions.writeLog(ticket.getTenantId(), ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
                 TicketAction.SUBMIT, studentId, null);
+        // 提交不走 conditionalUpdate（那是状态跃迁），所以这里单独记一次：**创建量**本身就是关键指标
+        metricsRecorder.ticketEvent(TicketAction.SUBMIT, ticket.getTenantId());
         log.info("提交报修 ticketId={} studentId={} building={} room={}",
                 ticket.getId(), studentId, buildingId, room);
 

@@ -146,6 +146,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- 轻量可观测性：只暴露 /actuator/prometheus 文本端点，不部署 Prometheus/Grafana 容器（2C2G 装不下，ADR-020） -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
 
         <!-- ===== 工具 ===== -->
         <dependency>
