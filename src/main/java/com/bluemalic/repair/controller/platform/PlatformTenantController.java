@@ -7,9 +7,11 @@ import com.bluemalic.repair.dto.TenantAdminPasswordDTO;
 import com.bluemalic.repair.dto.TenantCreateDTO;
 import com.bluemalic.repair.dto.TenantStatusDTO;
 import com.bluemalic.repair.dto.TenantUpdateDTO;
+import com.bluemalic.repair.service.TenantDatabaseService;
 import com.bluemalic.repair.service.TenantProvisionService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TenantAdminVO;
+import com.bluemalic.repair.vo.TenantDatabaseVO;
 import com.bluemalic.repair.vo.TenantVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -49,6 +51,8 @@ public class PlatformTenantController {
 
     private final TenantProvisionService tenantProvisionService;
 
+    private final TenantDatabaseService tenantDatabaseService;
+
     @Operation(summary = "租户列表",
             description = "分页；可按状态筛选、按学校名称或编码模糊搜索。**不含平台自身**（它不是学校）")
     @GetMapping
@@ -84,6 +88,32 @@ public class PlatformTenantController {
                                      @Valid @RequestBody TenantStatusDTO dto) {
         tenantProvisionService.changeStatus(id, dto.getStatus());
         return Result.ok();
+    }
+
+    @Operation(summary = "学校的数据在哪、搬家搬得怎么样",
+            description = "mode=SHARED 数据还在平台库（存量租户）／DEDICATED 已经在它自己的库里。"
+                    + "SHARED 且目标库已建好时，会**逐表**比对源库与目标库（结构 + 行数 + 全列校验和，O(行数)）："
+                    + "一致才说明「这份副本可以切过去了」。DEDICATED 时不再比对——源库那份是搬走那一刻的快照")
+    @GetMapping("/{id}/database")
+    public Result<TenantDatabaseVO> database(@Parameter(description = "租户ID") @PathVariable long id) {
+        return Result.ok(tenantDatabaseService.status(id));
+    }
+
+    @Operation(summary = "把学校的数据搬进它自己的库",
+            description = "建库 → 跑租户库迁移 → 逐表搬运 → 逐表校验。**幂等可反复跑，且不影响正在使用的师生**"
+                    + "（复制到新库，源库一条记录都不动）。搬完后源库若又有写入，校验会不一致，重跑即可")
+    @PostMapping("/{id}/database/copy")
+    public Result<TenantDatabaseVO> copyDatabase(@Parameter(description = "租户ID") @PathVariable long id) {
+        return Result.ok(tenantDatabaseService.copy(id));
+    }
+
+    @Operation(summary = "把学校切到它自己的库",
+            description = "再校验一次，一致才把 `db_schema` 指过去（这时该校的请求才会走它自己的库）。"
+                    + "**这是唯一改变行为的一步，几秒钟**；期间该校的请求会被拒绝并提示稍后重试。"
+                    + "不一致会直接拒绝并说清是哪张表。切换后源库那份保留（确认无误后再归档）")
+    @PostMapping("/{id}/database/switch")
+    public Result<TenantDatabaseVO> switchDatabase(@Parameter(description = "租户ID") @PathVariable long id) {
+        return Result.ok(tenantDatabaseService.switchToDedicated(id));
     }
 
     @Operation(summary = "学校的后勤管理员列表",
