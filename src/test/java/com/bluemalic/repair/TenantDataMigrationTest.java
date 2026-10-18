@@ -20,6 +20,7 @@ import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.TenantDatabaseService;
+import com.bluemalic.repair.tenancy.PlatformOnlyTables;
 import com.bluemalic.repair.tenancy.TenantDataMigrator;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
@@ -149,8 +150,9 @@ class TenantDataMigrationTest {
                 }
             }
         }
-        // 三张平台专属的表不搬：学校名录（只在平台库）、Flyway 历史、权限点（平台定义，两侧由种子保证）
-        inPlatformDb.removeAll(Set.of("tenant", "flyway_schema_history", "sys_permission"));
+        // 平台专属的表不搬：学校名录、SSO 配置（都要在"知道去哪个库"之前读）、
+        // Flyway 历史、权限点（平台定义，两侧由种子保证）
+        inPlatformDb.removeAll(PlatformOnlyTables.TABLES);
 
         assertThat(planned)
                 .as("搬运计划与平台库里的租户侧表必须一致：新加一张表时要同步改 TenantDataMigrator.PLAN，"
