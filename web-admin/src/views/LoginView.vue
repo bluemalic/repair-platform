@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { login } from '@/api/auth'
+import { login, ssoAvailable, ssoExchange } from '@/api/auth'
 import { setLogin } from '@/store/auth'
 
 const route = useRoute()
@@ -50,6 +50,64 @@ function togglePlatformLogin() {
  * 不设就没有——两种部署用同一份代码。
  */
 const demoHint = import.meta.env.VITE_DEMO_ACCOUNTS as string | undefined
+
+/**
+ * 统一认证回来时带着一次性 `ssoCode`（在 `location.search` 上，不在 hash 路由里——
+ * 所以不能读 `route.query`）。立刻换 token；**码只用一次**，换完把 URL 里的它清掉。
+ */
+onMounted(async () => {
+  const params = new URLSearchParams(location.search)
+  const ssoCode = params.get('ssoCode')
+  const ssoError = params.get('ssoError')
+  if (!ssoCode && !ssoError) {
+    return
+  }
+  // 无论成功失败，这个码 / 错误都不该留在地址栏里
+  history.replaceState(null, '', location.pathname + location.hash)
+  if (ssoError) {
+    ElMessage.error(params.get('ssoMessage') || '统一认证登录失败')
+    return
+  }
+  loading.value = true
+  try {
+    const vo = await ssoExchange(ssoCode as string)
+    if (vo.userType !== 3) {
+      ElMessage.error('该账号不是后勤管理角色，无法登录管理端')
+      return
+    }
+    setLogin(vo)
+    router.push('/tickets')
+  } catch {
+    // http 层已经弹过提示
+  } finally {
+    loading.value = false
+  }
+})
+
+/**
+ * 统一认证登录：**整页跳转**到后端，由它把浏览器送去学校的 IdP（不是 ajax）。
+ * 先问一下有没有开通，没开通就直接提示，而不是跳到一个报错页。
+ */
+async function ssoLogin() {
+  if (isPlatformLogin.value) {
+    return
+  }
+  const code = form.tenantCode.trim()
+  if (!code) {
+    ElMessage.warning('请先填写学校编码')
+    return
+  }
+  try {
+    const availability = await ssoAvailable(code)
+    if (!availability.enabled) {
+      ElMessage.warning('这所学校还没有开通统一认证登录')
+      return
+    }
+    location.href = `/api/auth/sso/authorize?tenantCode=${encodeURIComponent(code)}&target=ADMIN`
+  } catch {
+    // http 层已经弹过提示
+  }
+}
 
 async function submit() {
   if (!form.username || !form.password) {
@@ -103,6 +161,9 @@ async function submit() {
           <el-button link type="primary" @click="togglePlatformLogin">
             {{ isPlatformLogin ? '返回学校登录' : '平台运营登录' }}
           </el-button>
+        </el-form-item>
+        <el-form-item v-if="!isPlatformLogin">
+          <el-button link type="primary" @click="ssoLogin">统一认证登录</el-button>
         </el-form-item>
       </el-form>
       <p v-if="!isPlatformLogin" class="hint">
