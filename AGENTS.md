@@ -148,6 +148,9 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
   **改租户侧的表结构要写两份脚本**（平台库那份 + 租户库那份），漏一份是**静默**的——
   `TenantSchemaParityTest` 会把两份脚本各跑进一个临时库逐列逐索引比对，CI 直接红。
   `tenant`（学校名录）是唯一只存在于平台库的表：登录要先按编码找到学校，才知道去哪个库。
+- **新增租户侧的表要改三处**：`db/migration`、`db/tenant`、**以及搬迁计划** `TenantDataMigrator.PLAN`
+  （存量租户搬家时逐表复制，漏一张它就会永远留在平台库）。第三个位置有测试盯着
+  （`TenantDataMigrationTest.搬运计划正好覆盖平台库里那些租户侧的表`），漏了 CI 直接红。
 - **`tenant` 表只在平台库，读写一律钉在平台库上**：用 `TenantRoutingContext.callControl(...)`，
   别在租户上下文里直接查它（租户库里没有这张表，会报"表不存在"）。
 - **不许在事务里换租户**：`@Transactional` 把连接绑在数据源对象上，中途换路由键不会换连接，
