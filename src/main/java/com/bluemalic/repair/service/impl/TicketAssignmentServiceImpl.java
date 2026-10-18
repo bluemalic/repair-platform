@@ -87,7 +87,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                 crossBuilding);
         transitions.notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
-        timeoutService.registerAccept(id);
+        timeoutService.registerAccept(id, ticket.getTenantId());
         log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
                 crossBuilding == null ? "" : crossBuilding);
     }
@@ -129,8 +129,8 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         // 通知新师傅：与派单同一条文案
         transitions.notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
         // 计时重来，超时节点也要重登记（先撤掉旧节点的登记，避免按旧时间触发）
-        timeoutService.cancel(id);
-        timeoutService.registerAccept(id);
+        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutService.registerAccept(id, ticket.getTenantId());
         log.info("转派 ticketId={} from={} to={} operator={} reason={}",
                 id, previousWorkerId, worker.getId(), adminId, dto.getReason());
     }

@@ -24,6 +24,7 @@ import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.DemoResetService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -136,14 +137,21 @@ public class DemoResetServiceImpl implements DemoResetService {
     @Override
     public Result reset() {
         long tenantId = demo.getTenantId();
-        Tenant tenant = tenantMapper.selectById(tenantId);
+        // 租户行在**平台库**（`tenant` 表只在那里，ADR-021）：演示重置是系统任务，没有登录态，
+        // 所以这里显式钉一下
+        Tenant tenant = TenantRoutingContext.callControl(() -> tenantMapper.selectById(tenantId));
         if (tenant == null) {
             throw new IllegalStateException("演示重置的租户不存在：tenantId=" + tenantId
                     + "（repair.demo.tenant-id 配错了？schema.sql 的种子租户是 1）");
         }
 
-        // 数据库部分一个事务；对象存储的清理放到提交之后（见类注释第 3 条）
-        Result db = new TransactionTemplate(transactionManager).execute(status -> resetDatabase(tenantId));
+        // 数据库部分一个事务；对象存储的清理放到提交之后（见类注释第 3 条）。
+        // 演示数据写进**这所学校自己的库**（搬家之后它就不在平台库了）；还没搬家的存量租户仍是平台库。
+        // 路由键在这里解析：租户行刚查出来，`db_schema` 就是"现在"的答案
+        String routingKey = tenant.getDbSchema() == null
+                ? TenantRoutingContext.CONTROL : tenant.getDbSchema();
+        Result db = TenantRoutingContext.call(routingKey,
+                () -> new TransactionTemplate(transactionManager).execute(status -> resetDatabase(tenantId)));
         int purged = fileStorageService.purgeTenant(tenantId);
 
         Result result = new Result(db.deletedTickets(), db.createdTickets(), db.createdAccounts(), purged);

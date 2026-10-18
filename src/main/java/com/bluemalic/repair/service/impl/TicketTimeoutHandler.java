@@ -4,8 +4,11 @@ import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.entity.Ticket;
+import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.NotificationService;
 import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
+import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
@@ -39,8 +42,41 @@ public class TicketTimeoutHandler {
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
+    private final TenantSchemaCatalog schemaCatalog;
 
-    public void autoClose(long id) {
+    /**
+     * 超时自动关闭：**按这条任务所属租户的库**处理（阶段 6 第 3 步 · ADR-021）。
+     *
+     * <p>工单、流转日志、通知、审计都在租户自己的库里，所以整段处理必须跑在"那个库"的路由键下
+     * ——这也是"租户库装完整一套"带来的好处：处理逻辑一个字都不用改。
+     */
+    public void autoClose(DueTicket due) {
+        runPinned(due, () -> autoCloseInCurrentDatabase(due.ticketId()));
+    }
+
+    public void remindAcceptTimeout(DueTicket due) {
+        runPinned(due, () -> remindAcceptTimeoutInCurrentDatabase(due.ticketId()));
+    }
+
+    public void escalateProcessTimeout(DueTicket due) {
+        runPinned(due, () -> escalateProcessTimeoutInCurrentDatabase(due.ticketId()));
+    }
+
+    /**
+     * 解析"这条任务现在该去哪个库"并钉到线程上。
+     *
+     * <p>解析走 {@code TenantSchemaCatalog}（而不是任务里的成员原样用）：成员是登记当时写下的，
+     * 学校搬家之后旧值就不对了；目录里存的是**当前**答案，切换后立刻生效。
+     * 没有租户信息的老成员（{@link DueTicket#LEGACY_TENANT}）按平台库处理——那批学校都还没搬家。
+     */
+    private void runPinned(DueTicket due, Runnable action) {
+        String routingKey = due.tenantId() == DueTicket.LEGACY_TENANT
+                ? TenantRoutingContext.CONTROL
+                : schemaCatalog.routingKeyFor(due.tenantId());
+        TenantRoutingContext.run(routingKey, action);
+    }
+
+    private void autoCloseInCurrentDatabase(long id) {
         Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
         transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
@@ -48,16 +84,16 @@ public class TicketTimeoutHandler {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         transitions.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
-        timeoutService.cancel(id);
+        timeoutService.cancel(id, ticket.getTenantId());
     }
-    public void remindAcceptTimeout(long id) {
+    private void remindAcceptTimeoutInCurrentDatabase(long id) {
         Ticket ticket = transitions.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
                 NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
                         + " 无人接单，请及时调度");
     }
-    public void escalateProcessTimeout(long id) {
+    private void escalateProcessTimeoutInCurrentDatabase(long id) {
         Ticket ticket = transitions.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
                 NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
