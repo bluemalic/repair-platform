@@ -13,7 +13,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * （{@code SaTokenConfigure} 的 order 0）；限流是 order 1，排在它前面问题也不大——
  * 待改密的账号照样会被限流挡住，这没有坏处。
  *
- * <p><b>四个拦截器的 order 一起看：0 登录校验 → 1 限流 → 2 待改密 → 3 平台域收口。</b>
+ * <p><b>五个拦截器的 order 一起看：-1 租户路由 → 0 登录校验 → 1 限流 → 2 待改密 → 3 平台域收口。</b>
  * 改动任何一个都要回头对一遍这个顺序。
  */
 @Configuration

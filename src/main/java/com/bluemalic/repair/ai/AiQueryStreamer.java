@@ -6,6 +6,7 @@ import com.bluemalic.repair.common.NumericLongSerializer;
 import com.bluemalic.repair.common.TraceIdFilter;
 import com.bluemalic.repair.service.AiQueryProgress;
 import com.bluemalic.repair.service.AiQueryService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.vo.AiChartVO;
 import com.bluemalic.repair.vo.AiQueryVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,6 +77,9 @@ public class AiQueryStreamer {
     public SseEmitter start(String question, long tenantId) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
         String traceId = MDC.get(TraceIdFilter.TRACE_ID);
+        // 这次问数该连哪个库，也必须在**请求线程**上取：工作线程没有拦截器给它设过路由键
+        // （阶段 6 · ADR-021）。它与 traceId 是同一类东西：请求线程上的上下文，要显式带过去。
+        String routingKey = TenantRoutingContext.currentKey();
 
         emitter.onTimeout(() -> {
             log.warn("AI 流式问数超时（{}ms 未结束）tenantId={}", STREAM_TIMEOUT_MS, tenantId);
@@ -88,7 +92,7 @@ public class AiQueryStreamer {
         emitter.onError(e -> log.debug("AI 流式问数连接中断: {}", e.getMessage()));
 
         try {
-            executor.execute(() -> run(question, tenantId, traceId, emitter));
+            executor.execute(() -> run(question, tenantId, traceId, routingKey, emitter));
         } catch (TaskRejectedException e) {
             log.warn("AI 流式问数被线程池拒绝（队列已满）tenantId={}", tenantId);
             send(emitter, "error", new ErrorPayload(
@@ -98,9 +102,12 @@ public class AiQueryStreamer {
         return emitter;
     }
 
-    private void run(String question, long tenantId, String traceId, SseEmitter emitter) {
+    private void run(String question, long tenantId, String traceId, String routingKey, SseEmitter emitter) {
         if (traceId != null) {
             MDC.put(TraceIdFilter.TRACE_ID, traceId);
+        }
+        if (routingKey != null) {
+            TenantRoutingContext.set(routingKey);
         }
         try {
             AiQueryVO vo = aiQueryService.askStreaming(question, tenantId, sink(emitter));
@@ -119,8 +126,10 @@ public class AiQueryStreamer {
                     ErrorCode.SYSTEM_ERROR.getCode(), ErrorCode.SYSTEM_ERROR.getMessage(), traceId));
             emitter.complete();
         } finally {
-            // Tomcat 的工作线程是复用的，不清理会把这条流的 traceId 串到下一条上（同 TraceIdFilter）
+            // Tomcat 的工作线程是复用的，不清理会把这条流的 traceId / 路由键串到下一条流上
+            // （同 TraceIdFilter；路由键串了就是"读到别家数据"的量级）
             MDC.remove(TraceIdFilter.TRACE_ID);
+            TenantRoutingContext.clear();
         }
     }
 

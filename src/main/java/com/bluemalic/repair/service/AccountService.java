@@ -70,6 +70,11 @@ public interface AccountService {
      * <p><b>取舍</b>：这是一次查询 + 逐个踢，人数上万时会有明显耗时（每个账号一次 Redis 往返）。
      * 那个规模下的正解是"请求时校验租户状态"（一次缓存读，代价摊到每个请求上），本项目没有那么多
      * 用户，就不为它引入一套缓存。这个边界写在 docs/03 的「平台运营账号的约定」里。
+     *
+     * <p><b>调用方若是平台上下文，要自己钉到该租户的库上</b>（阶段 6 · ADR-021）：它第一个动作是
+     * 在 `sys_user` 里列出这个租户的账号，而账号在**租户自己的库**里。忘了钉就查到空集，
+     * 表现成"停用了学校、已登录的人却还被放行"——平台侧调用见
+     * {@code TenantProvisionServiceImpl#changeStatus}。
      */
     int kickoutAllOfTenant(long tenantId);
 

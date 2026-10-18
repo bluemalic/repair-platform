@@ -21,6 +21,8 @@ import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AuthService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
+import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import com.bluemalic.repair.vo.CurrentUserVO;
 import com.bluemalic.repair.vo.LoginVO;
 import lombok.RequiredArgsConstructor;
@@ -45,15 +47,29 @@ public class AuthServiceImpl implements AuthService {
     /** 复用同一个权限查询实现，避免"当前用户看到的权限"和"鉴权用的权限"两套口径 */
     private final StpInterface stpInterface;
     private final CurrentTenantService currentTenantService;
+    private final TenantSchemaCatalog tenantSchemaCatalog;
     private final RateLimiter rateLimiter;
     private final RateLimitRule rateLimitRule;
 
     private final AuditService auditService;
 
+    /**
+     * 登录是**两步**，顺序不能换（阶段 6 · ADR-021）：
+     *
+     * <ol>
+     *   <li><b>在平台库</b>按学校编码定位租户——`tenant` 表只在平台库（租户库里没有它），
+     *       这也是"先有学校这个概念，才谈得上它的数据在哪"；</li>
+     *   <li><b>切到那所学校的库</b>验证账号：账号、角色、审计日志都在它自己的库里。</li>
+     * </ol>
+     *
+     * <p>第一步用 {@code callControl} 钉住平台库，不是防御性写法：这个接口不要求登录态，
+     * 但已登录的人也可能再来调一次——那时拦截器已经把路由键设成了他的学校，而 `tenant` 表
+     * 在那个库里**不存在**，不钉住就会报"表不存在"。
+     */
     @Override
     public LoginVO login(LoginDTO dto) {
-        Tenant tenant = tenantMapper.selectOne(Wrappers.<Tenant>lambdaQuery()
-                .eq(Tenant::getCode, dto.getTenantCode()));
+        Tenant tenant = TenantRoutingContext.callControl(() -> tenantMapper.selectOne(Wrappers.<Tenant>lambdaQuery()
+                .eq(Tenant::getCode, dto.getTenantCode())));
         if (tenant == null || !Integer.valueOf(1).equals(tenant.getStatus())) {
             // 租户都不存在 / 已停用：**不记审计**——这条记录没有"谁的表"能放（审计是按租户查的），
             // 这类探测留在服务器的 WARN 日志里（docs/01 §4.4 的"明确不记"）
@@ -62,7 +78,12 @@ public class AuthServiceImpl implements AuthService {
         // 限流拦下的也不单独记审计：它是失败的延续，同一次爆破会连续触发、逐条记只会刷屏；
         // 每次**失败**都已经记了，看次数就够（docs/01 §4.4）
         requireLoginAttemptAllowed(tenant.getId(), dto.getUsername());
+        return TenantRoutingContext.call(tenantSchemaCatalog.routingKeyFor(tenant.getId()),
+                () -> authenticate(tenant, dto));
+    }
 
+    /** 第二步：在这所学校自己的库里验账号、发 token、写审计。 */
+    private LoginVO authenticate(Tenant tenant, LoginDTO dto) {
         SysUser user = sysUserMapper.selectOne(Wrappers.<SysUser>lambdaQuery()
                 .eq(SysUser::getTenantId, tenant.getId())
                 .eq(SysUser::getUsername, dto.getUsername()));

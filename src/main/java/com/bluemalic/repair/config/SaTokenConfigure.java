@@ -24,6 +24,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p><b>order 0 是显式写的</b>：限流拦截器（{@code RateLimitConfig}）依赖"登录校验先跑"，
  * 它排 order 1，且按登录用户计数。两个数字要一起看，别单独改。
+ *
+ * <p><b>它前面还有一个 order -1（{@code TenantRoutingConfig}）</b>：租户路由拦截器必须在最前面，
+ * 因为登录校验之后的注解鉴权（{@code @SaCheckPermission}）要查角色与权限表，而那些表在租户自己的库里
+ * —— 查库之前得先知道去哪个库（阶段 6 · ADR-021）。
  */
 @Configuration
 public class SaTokenConfigure implements WebMvcConfigurer {
