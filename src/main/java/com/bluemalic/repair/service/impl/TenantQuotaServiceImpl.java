@@ -9,6 +9,7 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.TenantQuotaService;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,7 +45,9 @@ public class TenantQuotaServiceImpl implements TenantQuotaService {
         if (adding <= 0) {
             return;
         }
-        Tenant tenant = tenantMapper.selectById(tenantId);
+        // 配额读**平台库**（`tenant` 表只在平台库），账号数**在本租户库里数**（账号跟着学校走）。
+        // 两个库、两次读，这里合并不了——`sys_user` 与 `tenant` 从物理上就是分开的（ADR-021）
+        Tenant tenant = TenantRoutingContext.callControl(() -> tenantMapper.selectById(tenantId));
         if (tenant == null) {
             throw new BizException(ErrorCode.TENANT_NOT_FOUND);
         }

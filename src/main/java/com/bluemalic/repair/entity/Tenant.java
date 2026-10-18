@@ -17,6 +17,14 @@ public class Tenant {
     /** 租户编码，登录时用于定位租户，全局唯一 */
     private String code;
 
+    /**
+     * 租户库名（阶段 6 · ADR-021）。NULL = 存量租户，数据仍在平台库。
+     *
+     * <p>它是**路由的依据**：请求进来自登录态拿到 tenantId，再经这张表换成库名，
+     * 决定这次请求用哪个连接池。所以它只在平台库里，租户库里没有这张表。
+     */
+    private String dbSchema;
+
     private String contact;
 
     private String phone;

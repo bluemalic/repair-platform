@@ -3,6 +3,8 @@ package com.bluemalic.repair.ai;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.config.AiProperties;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
+import com.bluemalic.repair.tenancy.TenantSchemas;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.extern.slf4j.Slf4j;
@@ -21,14 +23,19 @@ import java.sql.SQLTimeoutException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 用**只读账号**执行 AI 生成的 SQL——ADR-003 四层闸门里的第 1 层（连接层）与第 4 层（超时、行数上限）。
  *
- * <p><b>为什么自己持有一个小连接池，而不是再声明一个 Spring {@code DataSource} bean</b>：
- * 现在数据源完全由自动装配持有，加第二个 bean 就得给原来那个加 {@code @Primary}（改到既有装配）。
- * 自己持有还有个更重要的好处：**结构上保证 AI 的 SQL 永远不可能走到 root 连接上**——
- * 它连的是另一个账号、另一个池，不经过 MyBatis，也不可能被谁改成走主库。
+ * <p><b>为什么自己持有连接池，而不是复用应用的数据源</b>：AI 的 SQL 是模型生成的，不经过 MyBatis，
+ * 也**不能**走应用账号（当前部署里那是 root 权限）。它连的是另一个账号（白名单 SELECT）、另一个池，
+ * 结构上就不可能被谁改成走主库——ADR-003 的第 1 层闸门。
+ *
+ * <p><b>每租户一个只读池</b>（阶段 6 · ADR-021）：路由键与业务侧同一个来源（{@code TenantRoutingContext}），
+ * 所以"业务看到的库"与"AI 查的库"永远一致；池按需建、空闲回收，没被问过的学校不占连接。
+ * 只读账号在每个库上的授权由 {@code AiReadOnlyAccountBootstrap} 收敛（开通学校时会把新库纳进来）。
  *
  * <p>连接串从既有的 {@code spring.datasource.url} 派生（只换账号），不重复拼 host/port/db：
  * 两处各写一份的话，改一处忘一处就会出现"问数连到别的库上"这种极难查的问题。
@@ -45,8 +52,11 @@ public class AiQueryExecutor implements DisposableBean {
 
     private final String jdbcUrl;
 
-    /** 懒建：没配只读账号就不建池，也不占连接。 */
-    private volatile HikariDataSource readOnlyPool;
+    /**
+     * 懒建、按库缓存：平台库 + 每个被问过的学校库各一个（阶段 6 · ADR-021）。
+     * 键就是业务侧的路由键（{@code TenantRoutingContext}），所以"业务看到的库"与"AI 查的库"是同一个。
+     */
+    private final Map<String, HikariDataSource> pools = new ConcurrentHashMap<>();
 
     public AiQueryExecutor(AiProperties aiProperties,
                            @Value("${spring.datasource.url}") String jdbcUrl) {
@@ -146,43 +156,47 @@ public class AiQueryExecutor implements DisposableBean {
     }
 
     private HikariDataSource readOnlyPool() {
-        HikariDataSource pool = readOnlyPool;
-        if (pool == null) {
-            synchronized (this) {
-                if (readOnlyPool == null) {
-                    readOnlyPool = buildPool();
-                }
-                pool = readOnlyPool;
-            }
-        }
-        return pool;
+        // 按**库**取池（阶段 6 · ADR-021）：问的是哪个学校，就连哪个学校的库；
+        // 没有租户上下文（系统上下文）时是平台库。键与业务路由键同源，避免"AI 连的库和业务看到的库不是同一个"
+        String routingKey = TenantRoutingContext.currentKey();
+        String cacheKey = routingKey == null ? TenantRoutingContext.CONTROL : routingKey;
+        return pools.computeIfAbsent(cacheKey, this::buildPool);
     }
 
-    private HikariDataSource buildPool() {
+    private HikariDataSource buildPool(String cacheKey) {
         if (!aiProperties.readOnlyAccountConfigured()) {
             // 与"模型不可用"同一个码：对调用方来说都是"AI 问数这会儿用不了"，文案说清是没配账号
             throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
                     "AI 问数未启用（服务器上没配只读数据库账号）");
         }
+        boolean controlPlane = TenantRoutingContext.CONTROL.equals(cacheKey);
         HikariConfig config = new HikariConfig();
-        config.setPoolName("AiReadOnlyPool");
-        config.setJdbcUrl(jdbcUrl);
+        // 池名进日志与 JMX，用库名（`<control>` 这种带尖括号的键不适合当池名）
+        config.setPoolName(controlPlane ? "AiReadOnlyPool" : "AiReadOnlyPool-" + cacheKey);
+        config.setJdbcUrl(controlPlane ? jdbcUrl : TenantSchemas.jdbcUrl(jdbcUrl, cacheKey));
         config.setUsername(aiProperties.getDbUsername());
         config.setPassword(aiProperties.getDbPassword());
         // 问数是低频交互，2 条连接够用；池小也让"AI 不会跟主业务抢连接"这件事变得显然
         config.setMaximumPoolSize(2);
         config.setMinimumIdle(0);
         config.setConnectionTimeout(3000);
+        // 与业务侧的租户池同一套：空闲就还连接，别让"没人问的学校"占着 MySQL 的连接
+        config.setIdleTimeout(600000L);
         // 连接层再声明一次只读（第 1 层的补充：账号权限是第一道，这是第二道）
         config.setReadOnly(true);
-        log.info("AI 只读连接池已建立 username={}", aiProperties.getDbUsername());
+        log.info("AI 只读连接池已建立 username={} database={}",
+                aiProperties.getDbUsername(), controlPlane ? "平台库" : cacheKey);
         return new HikariDataSource(config);
     }
 
     @Override
     public void destroy() {
-        if (readOnlyPool != null) {
-            readOnlyPool.close();
-        }
+        pools.forEach((key, pool) -> {
+            try {
+                pool.close();
+            } catch (Exception e) {
+                log.warn("关闭 AI 只读连接池失败 database={} err={}", key, e.getMessage());
+            }
+        });
     }
 }
