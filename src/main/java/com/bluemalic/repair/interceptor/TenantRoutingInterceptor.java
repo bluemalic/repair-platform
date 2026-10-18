@@ -1,6 +1,9 @@
 package com.bluemalic.repair.interceptor;
 
+import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.service.CurrentTenantService;
+import com.bluemalic.repair.tenancy.TenantDataMigrator;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,6 +45,9 @@ public class TenantRoutingInterceptor implements HandlerInterceptor {
 
     private final TenantSchemaCatalog catalog;
 
+    /** 正在切换数据库的学校：那几秒里它的请求一律拒绝，避免有写入落在正在被替换的源库上 */
+    private final TenantDataMigrator dataMigrator;
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         if (!(handler instanceof HandlerMethod)) {
@@ -51,6 +57,10 @@ public class TenantRoutingInterceptor implements HandlerInterceptor {
         try {
             Long tenantId = currentTenantService.tenantIdOrNull();
             if (tenantId != null) {
+                if (dataMigrator.isSwitching(tenantId)) {
+                    // 切换那几秒：宁可让这次请求失败（并说清原因），也不能让它写进正在被换掉的源库
+                    throw new BizException(ErrorCode.SYSTEM_ERROR, "这所学校正在切换数据库，请稍后重试（约几秒）");
+                }
                 TenantRoutingContext.set(catalog.routingKeyFor(tenantId));
             }
             // tenantId 为 null = 没有登录态（登录接口本身、健康检查）→ 键留空 = 平台库，
