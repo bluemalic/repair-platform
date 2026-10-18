@@ -17,13 +17,17 @@ import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
+import com.bluemalic.repair.mapper.TenantUsageMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.TenantProvisionService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TenantAdminVO;
+import com.bluemalic.repair.vo.TenantUsageVO;
 import com.bluemalic.repair.vo.TenantVO;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,14 +48,29 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
 
     private static final int STATUS_ENABLED = 1;
 
+    /** 与 `V11__tenant_quota.sql` 的列默认值保持一致 */
+    private static final int DEFAULT_MAX_STUDENTS = 200;
+    private static final int DEFAULT_MAX_WORKERS = 20;
+
     /** 平台自身在 {@code tenant} 表里的 id。它不是一个学校，所有租户操作都要把它排除掉。 */
     private static final long PLATFORM_TENANT_ID = 0L;
 
     private static final String TENANT_LABEL = "租户";
     private static final String ADMIN_LABEL = "管理员";
 
+    /** 本页租户里某类账号的数量；tenantIds 为空时不查库 */
+    private Map<Long, Long> usageByType(List<Long> tenantIds, UserType type) {
+        if (tenantIds.isEmpty()) {
+            return Map.of();
+        }
+        return tenantUsageMapper.countByTenant(tenantIds).stream()
+                .filter(usage -> Integer.valueOf(type.getCode()).equals(usage.getUserType()))
+                .collect(Collectors.toMap(TenantUsageVO::getTenantId, TenantUsageVO::getAccountCount));
+    }
+
     private final TenantMapper tenantMapper;
     private final SysUserMapper sysUserMapper;
+    private final TenantUsageMapper tenantUsageMapper;
     private final AccountService accountService;
 
     private final AuditService auditService;
@@ -70,8 +89,18 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 query.orderByDesc(Tenant::getId));
 
+        // 配额用量：一次分组查询取回本页所有学校的账号数（不做 N+1）
+        List<Long> tenantIds = page.getRecords().stream().map(Tenant::getId).toList();
+        Map<Long, Long> students = usageByType(tenantIds, UserType.STUDENT);
+        Map<Long, Long> workers = usageByType(tenantIds, UserType.WORKER);
+
         Page<TenantVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        voPage.setRecords(page.getRecords().stream().map(TenantConverter::toVO).toList());
+        voPage.setRecords(page.getRecords().stream().map(tenant -> {
+            TenantVO vo = TenantConverter.toVO(tenant);
+            vo.setStudentCount(students.getOrDefault(tenant.getId(), 0L));
+            vo.setWorkerCount(workers.getOrDefault(tenant.getId(), 0L));
+            return vo;
+        }).toList());
         return PageResult.of(voPage);
     }
 
@@ -83,6 +112,9 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
         tenant.setCode(dto.getCode());
         tenant.setContact(dto.getContact());
         tenant.setPhone(dto.getPhone());
+        // 留空走默认（200 / 20，与 V11 的列默认值一致）：开通接口不必强迫平台运营填配额
+        tenant.setMaxStudents(dto.getMaxStudents() == null ? DEFAULT_MAX_STUDENTS : dto.getMaxStudents());
+        tenant.setMaxWorkers(dto.getMaxWorkers() == null ? DEFAULT_MAX_WORKERS : dto.getMaxWorkers());
         tenant.setStatus(STATUS_ENABLED);
         try {
             tenantMapper.insert(tenant);
@@ -104,7 +136,11 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                         + "），并创建首个管理员 " + dto.getAdminUsername());
         // 回查一次：create_time 是数据库默认值填的，插入后的实体里那个字段还是 null，
         // 直接转 VO 会让开通接口的响应缺一列（列表接口里却有），前端得为同一个字段写两种判断
-        return TenantConverter.toVO(tenantMapper.selectById(tenant.getId()));
+        TenantVO vo = TenantConverter.toVO(tenantMapper.selectById(tenant.getId()));
+        // 新租户只有第一个管理员，学生 / 维修工都是 0
+        vo.setStudentCount(0L);
+        vo.setWorkerCount(0L);
+        return vo;
     }
 
     @Override
@@ -114,7 +150,9 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 .eq(Tenant::getId, tenantId)
                 .set(Tenant::getName, dto.getName())
                 .set(Tenant::getContact, dto.getContact())
-                .set(Tenant::getPhone, dto.getPhone()));
+                .set(Tenant::getPhone, dto.getPhone())
+                .set(dto.getMaxStudents() != null, Tenant::getMaxStudents, dto.getMaxStudents())
+                .set(dto.getMaxWorkers() != null, Tenant::getMaxWorkers, dto.getMaxWorkers()));
         requireUpdated(rows);
         log.info("修改租户资料 tenantId={} 操作人={}", tenantId, StpUtil.getLoginIdAsLong());
         // 联系人与联系电话属于个人信息，摘要里只说改了哪些字段、不回显值（与账号那条同口径）
@@ -127,6 +165,12 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
         }
         if (!Objects.equals(before.getPhone(), dto.getPhone())) {
             changed.add("联系电话");
+        }
+        if (dto.getMaxStudents() != null && !Objects.equals(before.getMaxStudents(), dto.getMaxStudents())) {
+            changed.add("学生配额 " + before.getMaxStudents() + "→" + dto.getMaxStudents());
+        }
+        if (dto.getMaxWorkers() != null && !Objects.equals(before.getMaxWorkers(), dto.getMaxWorkers())) {
+            changed.add("维修工配额 " + before.getMaxWorkers() + "→" + dto.getMaxWorkers());
         }
         auditService.record(AuditAction.TENANT_UPDATE, AuditTarget.TENANT, tenantId, dto.getName(),
                 "修改学校 " + before.getName() + "：" + (changed.isEmpty() ? "无字段变化" : String.join("、", changed)));

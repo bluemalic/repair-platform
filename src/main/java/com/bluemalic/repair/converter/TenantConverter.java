@@ -18,6 +18,8 @@ public final class TenantConverter {
         vo.setCode(tenant.getCode());
         vo.setContact(tenant.getContact());
         vo.setPhone(tenant.getPhone());
+        vo.setMaxStudents(tenant.getMaxStudents());
+        vo.setMaxWorkers(tenant.getMaxWorkers());
         vo.setStatus(tenant.getStatus());
         vo.setCreateTime(tenant.getCreateTime());
         return vo;

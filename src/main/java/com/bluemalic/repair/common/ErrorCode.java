@@ -33,6 +33,7 @@ public enum ErrorCode {
     LOGIN_FAILED(30001, "用户名或密码错误"),
     ACCOUNT_DISABLED(30002, "账号已被禁用"),
     TENANT_NOT_FOUND(30003, "租户不存在或已停用"),
+    TENANT_QUOTA_EXCEEDED(30004, "租户配额已用尽"),
 
     // ---------- 4xxxx AI 与 SQL 安全 ----------
     AI_INTENT_UNRESOLVED(40001, "自然语言无法解析为查询意图"),

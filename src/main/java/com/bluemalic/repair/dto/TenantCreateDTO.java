@@ -1,6 +1,7 @@
 package com.bluemalic.repair.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -54,6 +55,14 @@ public class TenantCreateDTO {
     @Schema(description = "管理员手机号")
     @Size(max = 20, message = "管理员手机号最长 20 位")
     private String adminPhone;
+
+    @Schema(description = "学生账号上限；留空用默认 200，0 表示不限")
+    @Min(value = 0, message = "学生账号上限不能为负数")
+    private Integer maxStudents;
+
+    @Schema(description = "维修工账号上限；留空用默认 20，0 表示不限")
+    @Min(value = 0, message = "维修工账号上限不能为负数")
+    private Integer maxWorkers;
 
     @Schema(description = "管理员初始口令，8-32 位；首次登录必须改")
     @NotBlank(message = "管理员初始口令不能为空")

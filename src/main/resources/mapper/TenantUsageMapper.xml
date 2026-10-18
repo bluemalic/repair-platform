@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  平台租户列表的配额用量（ADR-020）。
+
+  两个口径细节：
+  · deleted = 0：原生 SQL 不会自动带上逻辑删除条件，漏了会把已删账号算进"已用"；
+  · 不按 status 过滤：**停用也算占用**——停用随时可能被启用，把它当"空出位置"
+    会让重新启用时悄悄超限（TenantQuotaServiceImpl 的类注释里有同样的说明）。
+-->
+<mapper namespace="com.bluemalic.repair.mapper.TenantUsageMapper">
+
+    <select id="countByTenant" resultType="com.bluemalic.repair.vo.TenantUsageVO">
+        SELECT tenant_id  AS tenantId,
+               user_type  AS userType,
+               COUNT(*)   AS accountCount
+        FROM sys_user
+        WHERE deleted = 0
+          AND tenant_id IN
+          <foreach collection="tenantIds" item="tenantId" open="(" separator="," close=")">
+              #{tenantId}
+          </foreach>
+        GROUP BY tenant_id, user_type
+    </select>
+
+</mapper>

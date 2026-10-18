@@ -28,6 +28,7 @@ import com.bluemalic.repair.mapper.WorkerSkillMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
+import com.bluemalic.repair.service.TenantQuotaService;
 import com.bluemalic.repair.service.WorkerService;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.WorkerVO;
@@ -71,6 +72,7 @@ public class WorkerServiceImpl implements WorkerService {
 
     private final AuditService auditService;
     private final CurrentTenantService currentTenantService;
+    private final TenantQuotaService tenantQuotaService;
 
     @Override
     public PageResult<WorkerVO> page(long pageNum, long pageSize, Integer status, String keyword) {
@@ -117,6 +119,7 @@ public class WorkerServiceImpl implements WorkerService {
     @Transactional
     public WorkerVO create(WorkerCreateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
+        tenantQuotaService.requireWorkerSeats(tenantId, 1);
 
         // 用户类型与角色由服务端写死（见 UserType），接口造不出后勤管理员
         SysUser worker = accountService.create(new AccountService.NewAccount(
