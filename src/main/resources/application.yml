@@ -155,10 +155,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        # 只露这几个：health 给部署健康检查；prometheus 给 scrape；metrics 给排障时手查。
+        # **nginx 只反代 /actuator/health**，所以 prometheus 只能从容器网络/本机访问（ADR-020）。
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
+  metrics:
+    tags:
+      # 所有指标带上应用名：将来同机多实例时（或接入统一采集时）能区分来源
+      application: repair-platform
 
 # ============================================================
 # 日志

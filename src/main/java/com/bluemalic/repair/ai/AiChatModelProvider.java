@@ -2,6 +2,7 @@ package com.bluemalic.repair.ai;
 
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.config.AiProperties;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -30,10 +31,12 @@ public class AiChatModelProvider {
     private static final Duration MODEL_TIMEOUT = Duration.ofSeconds(60);
 
     private final AiProperties aiProperties;
+    private final MetricsRecorder metricsRecorder;
     private volatile ChatModel chatModel;
 
-    public AiChatModelProvider(AiProperties aiProperties) {
+    public AiChatModelProvider(AiProperties aiProperties, MetricsRecorder metricsRecorder) {
         this.aiProperties = aiProperties;
+        this.metricsRecorder = metricsRecorder;
     }
 
     public ChatModel get() {
@@ -71,10 +74,15 @@ public class AiChatModelProvider {
      */
     public <T> T call(String what, Supplier<T> action) {
         try {
-            return action.get();
+            T result = action.get();
+            // AI 调用次数 = 成本，这是最该有数字的一项（按用途与结果分开计）
+            metricsRecorder.aiCall(what, true);
+            return result;
         } catch (BizException e) {
+            metricsRecorder.aiCall(what, false);
             throw e;
         } catch (Exception e) {
+            metricsRecorder.aiCall(what, false);
             log.warn("调用模型失败（{}）model={} err={}", what, aiProperties.getModelName(), e.getMessage());
             throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE);
         }

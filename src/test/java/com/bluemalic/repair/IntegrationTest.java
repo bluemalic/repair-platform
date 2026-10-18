@@ -1,5 +1,6 @@
 package com.bluemalic.repair;
 
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +46,12 @@ import java.lang.annotation.Target;
         "AI_DB_PASSWORD=Test@123456"
 })
 @AutoConfigureMockMvc
+// Spring Boot 3 在 @SpringBootTest 里**默认关闭可观测性导出**（ObservabilityContextCustomizer），
+// 不打开的话 Prometheus 注册表与 /actuator/prometheus 在测试里根本不存在——
+// 而生产（java -jar）是开着的，测试就测不到真实形态（阶段 5 踩过）。
+// 放在这个统一注解上而不是某一个测试类上：换注解组合会多起一个 Spring 上下文，
+// 而 Sa-Token 的静态字段在多上下文下会串（见类注释）。
+@AutoConfigureObservability
 @Transactional
 public @interface IntegrationTest {
 }
