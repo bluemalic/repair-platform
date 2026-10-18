@@ -27,6 +27,10 @@ export interface TenantCreateBody {
   adminRealName?: string
   adminPhone?: string
   adminPassword: string
+  /** 学生账号上限；留空用服务端默认 200，0 = 不限 */
+  maxStudents?: number
+  /** 维修工账号上限；留空用服务端默认 20，0 = 不限 */
+  maxWorkers?: number
 }
 
 /** 改资料：编码不给改（它是师生天天输入的登录参数）。 */
@@ -34,6 +38,9 @@ export interface TenantUpdateBody {
   name: string
   contact?: string
   phone?: string
+  /** 账号配额；不传表示不改。0 = 不限 */
+  maxStudents?: number
+  maxWorkers?: number
 }
 
 export interface TenantAdminCreateBody {

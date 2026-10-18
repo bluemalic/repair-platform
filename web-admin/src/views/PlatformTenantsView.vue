@@ -59,6 +59,9 @@ const createForm = reactive({
   adminRealName: '',
   adminPhone: '',
   adminPassword: '',
+  // 账号配额：开通时就能定，留空用服务端默认（200 / 20）。0 = 不限
+  maxStudents: 200,
+  maxWorkers: 20,
 })
 
 const createRules: FormRules = {
@@ -107,6 +110,8 @@ async function submitCreate() {
     adminRealName: createForm.adminRealName || undefined,
     adminPhone: createForm.adminPhone || undefined,
     adminPassword: createForm.adminPassword,
+    maxStudents: createForm.maxStudents,
+    maxWorkers: createForm.maxWorkers,
   })
   createVisible.value = false
   ElMessage.success('已开通。请把学校编码与管理员初始口令交给学校——首次登录必须改密')
@@ -118,14 +123,17 @@ async function submitCreate() {
 const editVisible = ref(false)
 const editFormRef = ref<FormInstance>()
 const editId = ref<string | null>(null)
-const editForm = reactive({ name: '', contact: '', phone: '' })
+const editForm = reactive({ name: '', contact: '', phone: '', maxStudents: 200, maxWorkers: 20 })
 const editRules: FormRules = {
   name: [{ required: true, message: '请填写学校名称', trigger: 'blur' }],
 }
 
 function openEdit(row: TenantVO) {
   editId.value = row.id
-  Object.assign(editForm, { name: row.name, contact: row.contact ?? '', phone: row.phone ?? '' })
+  Object.assign(editForm, {
+    name: row.name, contact: row.contact ?? '', phone: row.phone ?? '',
+    maxStudents: row.maxStudents, maxWorkers: row.maxWorkers,
+  })
   editVisible.value = true
 }
 
@@ -137,6 +145,8 @@ async function submitEdit() {
     name: editForm.name,
     contact: editForm.contact || undefined,
     phone: editForm.phone || undefined,
+    maxStudents: editForm.maxStudents,
+    maxWorkers: editForm.maxWorkers,
   })
   editVisible.value = false
   ElMessage.success('已保存')
@@ -261,6 +271,12 @@ onMounted(load)
       <el-table-column prop="phone" label="联系电话" width="130">
         <template #default="{ row }">{{ row.phone ?? '—' }}</template>
       </el-table-column>
+      <el-table-column label="账号配额（已用 / 上限）" min-width="200">
+        <template #default="{ row }">
+          <div>学生 {{ row.studentCount }} / {{ row.maxStudents > 0 ? row.maxStudents : '不限' }}</div>
+          <div>维修工 {{ row.workerCount }} / {{ row.maxWorkers > 0 ? row.maxWorkers : '不限' }}</div>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'info'">{{ row.status === 1 ? '启用' : '停用' }}</el-tag>
@@ -301,6 +317,15 @@ onMounted(load)
         <el-form-item label="联系电话" prop="phone">
           <el-input v-model="createForm.phone" placeholder="可选" />
         </el-form-item>
+        <el-divider content-position="left">账号配额</el-divider>
+        <el-form-item label="学生账号上限">
+          <el-input-number v-model="createForm.maxStudents" :min="0" />
+          <span class="quota-hint">0 = 不限。到上限后学校就无法再建学生账号</span>
+        </el-form-item>
+        <el-form-item label="维修工上限">
+          <el-input-number v-model="createForm.maxWorkers" :min="0" />
+          <span class="quota-hint">0 = 不限</span>
+        </el-form-item>
         <el-divider content-position="left">第一个后勤管理员</el-divider>
         <el-form-item label="登录名" prop="adminUsername">
           <el-input v-model="createForm.adminUsername" placeholder="如 admin" />
@@ -336,6 +361,14 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="联系电话" prop="phone">
           <el-input v-model="editForm.phone" />
+        </el-form-item>
+        <el-form-item label="学生上限">
+          <el-input-number v-model="editForm.maxStudents" :min="0" />
+          <span class="quota-hint">0 = 不限</span>
+        </el-form-item>
+        <el-form-item label="维修工上限">
+          <el-input-number v-model="editForm.maxWorkers" :min="0" />
+          <span class="quota-hint">0 = 不限</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -407,6 +440,12 @@ onMounted(load)
 </template>
 
 <style scoped>
+.quota-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 .toolbar {
   display: flex;
   gap: 8px;

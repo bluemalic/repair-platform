@@ -270,6 +270,14 @@ export interface TenantVO {
   code: string
   contact: string | null
   phone: string | null
+  /** 学生账号上限；0 = 不限 */
+  maxStudents: number
+  /** 维修工账号上限；0 = 不限 */
+  maxWorkers: number
+  /** 已用学生账号数（含停用） */
+  studentCount: number
+  /** 已用维修工账号数（含停用） */
+  workerCount: number
   /** 1启用 0停用。停用会踢掉该校全部在线用户，之后他们也登不进来 */
   status: number
   createTime: string
