@@ -1,15 +1,6 @@
 package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpInterface;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.bluemalic.repair.entity.SysPermission;
-import com.bluemalic.repair.entity.SysRole;
-import com.bluemalic.repair.entity.SysRolePermission;
-import com.bluemalic.repair.entity.SysUserRole;
-import com.bluemalic.repair.mapper.SysPermissionMapper;
-import com.bluemalic.repair.mapper.SysRoleMapper;
-import com.bluemalic.repair.mapper.SysRolePermissionMapper;
-import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -27,61 +18,28 @@ import java.util.List;
  * → {@code sys_permission}。注意它和 MyBatis 拦截器做的**数据权限**是两件事：
  * 这里管"能不能调这个接口"，拦截器管"能看哪些数据"。
  *
- * <p>代价说明：每次权限校验都会查库（Sa-Token 默认不缓存权限列表）。当前量级够用；
- * 若将来校验频率显著上升，在这里加缓存即可，不必改调用方。
+ * <p>2026-10-17（阶段 5 · ADR-020）：权限列表已加 Redis 缓存，见 {@link AuthorizationCacheService}。
+ * 本类退化为**薄委托**——缓存必须放在另一个 Bean 里才走得到 Spring 的代理，
+ * 同类自调用不会触发 {@code @Cacheable}（这条坑写在那个类的注释里）。
  */
+
 @Service
 @RequiredArgsConstructor
 public class StpInterfaceImpl implements StpInterface {
 
-    private final SysUserRoleMapper sysUserRoleMapper;
-    private final SysRoleMapper sysRoleMapper;
-    private final SysRolePermissionMapper sysRolePermissionMapper;
-    private final SysPermissionMapper sysPermissionMapper;
+    private final AuthorizationCacheService authorizationCacheService;
 
     @Override
     public List<String> getPermissionList(Object loginId, String loginType) {
-        List<Long> roleIds = roleIdsOf(loginId);
-        if (roleIds.isEmpty()) {
-            return List.of();
-        }
-        List<Long> permissionIds = sysRolePermissionMapper
-                .selectList(Wrappers.<SysRolePermission>lambdaQuery()
-                        .in(SysRolePermission::getRoleId, roleIds))
-                .stream()
-                .map(SysRolePermission::getPermissionId)
-                .distinct()
-                .toList();
-        if (permissionIds.isEmpty()) {
-            return List.of();
-        }
-        return sysPermissionMapper.selectByIds(permissionIds).stream()
-                .filter(permission -> Integer.valueOf(1).equals(permission.getStatus()))
-                .map(SysPermission::getCode)
-                .distinct()
-                .toList();
+        return authorizationCacheService.permissionCodes(userIdOf(loginId));
     }
 
     @Override
     public List<String> getRoleList(Object loginId, String loginType) {
-        List<Long> roleIds = roleIdsOf(loginId);
-        if (roleIds.isEmpty()) {
-            return List.of();
-        }
-        return sysRoleMapper.selectByIds(roleIds).stream()
-                .filter(role -> Integer.valueOf(1).equals(role.getStatus()))
-                .map(SysRole::getCode)
-                .distinct()
-                .toList();
+        return authorizationCacheService.roleCodes(userIdOf(loginId));
     }
 
-    private List<Long> roleIdsOf(Object loginId) {
-        Long userId = Long.valueOf(String.valueOf(loginId));
-        return sysUserRoleMapper
-                .selectList(Wrappers.<SysUserRole>lambdaQuery().eq(SysUserRole::getUserId, userId))
-                .stream()
-                .map(SysUserRole::getRoleId)
-                .distinct()
-                .toList();
+    private long userIdOf(Object loginId) {
+        return Long.parseLong(String.valueOf(loginId));
     }
 }

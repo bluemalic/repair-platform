@@ -3,12 +3,14 @@ package com.bluemalic.repair.vo;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
+import java.io.Serializable;
+
 /**
  * 报修类别信息。
  */
 @Data
 @Schema(description = "报修类别信息")
-public class CategoryVO {
+public class CategoryVO implements Serializable {
 
     @Schema(description = "类别ID")
     private Long id;

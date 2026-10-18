@@ -2,6 +2,7 @@ package com.bluemalic.repair.controller;
 
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.service.CategoryService;
+import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.CategoryVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,11 +27,12 @@ import java.util.List;
 public class CategoryQueryController {
 
     private final CategoryService categoryService;
+    private final CurrentTenantService currentTenantService;
 
     @Operation(summary = "启用中的报修类别", description = "不分页、按 sort 升序；供学生报修表单选择")
     @GetMapping
     public Result<List<CategoryVO>> listEnabled() {
-        // 固定传 1：这个接口的用途就是"给你能选的类别"，返回停用的只会让前端多一层过滤
-        return Result.ok(categoryService.list(1));
+        // 只返启用中的（语义固定的那条查询），并在实现里按租户缓存
+        return Result.ok(categoryService.listEnabled(currentTenantService.requireTenantId()));
     }
 }
