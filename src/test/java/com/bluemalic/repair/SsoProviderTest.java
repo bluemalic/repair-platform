@@ -148,6 +148,36 @@ class SsoProviderTest {
                 .hasMessageContaining("没有返回登录名");
     }
 
+    /**
+     * **回归守卫**：调 IdP 的 URL 必须原样发出，不能被"URI 模板"再编码一次。
+     *
+     * <p>踩过的坑：`RestClient.uri(String)` 把参数当模板（默认 TEMPLATE_AND_VALUES），
+     * 地址里已编码的 `%3D` 会变成 `%253D`——对面解一次得到 `...%3D...`，
+     * 与浏览器带来的 service 对不上，CAS 判 INVALID_TICKET。
+     */
+    @Test
+    void 调IdP时URL原样发出_不会被二次编码() {
+        String[] received = new String[1];
+        try {
+            HttpServer capture = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            capture.createContext("/probe", exchange -> {
+                received[0] = exchange.getRequestURI().getRawQuery();
+                respond(exchange, 200, "{}");
+            });
+            capture.start();
+            try {
+                String rawQuery = "service=http%3A%2F%2Ffront.test%2Fcb%3Fstate%3Dabc&ticket=ST-1";
+                new SsoHttpClient(new SsoProperties(false, 300, 120, 1000, 5, ""))
+                        .get("http://127.0.0.1:" + capture.getAddress().getPort() + "/probe?" + rawQuery, null);
+                assertThat(received[0]).as("查询串必须与调用方给出的完全一致").isEqualTo(rawQuery);
+            } finally {
+                capture.stop(0);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     // ==================== CAS ====================
 
     @Test
