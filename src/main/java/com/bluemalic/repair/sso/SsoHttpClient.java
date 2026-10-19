@@ -11,6 +11,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 
@@ -49,7 +50,10 @@ public class SsoHttpClient {
     /** GET 一段文本（取用户信息 / 校验 ticket）；{@code bearerToken} 为空就不带 Authorization。 */
     public String get(String url, String bearerToken) {
         try {
-            RestClient.RequestHeadersSpec<?> spec = restClient.get().uri(url);
+            // **传 URI 而不是字符串**：RestClient 把字符串当 URI 模板，默认会再编码一次——
+            // 地址里已经编码过的 `%3D` 会变成 `%253D`（CAS 的 service 因此对不上，演示站实测踩到）。
+            // 预构建的 URI 不会再被模板化。
+            RestClient.RequestHeadersSpec<?> spec = restClient.get().uri(URI.create(url));
             if (bearerToken != null && !bearerToken.isBlank()) {
                 spec = spec.header("Authorization", "Bearer " + bearerToken);
             }
@@ -67,7 +71,7 @@ public class SsoHttpClient {
     /** 以表单方式 POST（换 token）；返回响应文本。 */
     public String postForm(String url, MultiValueMap<String, String> form) {
         try {
-            return restClient.post().uri(url)
+            return restClient.post().uri(URI.create(url))
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(form)
                     .retrieve()
