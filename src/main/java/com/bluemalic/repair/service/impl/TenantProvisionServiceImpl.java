@@ -15,8 +15,10 @@ import com.bluemalic.repair.dto.TenantCreateDTO;
 import com.bluemalic.repair.dto.TenantUpdateDTO;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Tenant;
+import com.bluemalic.repair.entity.TenantSsoConfig;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
+import com.bluemalic.repair.mapper.TenantSsoConfigMapper;
 import com.bluemalic.repair.mapper.TenantUsageMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
@@ -65,6 +67,15 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
     private static final String TENANT_LABEL = "租户";
     private static final String ADMIN_LABEL = "管理员";
 
+    /** 本页学校的统一认证配置（平台库读；tenantIds 为空时不查库） */
+    private Map<Long, TenantSsoConfig> ssoConfigsOf(List<Long> tenantIds) {
+        if (tenantIds.isEmpty()) {
+            return Map.of();
+        }
+        return tenantSsoConfigMapper.selectBatchIds(tenantIds).stream()
+                .collect(Collectors.toMap(TenantSsoConfig::getTenantId, config -> config));
+    }
+
     /** 本页租户里某类账号的数量；tenantIds 为空时不查库 */
     private Map<Long, Long> usageByType(List<Long> tenantIds, UserType type) {
         if (tenantIds.isEmpty()) {
@@ -78,6 +89,8 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
     private final TenantMapper tenantMapper;
     private final SysUserMapper sysUserMapper;
     private final TenantUsageMapper tenantUsageMapper;
+
+    private final TenantSsoConfigMapper tenantSsoConfigMapper;
     private final AccountService accountService;
 
     private final AuditService auditService;
@@ -121,11 +134,18 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
             workers.put(tenant.getId(), countAccountsInTenant(tenant, UserType.WORKER));
         }
 
+        // 统一认证状态：一次 IN 查询取回本页学校的配置（与配额一样，不做 N+1）
+        List<Long> pageTenantIds = page.getRecords().stream().map(Tenant::getId).toList();
+        Map<Long, TenantSsoConfig> ssoByTenant = ssoConfigsOf(pageTenantIds);
+
         Page<TenantVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream().map(tenant -> {
             TenantVO vo = TenantConverter.toVO(tenant);
             vo.setStudentCount(students.getOrDefault(tenant.getId(), 0L));
             vo.setWorkerCount(workers.getOrDefault(tenant.getId(), 0L));
+            TenantSsoConfig sso = ssoByTenant.get(tenant.getId());
+            vo.setSsoEnabled(sso != null && sso.enabled());
+            vo.setSsoProtocol(sso != null && sso.enabled() ? sso.getProtocol() : null);
             return vo;
         }).toList());
         return PageResult.of(voPage);
