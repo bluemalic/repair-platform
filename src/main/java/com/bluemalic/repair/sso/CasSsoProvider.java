@@ -77,11 +77,18 @@ public class CasSsoProvider implements SsoProvider {
         return new SsoIdentity(username, username.trim(), null);
     }
 
-    /** authorize 与 validate 用的同一个 service 字符串（含 state）。 */
+    /**
+     * authorize 与 validate 用的同一个 service 字符串（含 state）。
+     *
+     * <p>**这里不能再 `encode()`**：这个值稍后还会作为 `service` 查询参数被最外层编码一次。
+     * 内层先编码会导致 `%3D` 被再编码成 `%253D`——authorize 那一跳浏览器会解一次（看起来正常），
+     * 而 validate 是服务端直接发的请求、只解一次 → 与授权时的 service **对不上**，CAS 判
+     * INVALID_TICKET（演示站实测踩到，Mock 的 receivedService 里能看到 `%3D`）。
+     */
     private String serviceUri(String redirectUri, String state) {
         return UriComponentsBuilder.fromUriString(redirectUri)
                 .queryParam("state", state)
-                .build().encode().toUriString();
+                .build().toUriString();
     }
 
     /** 先按 JSON 取 {@code serviceResponse.authenticationSuccess.user}，取不到再按 XML 兜底。 */
