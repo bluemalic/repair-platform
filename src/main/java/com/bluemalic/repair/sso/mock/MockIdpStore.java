@@ -96,16 +96,31 @@ public class MockIdpStore {
         return ticket;
     }
 
-    /** CAS ticket 一次性：校验即删除（与真实 CAS 一致，刷回调页会失败）。 */
-    public String consumeCasTicket(String ticket, String service) {
+    /**
+     * CAS ticket 一次性：校验即删除（与真实 CAS 一致，刷回调页会失败）。
+     *
+     * @return 校验结果；失败时带上"为什么"——Mock 是要拿来排查联调问题的，
+     *         只说 INVALID_TICKET 的话分不清是 ticket 过期还是 service 对不上
+     */
+    public CasValidation consumeCasTicket(String ticket, String service) {
         Code entry = ticket == null ? null : casTickets.remove(ticket);
-        if (entry == null || entry.expiresAt().isBefore(Instant.now())) {
-            return null;
+        if (entry == null) {
+            return CasValidation.failure("ticket 不存在或已用过", service, null);
+        }
+        if (entry.expiresAt().isBefore(Instant.now())) {
+            return CasValidation.failure("ticket 已过期", service, entry.target());
         }
         if (!entry.target().equals(service)) {
-            return null;
+            return CasValidation.failure("service 与授权时不一致", service, entry.target());
         }
-        return entry.subject();
+        return new CasValidation(entry.subject(), null, service, entry.target());
+    }
+
+    /** CAS 校验结果（成功时 subject 非空；失败时 reason 说明原因，便于联调）。 */
+    public record CasValidation(String subject, String reason, String receivedService, String expectedService) {
+        static CasValidation failure(String reason, String received, String expected) {
+            return new CasValidation(null, reason, received, expected);
+        }
     }
 
     /** 顺手清理过期项，并给意外增长设个上限（演示工具，不该成为内存泄漏点）。 */

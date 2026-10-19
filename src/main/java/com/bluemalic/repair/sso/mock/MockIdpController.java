@@ -143,13 +143,18 @@ public class MockIdpController {
         if (!properties.isMockIdpEnabled()) {
             return ResponseEntity.notFound().build();
         }
-        String subject = store.consumeCasTicket(ticket, service);
-        if (subject == null) {
-            return ResponseEntity.ok(Map.of("serviceResponse",
-                    Map.of("authenticationFailure", Map.of("code", "INVALID_TICKET"))));
+        MockIdpStore.CasValidation validation = store.consumeCasTicket(ticket, service);
+        if (validation.subject() == null) {
+            Map<String, Object> failure = new LinkedHashMap<>();
+            failure.put("code", "INVALID_TICKET");
+            // Mock 专有：把原因与两侧的 service 都回出来，联调时一眼看出差在哪
+            failure.put("reason", validation.reason());
+            failure.put("receivedService", validation.receivedService());
+            failure.put("expectedService", validation.expectedService());
+            return ResponseEntity.ok(Map.of("serviceResponse", Map.of("authenticationFailure", failure)));
         }
         return ResponseEntity.ok(Map.of("serviceResponse", Map.of("authenticationSuccess",
-                Map.of("user", subject, "attributes", Map.of()))));
+                Map.of("user", validation.subject(), "attributes", Map.of()))));
     }
 
     // ==================== 页面 ====================

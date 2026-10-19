@@ -71,6 +71,8 @@ class SsoFlowTest {
 
     /** 假 IdP 状态：当前要返回的登录名；授权码 → PKCE challenge */
     private static volatile String ssoUsername;
+    /** CAS 授权时用的 service（含 state），validate 必须一字不差 */
+    private static volatile String ssoCasService;
     private static final Map<String, String> codes = new ConcurrentHashMap<>();
 
     @Autowired
@@ -114,7 +116,10 @@ class SsoFlowTest {
         });
         idp.createContext("/cas/validate", exchange -> {
             Map<String, String> query = parseForm(exchange.getRequestURI().getQuery());
-            if (!"ST-flow".equals(query.get("ticket"))) {
+            // 真实 CAS 会校验 service 与授权时完全一致（ticket 绑定在它上面）；
+            // 假 IdP 也这么做，否则这个差异要到线上才暴露
+            boolean serviceOk = ssoCasService != null && ssoCasService.equals(query.get("service"));
+            if (!"ST-flow".equals(query.get("ticket")) || !serviceOk) {
                 respond(exchange, 200, "{\"serviceResponse\":{\"authenticationFailure\":{\"code\":\"INVALID_TICKET\"}}}");
                 return;
             }
@@ -251,6 +256,7 @@ class SsoFlowTest {
         assertThat(authorizeUrl).startsWith(idpBase + "/cas/login");
         // CAS 不会把 state 带回来：它嵌在 service 的查询串里（回调时由 CAS 追加 &ticket=...）
         String service = parseForm(URI.create(authorizeUrl).getQuery()).get("service");
+        ssoCasService = service;
         String state = parseForm(URI.create(service).getQuery()).get("state");
         assertThat(state).isNotBlank();
 
