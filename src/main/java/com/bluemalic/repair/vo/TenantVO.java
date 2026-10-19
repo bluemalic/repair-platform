@@ -36,6 +36,12 @@ public class TenantVO {
     /** 维修工账号上限；0 = 不限 */
     private Integer maxWorkers;
 
+    /** 是否开通并启用了统一身份认证（阶段 7 · ADR-022；平台列表里一眼看出哪个学校配了） */
+    private Boolean ssoEnabled;
+
+    /** 协议 OAUTH2 / CAS；未启用时为 null */
+    private String ssoProtocol;
+
     /** 已用学生账号数（含停用；平台页展示用） */
     private Long studentCount;
 

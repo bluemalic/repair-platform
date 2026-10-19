@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { PageResult, TenantAdminVO, TenantVO } from '@/types'
+import type { PageResult, TenantAdminVO, TenantSsoConfig, TenantVO } from '@/types'
 
 /**
  * 平台运营端（docs/03 §5.5）。
@@ -82,4 +82,40 @@ export function addTenantAdmin(tenantId: string, body: TenantAdminCreateBody) {
 /** 重置管理员口令：这是"后勤管理员忘记口令"的唯一出路，重置后他下次登录必须改密。 */
 export function resetTenantAdminPassword(tenantId: string, userId: string, password: string) {
   return http.put<void>(`/platform/tenants/${tenantId}/admins/${userId}/password`, { password })
+}
+
+/**
+ * 学校的统一认证配置（阶段 7 · ADR-022）。
+ *
+ * 必填项由后端按 `protocol` 校验（OAuth2 要三个地址 + clientId；CAS 要两个地址）；
+ * **启用时至少要有一个登录后的跳转地址**。
+ */
+export interface TenantSsoConfigBody {
+  /** 1 启用 / 0 停用 */
+  enabled: number
+  protocol: 'OAUTH2' | 'CAS'
+  // OAuth2：authorizeUrl 是浏览器跳转的（必须外网可达）；tokenUrl / userinfoUrl 是服务端调用的
+  authorizeUrl?: string
+  tokenUrl?: string
+  userinfoUrl?: string
+  clientId?: string
+  /** **留空表示不修改**（后端不会把已配置的密钥清掉） */
+  clientSecret?: string
+  scope?: string
+  // CAS
+  casLoginUrl?: string
+  casValidateUrl?: string
+  /** IdP 返回的哪个属性是登录名（学号 / 工号） */
+  usernameAttribute?: string
+  /** 登录成功后跳回前端：只允许用这里配的（防开放重定向） */
+  adminRedirectUrl?: string
+  h5RedirectUrl?: string
+}
+
+export function getTenantSso(tenantId: string) {
+  return http.get<TenantSsoConfig>(`/platform/tenants/${tenantId}/sso`)
+}
+
+export function updateTenantSso(tenantId: string, body: TenantSsoConfigBody) {
+  return http.put<TenantSsoConfig>(`/platform/tenants/${tenantId}/sso`, body)
 }

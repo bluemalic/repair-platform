@@ -308,6 +308,22 @@ class SsoFlowTest {
         assertThat(config.path("clientSecretConfigured").asBoolean()).isTrue();
         assertThat(config.has("clientSecret")).as("密钥绝不出现在出参里").isFalse();
         assertThat(config.path("protocol").asText()).isEqualTo("OAUTH2");
+
+        // 租户列表也要能一眼看出"这所学校配了统一认证"（平台运营的列表页用这两个字段渲染标签）
+        JsonNode list = objectMapper.readTree(mockMvc.perform(get("/api/platform/tenants")
+                        .param("pageSize", "100")
+                        .header("Authorization", "Bearer " + platform))
+                .andExpect(jsonPath("$.code").value(0)).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8)).path("data").path("list");
+        JsonNode row = null;
+        for (JsonNode item : list) {
+            if (item.path("id").asLong() == TENANT) {
+                row = item;
+            }
+        }
+        assertThat(row).as("平台列表里应当有这所学校").isNotNull();
+        assertThat(row.path("ssoEnabled").asBoolean()).isTrue();
+        assertThat(row.path("ssoProtocol").asText()).isEqualTo("OAUTH2");
     }
 
     // ==================== 工具 ====================

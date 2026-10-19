@@ -280,7 +280,35 @@ export interface TenantVO {
   workerCount: number
   /** 1启用 0停用。停用会踢掉该校全部在线用户，之后他们也登不进来 */
   status: number
+  /** 是否开通并启用了统一身份认证（阶段 7 · ADR-022） */
+  ssoEnabled: boolean
+  /** 协议 OAUTH2 / CAS；未启用时为 null */
+  ssoProtocol: string | null
   createTime: string
+}
+
+/**
+ * 学校统一认证配置（阶段 7 · ADR-022）。
+ *
+ * <p>**不含密钥**：只回 `clientSecretConfigured`（是否已配置）。密钥写进浏览器、日志、截图都是泄露面。
+ */
+export interface TenantSsoConfig {
+  tenantId: string
+  /** 是否配置过（false 表示从未配过，其余字段是默认值） */
+  configured: boolean
+  enabled: boolean
+  protocol: 'OAUTH2' | 'CAS'
+  authorizeUrl: string | null
+  tokenUrl: string | null
+  userinfoUrl: string | null
+  clientId: string | null
+  clientSecretConfigured: boolean
+  scope: string | null
+  casLoginUrl: string | null
+  casValidateUrl: string | null
+  usernameAttribute: string | null
+  adminRedirectUrl: string | null
+  h5RedirectUrl: string | null
 }
 
 /** 某所学校的后勤管理员。不含口令——任何接口都不返回口令。 */
