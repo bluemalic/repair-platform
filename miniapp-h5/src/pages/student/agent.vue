@@ -10,6 +10,8 @@
       <view id="bottom" class="bottom-pad" />
     </scroll-view>
 
+    <view class="ai-note">本页回复与工单草稿由 AI 生成，仅供参考</view>
+
     <!-- 位置上下文：扫了码/输过码就常驻显示，之后每轮都带给助手，不必重复说 -->
     <view v-if="repairCode" class="context">
       <text class="context-text">位置 {{ repairCode }}</text>
@@ -204,6 +206,12 @@ async function confirm() {
 }
 
 .bubble.thinking {
+  color: #909399;
+}
+
+.ai-note {
+  padding: 0 24rpx 12rpx;
+  font-size: 22rpx;
   color: #909399;
 }
 

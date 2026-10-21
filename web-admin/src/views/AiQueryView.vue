@@ -169,6 +169,7 @@ onBeforeUnmount(() => {
     <el-skeleton v-if="stage && !result?.sql" :rows="4" animated />
 
     <template v-if="result">
+      <p class="ai-label">本页 SQL 与结论由 AI 生成，数据来自业务库，仅供参考</p>
       <p v-if="!stage && result.conclusion" class="conclusion">{{ result.conclusion }}</p>
 
       <div v-if="canChart" ref="chartRef" class="chart" />
@@ -241,6 +242,11 @@ onBeforeUnmount(() => {
   font-size: 15px;
   line-height: 1.7;
   color: var(--el-text-color-primary);
+}
+.ai-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .chart {
   height: 320px;

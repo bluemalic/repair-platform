@@ -5,6 +5,7 @@ import { onMounted } from 'vue'
 // #endif
 import { login, ssoAvailable, ssoExchange } from '@/api/auth'
 import { goHomeByRole, setLogin } from '@/store/auth'
+import BeianFooter from '@/components/BeianFooter.vue'
 
 const tenantCode = ref('gdou')
 const username = ref('')
@@ -111,6 +112,7 @@ async function submit() {
     <view class="tip">后勤管理账号请用电脑端管理后台登录</view>
     <view class="tip">忘记密码请联系学校后勤重置</view>
     <view v-if="demoHint" class="demo-tip">{{ demoHint }}</view>
+    <BeianFooter />
   </view>
 </template>
 

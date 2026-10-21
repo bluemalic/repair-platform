@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { changePassword } from '@/api/auth'
 import { auth, clearLogin } from '@/store/auth'
 import { refreshUnread, unread } from '@/store/notification'
+import BeianFooter from '@/components/BeianFooter.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -150,6 +151,9 @@ async function submitPassword() {
       <el-main>
         <router-view />
       </el-main>
+      <el-footer height="30px" class="beian-footer">
+        <BeianFooter />
+      </el-footer>
     </el-container>
 
     <el-dialog
@@ -205,6 +209,13 @@ async function submitPassword() {
 .header-actions {
   display: flex;
   gap: 4px;
+}
+.beian-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-top: 1px solid var(--el-border-color-light);
 }
 .pwd-tip {
   margin: 0 0 12px;

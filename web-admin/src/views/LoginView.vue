@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { login, ssoAvailable, ssoExchange } from '@/api/auth'
 import { setLogin } from '@/store/auth'
+import BeianFooter from '@/components/BeianFooter.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -175,6 +176,7 @@ async function submit() {
       -->
       <p v-if="demoHint && !isPlatformLogin" class="hint">{{ demoHint }}</p>
     </el-card>
+    <BeianFooter class="login-beian" />
   </div>
 </template>
 
@@ -198,5 +200,12 @@ async function submit() {
   font-size: 12px;
   line-height: 1.6;
   margin: 0;
+}
+.login-beian {
+  position: fixed;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  z-index: 1;
 }
 </style>
