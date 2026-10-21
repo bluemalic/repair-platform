@@ -183,10 +183,16 @@ services:
     restart: unless-stopped
     depends_on: [app]
     ports:
-      # 宿主端口可改：本机 8080 常被 IDEA 里跑的应用占着；服务器上按需换成 80
+      # 域名入口：80 只做 HTTPS 跳转，443 是业务入口。
+      # 本机 8080 常被 IDEA 里跑的应用占着，所以保留一个 8080 别名；
+      # 本地只起中间件（mysql redis minio）时不会碰这两个端口。
+      - "80:80"
+      - "443:443"
       - "${NGINX_PORT:-8080}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # 证书只放服务器上，不进 Git：./nginx/certs/{域名}_bundle.crt 与 .key
+      - ./nginx/certs:/etc/nginx/certs:ro
       # 两个前端的产物目录。目录还不存在时 Docker 会挂成空目录、访问 / 与 /h5/ 返回 403，属预期不是故障。
       # 注意两边路径不同：web-admin 构建到 dist/，而 miniapp-h5（uni-app）构建到 dist/build/h5/
       # —— 写错这一处会静默挂上空目录，表现为"/h5/ 打不开"。

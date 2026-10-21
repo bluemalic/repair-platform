@@ -148,6 +148,7 @@ async function loadAdvice() {
 
         <template v-else>
           <text class="advice-suggestion">{{ advice.suggestion }}</text>
+          <text class="ai-note">本内容由 AI 生成，仅供参考</text>
 
           <view v-for="(step, index) in advice.steps" :key="index" class="step">
             <text class="step-text">{{ index + 1 }}. {{ step.text }}</text>
@@ -247,6 +248,12 @@ async function loadAdvice() {
   font-size: 28rpx;
   color: #303133;
   line-height: 1.6;
+}
+.ai-note {
+  display: block;
+  margin-bottom: 12rpx;
+  font-size: 22rpx;
+  color: #909399;
 }
 .step {
   padding: 16rpx 0;

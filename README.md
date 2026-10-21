@@ -17,7 +17,7 @@
 [![Nginx](https://img.shields.io/badge/Nginx-1.27-009639.svg)](https://nginx.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://docs.docker.com/compose/)
 
-**在线演示** <http://119.91.47.63:8080>（管理端；学生 / 维修工端在同地址的 `/h5/`）
+**在线演示** <https://bluemalic.cn>（管理端；学生 / 维修工端在同地址的 `/h5/`）
 **接口文档** 本机启动后 <http://localhost:8080/doc.html>
 **项目全景**（进度 / 路线图 / 全链路 / 决策索引）见 [docs/00-项目全景.md](docs/00-项目全景.md)
 

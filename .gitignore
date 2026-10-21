@@ -38,6 +38,8 @@ log/
 .env.*.local
 *.pem
 *.key
+# 证书只放服务器，不进仓库（.crt 是公开的，但整个目录不该被 Git 管）
+/nginx/certs/
 application-local.yml
 application-prod.yml
 
