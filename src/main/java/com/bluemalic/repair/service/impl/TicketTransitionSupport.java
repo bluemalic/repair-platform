@@ -228,20 +228,6 @@ class TicketTransitionSupport {
     }
 
     /**
-            return List.of();
-        }
-        Map<Long, String> names = sysUserMapper.selectByIds(
-                        rows.stream().map(TicketCollaborator::getWorkerId).distinct().toList()).stream()
-                .collect(Collectors.toMap(SysUser::getId, u -> nullToEmpty(u.getRealName())));
-        return rows.stream().map(row -> {
-            TicketCollaboratorVO vo = new TicketCollaboratorVO();
-            vo.setWorkerId(row.getWorkerId());
-            vo.setWorkerName(names.get(row.getWorkerId()));
-            return vo;
-        }).toList();
-    }
-
-    /**
      * 本页里"我参与协作"的工单 ID（给列表打「协作」标记用）。一次查询，不逐条回库。
      *
      * <p>条件里只带 worker_id 不带 tenant_id，与上面查 `worker_building` 同一个理由：
