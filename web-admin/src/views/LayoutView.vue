@@ -6,6 +6,7 @@ import { changePassword } from '@/api/auth'
 import { auth, clearLogin } from '@/store/auth'
 import { refreshUnread, unread } from '@/store/notification'
 import BeianFooter from '@/components/BeianFooter.vue'
+import BrandMark from '@/components/BrandMark.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,16 +56,15 @@ async function logout() {
 }
 
 /**
- * 清登录态并回登录页。**平台运营账号要带着登录模式回去**（`?platform=1`）——
- * 否则登录页退回学校模式（学校编码默认 `gdou`），而那个租户下没有 `platform` 这个账号，
- * 现象是"新旧口令都不对"，很难从现象倒推回来。踩过一次。
+ * 清登录态并回对应的登录页。**平台运营账号回平台登录页**——退回学校登录页的话，
+ * 人会拿学校账号去登平台入口，现象是"新旧口令都不对"，很难从现象倒推回来。
  *
  * 注意顺序：先读 `isPlatform`（它读的是 `auth.user`）再 `clearLogin()`。
  */
 function goLogin() {
-  const query = isPlatform.value ? { platform: '1' } : {}
+  const path = isPlatform.value ? '/platform/login' : '/login'
   clearLogin()
-  router.push({ path: '/login', query })
+  router.push(path)
 }
 
 // ---------- 修改密码 ----------
@@ -113,29 +113,31 @@ async function submitPassword() {
 <template>
   <el-container class="layout">
     <el-aside width="200px" class="aside">
-      <div class="brand">{{ isPlatform ? '后勤报修 · 平台运营' : '后勤报修 · 管理端' }}</div>
+      <RouterLink to="/" class="brand brand-link" title="返回首页">
+        <BrandMark :subtitle="isPlatform ? '平台运营' : '管理端'" />
+      </RouterLink>
       <!-- 待改密时藏起菜单：服务端此时只放行 /api/auth/**，点任何一项都只会拿到一屏 10003 -->
       <el-menu v-if="!mustChangePassword" :default-active="activeMenu" router>
         <template v-if="isPlatform">
-          <el-menu-item index="/platform/tenants">租户管理</el-menu-item>
+          <el-menu-item index="/console/platform/tenants">租户管理</el-menu-item>
         </template>
         <template v-else>
-          <el-menu-item index="/tickets">工单管理</el-menu-item>
-          <el-menu-item index="/notifications">
+          <el-menu-item index="/console/tickets">工单管理</el-menu-item>
+          <el-menu-item index="/console/notifications">
             <el-badge :value="unread" :max="99" :hidden="unread === 0">通知</el-badge>
           </el-menu-item>
-          <el-menu-item index="/dashboard">统计看板</el-menu-item>
-          <el-menu-item index="/ai-query">AI 问数</el-menu-item>
+          <el-menu-item index="/console/dashboard">统计看板</el-menu-item>
+          <el-menu-item index="/console/ai-query">AI 问数</el-menu-item>
           <el-sub-menu index="base">
             <template #title>基础数据</template>
             <!-- 菜单项随页面一起加：指向未注册路由的菜单点了会是一片空白 -->
-            <el-menu-item index="/workers">维修工管理</el-menu-item>
-            <el-menu-item index="/students">学生管理</el-menu-item>
-            <el-menu-item index="/repair-codes">报修码管理</el-menu-item>
-            <el-menu-item index="/buildings">楼栋管理</el-menu-item>
-            <el-menu-item index="/categories">类别管理</el-menu-item>
-            <el-menu-item index="/knowledge">维修知识库</el-menu-item>
-            <el-menu-item index="/audit-logs">操作日志</el-menu-item>
+            <el-menu-item index="/console/workers">维修工管理</el-menu-item>
+            <el-menu-item index="/console/students">学生管理</el-menu-item>
+            <el-menu-item index="/console/repair-codes">报修码管理</el-menu-item>
+            <el-menu-item index="/console/buildings">楼栋管理</el-menu-item>
+            <el-menu-item index="/console/categories">类别管理</el-menu-item>
+            <el-menu-item index="/console/knowledge">维修知识库</el-menu-item>
+            <el-menu-item index="/console/audit-logs">操作日志</el-menu-item>
           </el-sub-menu>
         </template>
       </el-menu>
@@ -199,6 +201,16 @@ async function submitPassword() {
   line-height: 60px;
   text-align: center;
   font-weight: 600;
+}
+.brand-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  text-decoration: none;
+}
+.brand-link:hover {
+  background: var(--el-fill-color-light);
 }
 .header {
   display: flex;
