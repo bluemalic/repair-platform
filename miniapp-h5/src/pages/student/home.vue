@@ -88,13 +88,11 @@ function goAgent() {
       </view>
     </view>
 
-    <button class="primary" @click="goSubmit">我要报修</button>
-
-    <button class="secondary" @click="goAgent">跟助手说</button>
+    <button class="primary" @click="goSubmit">新建报修</button>
 
     <view v-if="rows.length === 0 && !loading" class="empty">
       <text>还没有报修记录</text>
-      <text class="empty-tip">点上面的「我要报修」，输入房间门口的 6 位报修码</text>
+      <text class="empty-tip">点上面的「新建报修」，输入房间门口的 6 位报修码</text>
     </view>
 
     <view v-for="row in rows" :key="row.id" class="card" @click="() => openDetail(row)">
@@ -118,15 +116,25 @@ function goAgent() {
     <view v-if="rows.length > 0" class="footer">
       <text>{{ hasMore ? (loading ? '加载中…' : '上拉加载更多') : '没有更多了' }}</text>
     </view>
+
+    <view class="ai-fab" hover-class="ai-fab-hover" aria-label="AI 助手" @click="goAgent">
+      <view class="ai-bubble">
+        <text>AI 助手</text>
+        <view class="ai-bubble-tail"></view>
+      </view>
+      <view class="ai-fab-button">
+        <image class="ai-logo" src="/static/ai-logo.png" mode="aspectFit" />
+      </view>
+    </view>
   </view>
 </template>
 
 <style scoped>
 .page {
   min-height: 100vh;
-  padding: 24rpx;
+  padding: 24rpx 24rpx 200rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .header {
   display: flex;
@@ -137,11 +145,7 @@ function goAgent() {
 .hello {
   font-size: 32rpx;
   font-weight: 600;
-  color: #303133;
-}
-.logout {
-  font-size: 26rpx;
-  color: #2c6cf6;
+  color: #0b1f33;
 }
 .header-actions {
   display: flex;
@@ -149,30 +153,31 @@ function goAgent() {
 }
 .action {
   font-size: 26rpx;
-  color: #2c6cf6;
+  color: #1d4ed8;
 }
 .empty {
   margin-top: 160rpx;
   text-align: center;
   font-size: 28rpx;
-  color: #909399;
+  color: #64748b;
 }
 .empty-tip {
   display: block;
   margin-top: 12rpx;
   font-size: 24rpx;
-  color: #c0c4cc;
+  color: #64748b;
 }
 .primary {
   margin-bottom: 24rpx;
   color: #fff;
-  background: #2c6cf6;
-  border-radius: 8rpx;
+  background: #0f2a44;
+  border-radius: 12rpx;
 }
 .card {
   margin-bottom: 20rpx;
   padding: 28rpx;
   background: #fff;
+  border: 1rpx solid #dce5ec;
   border-radius: 16rpx;
 }
 .card-head {
@@ -183,7 +188,7 @@ function goAgent() {
 .position {
   font-size: 32rpx;
   font-weight: 600;
-  color: #303133;
+  color: #0b1f33;
 }
 .status {
   font-size: 26rpx;
@@ -191,11 +196,11 @@ function goAgent() {
 .card-body {
   margin-top: 16rpx;
   font-size: 26rpx;
-  color: #606266;
+  color: #5b7083;
 }
 .dot {
   margin: 0 12rpx;
-  color: #c0c4cc;
+  color: #94a3b8;
 }
 .card-foot {
   display: flex;
@@ -205,23 +210,66 @@ function goAgent() {
 }
 .ticket-no {
   font-size: 24rpx;
-  color: #909399;
+  color: #64748b;
 }
 .muted {
   font-size: 24rpx;
-  color: #909399;
+  color: #64748b;
 }
 .footer {
   padding: 24rpx 0 48rpx;
   text-align: center;
   font-size: 24rpx;
-  color: #c0c4cc;
+  color: #64748b;
 }
 
-.secondary {
-  margin-top: 16rpx;
+/* 右下角 AI 助手：固定悬浮 + 气泡提示 */
+.ai-fab {
+  position: fixed;
+  right: 32rpx;
+  bottom: calc(40rpx + env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+.ai-fab-hover {
+  transform: scale(0.96);
+}
+.ai-bubble {
+  position: relative;
+  padding: 12rpx 20rpx;
+  border-radius: 999rpx;
+  color: #0f2a44;
   background: #fff;
-  color: #1f6feb;
-  border: 1rpx solid #cfe0ff;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 8rpx 24rpx rgba(11, 31, 51, 0.14);
+}
+.ai-bubble-tail {
+  position: absolute;
+  top: 50%;
+  right: -7rpx;
+  width: 14rpx;
+  height: 14rpx;
+  background: #fff;
+  transform: translateY(-50%) rotate(45deg);
+}
+.ai-fab-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 108rpx;
+  height: 108rpx;
+  border: 2rpx solid #dce5ec;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 12rpx 30rpx rgba(11, 31, 51, 0.18);
+}
+.ai-logo {
+  width: 84rpx;
+  height: 84rpx;
 }
 </style>

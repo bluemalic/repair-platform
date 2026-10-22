@@ -82,6 +82,10 @@ async function submit() {
     loading.value = false
   }
 }
+
+function forgotPassword() {
+  uni.showToast({ title: '忘记密码功能正在准备中，请联系学校后勤重置', icon: 'none' })
+}
 </script>
 
 <template>
@@ -109,8 +113,9 @@ async function submit() {
       <!-- #endif -->
     </view>
 
-    <view class="tip">后勤管理账号请用电脑端管理后台登录</view>
-    <view class="tip">忘记密码请联系学校后勤重置</view>
+    <view class="forgot">
+      <text class="forgot-link" @click="forgotPassword">忘记密码</text>
+    </view>
     <view v-if="demoHint" class="demo-tip">{{ demoHint }}</view>
     <BeianFooter />
   </view>
@@ -121,25 +126,27 @@ async function submit() {
   min-height: 100vh;
   padding: 80rpx 48rpx 0;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .brand {
   font-size: 48rpx;
   font-weight: 600;
-  color: #2c6cf6;
+  color: #0f2a44;
   text-align: center;
 }
 .subtitle {
   margin-top: 8rpx;
   font-size: 26rpx;
-  color: #909399;
+  color: #64748b;
   text-align: center;
 }
 .form {
   margin-top: 64rpx;
   padding: 40rpx 32rpx;
   background: #fff;
+  border: 1rpx solid #dce5ec;
   border-radius: 16rpx;
+  box-shadow: 0 12rpx 40rpx rgba(11, 31, 51, 0.06);
 }
 .field {
   margin-bottom: 32rpx;
@@ -148,39 +155,49 @@ async function submit() {
   display: block;
   margin-bottom: 12rpx;
   font-size: 26rpx;
-  color: #606266;
+  color: #3f5568;
 }
 .input {
+  box-sizing: border-box;
   height: 80rpx;
   padding: 0 20rpx;
   font-size: 30rpx;
-  background: #f5f6f8;
+  color: #0b1f33;
+  background: #f7fafc;
+  border: 1rpx solid #dce5ec;
   border-radius: 8rpx;
 }
 .sso {
   margin-top: 16rpx;
+  color: #1d4ed8;
   background: transparent;
-  color: #2c6cf6;
+  border: none;
   font-size: 28rpx;
+}
+.sso::after {
+  border: none;
 }
 .submit {
   margin-top: 16rpx;
   color: #fff;
-  background: #2c6cf6;
-  border-radius: 8rpx;
+  background: #0f2a44;
+  border-radius: 10rpx;
 }
-.tip {
-  margin-top: 32rpx;
-  font-size: 24rpx;
-  color: #c0c4cc;
+.forgot {
+  margin-top: 28rpx;
   text-align: center;
+}
+.forgot-link {
+  color: #1d4ed8;
+  font-size: 28rpx;
+  font-weight: 500;
 }
 .demo-tip {
   margin-top: 16rpx;
   padding: 0 16rpx;
   font-size: 24rpx;
   line-height: 1.6;
-  color: #2c6cf6;
+  color: #1d4ed8;
   text-align: center;
 }
 </style>

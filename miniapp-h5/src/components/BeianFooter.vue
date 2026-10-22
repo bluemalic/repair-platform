@@ -27,13 +27,13 @@
   padding: 24rpx 24rpx 32rpx;
   font-size: 22rpx;
   line-height: 1.6;
-  color: #909399;
+  color: #5b7083;
 }
 .beian-link {
-  color: #909399;
+  color: #5b7083;
   text-decoration: none;
 }
 .beian-note {
-  color: #b1b3b8;
+  color: #64748b;
 }
 </style>
