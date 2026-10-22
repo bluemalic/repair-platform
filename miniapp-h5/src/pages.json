@@ -1,6 +1,12 @@
 {
   "pages": [
     {
+      "path": "pages/login/login",
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
       "path": "pages/common/scan",
       "style": {
         "navigationBarTitleText": "扫码"
@@ -10,12 +16,6 @@
       "path": "pages/common/password",
       "style": {
         "navigationBarTitleText": "修改密码"
-      }
-    },
-    {
-      "path": "pages/login/login",
-      "style": {
-        "navigationBarTitleText": "登录"
       }
     },
     {
@@ -72,7 +72,7 @@
   "globalStyle": {
     "navigationBarTextStyle": "white",
     "navigationBarTitleText": "后勤报修",
-    "navigationBarBackgroundColor": "#2c6cf6",
-    "backgroundColor": "#f5f6f8"
+    "navigationBarBackgroundColor": "#0f2a44",
+    "backgroundColor": "#f5f8fa"
   }
 }
