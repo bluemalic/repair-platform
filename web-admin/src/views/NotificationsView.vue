@@ -51,7 +51,7 @@ async function readAll() {
 /** 带工单的通知 → 跳到工单列表并自动打开那条详情（列表页读 ?ticketId）。 */
 function openTicket(row: NotificationVO) {
   if (row.ticketId) {
-    router.push({ path: '/tickets', query: { ticketId: row.ticketId } })
+    router.push({ path: '/console/tickets', query: { ticketId: row.ticketId } })
   }
 }
 
