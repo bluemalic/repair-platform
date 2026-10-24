@@ -49,6 +49,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class TicketFlowServiceImpl implements TicketFlowService {
 
     private final TicketMapper ticketMapper;
@@ -267,26 +268,30 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         if (transitions.isNotAssignee(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
-        doReject(ticket, workerId, dto.getReason());
+        doReject(ticket, workerId, dto.getReason(), workerId);
         transitions.notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
     }
     public void rejectByAdmin(long id, TicketRejectDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
-        doReject(ticket, adminId, dto.getReason());
+        doReject(ticket, adminId, dto.getReason(), null);
         transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
         transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
     }
-    void doReject(Ticket ticket, long operatorId, String reason) {
+    void doReject(Ticket ticket, long operatorId, String reason, Long expectedWorkerId) {
         transitions.conditionalUpdate(ticket.getId(), TicketStatus.REJECTED.getCode(), TicketAction.REJECT, operatorId,
                 ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
-                entity -> {
-                    entity.setRejectReason(reason);
-                    // 驳回后清空维修工，重新派单时另指派
-                    entity.setWorkerId(null);
-                });
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    if (expectedWorkerId != null) {
+                        // 维修工驳回时把主责写进 WHERE：与转派并发时，旧主责无法再驳回
+                        wrapper.eq(Ticket::getWorkerId, expectedWorkerId);
+                    }
+                    // MP 默认跳过实体里的 null 字段，清空必须显式写在 wrapper 上
+                    wrapper.set(Ticket::getWorkerId, null);
+                },
+                entity -> entity.setRejectReason(reason));
         // 驳回后原节点作废（可能是未接单提醒，也可能是待验收的验收超时）；重新派单会重新登记
         timeoutService.cancel(ticket.getId(), ticket.getTenantId());
         log.info("驳回工单 ticketId={} operator={} reason={}", ticket.getId(), operatorId, reason);

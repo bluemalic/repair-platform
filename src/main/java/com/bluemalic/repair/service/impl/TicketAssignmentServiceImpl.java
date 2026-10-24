@@ -40,6 +40,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
     private final TicketMapper ticketMapper;
@@ -94,8 +95,14 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     public void transfer(long id, TicketTransferDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
         Ticket ticket = transitions.requireTicket(id);
-        // 20 → 20 / 30 → 20 都是允许的（docs/02 §5）；40 及之后不允许——那时该走打回或驳回
-        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
+        // 只有"已经派出去、还没验收"的单才谈得上换人：
+        // 10 还没派（走 dispatch）、80 已驳回（走 dispatch 重新派）、40 及之后活已干完（走打回/驳回）。
+        int fromStatus = ticket.getStatus();
+        if (fromStatus != TicketStatus.TO_ACCEPT.getCode()
+                && fromStatus != TicketStatus.PROCESSING.getCode()) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED,
+                    TicketStatus.of(fromStatus).getDesc() + "的工单不能转派");
+        }
 
         SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         if (worker.getId().equals(ticket.getWorkerId())) {
@@ -110,11 +117,18 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
         transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.TRANSFER, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus())
-                        // 上一轮的接单/到场时间必须清掉：响应时长口径是"到场 − 派单"，
-                        // 留着旧值会算出负数或虚高的数。谁来过在 ticket_log 里，不丢
-                        .set(Ticket::getAcceptTime, null)
-                        .set(Ticket::getArriveTime, null),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    if (previousWorkerId != null) {
+                        // 转派是 20→20 / 30→20，状态 CAS 可能"永远成立"；
+                        // 把转派前的主责写进 WHERE，并发/重试时只有一次能成功
+                        wrapper.eq(Ticket::getWorkerId, previousWorkerId);
+                    }
+                    // 上一轮的接单/到场时间必须清掉：响应时长口径是"到场 − 派单"，
+                    // 留着旧值会算出负数或虚高的数。谁来过在 ticket_log 里，不丢
+                    wrapper.set(Ticket::getAcceptTime, null)
+                            .set(Ticket::getArriveTime, null);
+                },
                 entity -> {
                     entity.setWorkerId(worker.getId());
                     entity.setDispatchType(1);

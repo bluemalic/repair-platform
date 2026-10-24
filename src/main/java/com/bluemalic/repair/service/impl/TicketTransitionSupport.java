@@ -3,6 +3,7 @@ package com.bluemalic.repair.service.impl;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.TextLimits;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.common.WorkerTaskScope;
@@ -99,9 +100,11 @@ class TicketTransitionSupport {
         if (spec == null) {
             return;
         }
-        long receiver = explicitReceiver != null ? explicitReceiver
+        Long receiver = explicitReceiver != null ? explicitReceiver
                 : (spec.toStudent() ? ticket.getStudentId() : ticket.getWorkerId());
-        if (receiver <= 0) {
+        if (receiver == null || receiver <= 0) {
+            // 转派 / 管理员驳回时 worker_id 可能已被清空：没有接收人就静默跳过，
+            // 不要用 long 拆箱换一个 500。
             return;
         }
         notificationService.send(ticket.getTenantId(), receiver, spec.type(), spec.title(),
@@ -158,7 +161,12 @@ class TicketTransitionSupport {
         ticketLog.setToStatus(toStatus);
         ticketLog.setAction(action.name());
         ticketLog.setOperatorId(operatorId);
-        ticketLog.setRemark(remark);
+        String safeRemark = TextLimits.truncate(remark, TextLimits.TICKET_LOG_REMARK);
+        if (remark != null && safeRemark.length() < remark.length()) {
+            log.warn("工单日志备注超长已截断 ticketId={} action={} originalLength={}",
+                    ticketId, action, remark.length());
+        }
+        ticketLog.setRemark(safeRemark);
         ticketLogMapper.insert(ticketLog);
     }
     /**

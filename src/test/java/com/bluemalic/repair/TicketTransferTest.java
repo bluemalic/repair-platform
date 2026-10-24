@@ -237,16 +237,161 @@ class TicketTransferTest {
                 .andExpect(jsonPath("$.code").value(10003));
     }
 
+    // ==================== P0 回归：驳回后重新派单 ====================
+
+    @Test
+    void rejectThenDispatchAgainSucceeds() throws Exception {
+        String admin = givenToken("test-rg-admin", 3, ROLE_ADMIN, null);
+        String student = givenToken("test-rg-student", 1, ROLE_STUDENT, null);
+        String from = givenToken("test-rg-from", 2, ROLE_WORKER, List.of(1L));
+        String to = givenToken("test-rg-to", 2, ROLE_WORKER, List.of(1L));
+        String ticketId = dispatchedTicket(student, admin, "test-rg-from", "test-rg-from");
+
+        postJson(from, "/api/worker/tickets/" + ticketId + "/reject", Map.of("reason", "不是这栋楼的"))
+                .andExpect(jsonPath("$.code").value(0));
+
+        Ticket rejected = ticketOf(ticketId);
+        assertThat(rejected.getStatus()).isEqualTo(80);
+        assertThat(rejected.getWorkerId())
+                .as("驳回后必须清空主责，否则重新派单会被“已有维修工”挡住")
+                .isNull();
+
+        postJson(admin, "/api/admin/tickets/" + ticketId + "/dispatch",
+                Map.of("workerId", userIdOf("test-rg-to")))
+                .andExpect(jsonPath("$.code").value(0));
+
+        Ticket redispatched = ticketOf(ticketId);
+        assertThat(redispatched.getStatus()).isEqualTo(20);
+        assertThat(redispatched.getWorkerId()).isEqualTo(userIdOf("test-rg-to"));
+    }
+
+    // ==================== P0 回归：非法状态转派 ====================
+
+    @Test
+    void transferRejectsToDispatchAndRejectedStatuses() throws Exception {
+        String admin = givenToken("test-rg2-admin", 3, ROLE_ADMIN, null);
+        String student = givenToken("test-rg2-student", 1, ROLE_STUDENT, null);
+        String worker = givenToken("test-rg2-worker", 2, ROLE_WORKER, List.of(1L));
+        givenToken("test-rg2-other", 2, ROLE_WORKER, List.of(1L));
+        long otherId = userIdOf("test-rg2-other");
+
+        // 10 待派单：还没派出去，谈不上换人
+        String pending = submitTicket(student);
+        postJson(admin, "/api/admin/tickets/" + pending + "/transfer",
+                Map.of("workerId", otherId, "reason", "还没派就想换人"))
+                .andExpect(jsonPath("$.code").value(20002));
+        assertThat(ticketOf(pending).getStatus()).isEqualTo(10);
+
+        // 80 已驳回：退回调度池，应走 dispatch 重新派单，不是转派
+        String rejected = dispatchedTicket(student, admin, "test-rg2-worker", "test-rg2-worker");
+        postJson(worker, "/api/worker/tickets/" + rejected + "/reject", Map.of("reason", "做不了"))
+                .andExpect(jsonPath("$.code").value(0));
+        assertThat(ticketOf(rejected).getStatus()).isEqualTo(80);
+
+        postJson(admin, "/api/admin/tickets/" + rejected + "/transfer",
+                Map.of("workerId", otherId, "reason", "已驳回还想转派"))
+                .andExpect(jsonPath("$.code").value(20002));
+        assertThat(ticketOf(rejected).getStatus()).isEqualTo(80);
+    }
+
+    // ==================== P0 回归：转派后旧师傅不能驳回 ====================
+
+    @Test
+    void oldWorkerCannotRejectAfterTransfer() throws Exception {
+        String admin = givenToken("test-rg3-admin", 3, ROLE_ADMIN, null);
+        String student = givenToken("test-rg3-student", 1, ROLE_STUDENT, null);
+        String from = givenToken("test-rg3-from", 2, ROLE_WORKER, List.of(1L));
+        String to = givenToken("test-rg3-to", 2, ROLE_WORKER, List.of(1L));
+        String ticketId = dispatchedTicket(student, admin, "test-rg3-from", "test-rg3-from");
+
+        postJson(admin, "/api/admin/tickets/" + ticketId + "/transfer",
+                Map.of("workerId", userIdOf("test-rg3-to"), "reason", "换人"))
+                .andExpect(jsonPath("$.code").value(0));
+
+        // 旧主责再驳回：状态对、但不是他的单 → 20003
+        postJson(from, "/api/worker/tickets/" + ticketId + "/reject", Map.of("reason", "我还能驳回吗"))
+                .andExpect(jsonPath("$.code").value(20003));
+        assertThat(ticketOf(ticketId).getStatus()).isEqualTo(20);
+
+        // 新主责可以正常驳回
+        postJson(to, "/api/worker/tickets/" + ticketId + "/reject", Map.of("reason", "我也不做"))
+                .andExpect(jsonPath("$.code").value(0));
+        assertThat(ticketOf(ticketId).getStatus()).isEqualTo(80);
+    }
+
+    // ==================== P0 回归：长理由不能撑爆日志/通知 ====================
+
+    @Test
+    void longTransferReasonDoesNotBreakLogAndNotification() throws Exception {
+        String admin = givenToken("test-rg4-admin", 3, ROLE_ADMIN, null);
+        String student = givenToken("test-rg4-student", 1, ROLE_STUDENT, null);
+        String from = givenToken("test-rg4-from", 2, ROLE_WORKER, List.of(1L));
+        givenToken("test-rg4-to", 2, ROLE_WORKER, List.of(1L));
+        String ticketId = dispatchedTicket(student, admin, "test-rg4-from", "test-rg4-from");
+
+        // DTO 允许 255 字；加上“转派给 X；原因：”前缀后必然超过 255
+        String reason = "长".repeat(255);
+        postJson(admin, "/api/admin/tickets/" + ticketId + "/transfer",
+                Map.of("workerId", userIdOf("test-rg4-to"), "reason", reason))
+                .andExpect(jsonPath("$.code").value(0));
+
+        TicketLog transferLog = logsOf(ticketId).stream()
+                .filter(log -> "TRANSFER".equals(log.getAction()))
+                .findFirst().orElseThrow();
+        assertThat(transferLog.getRemark()).isNotNull();
+        assertThat(transferLog.getRemark().length()).isLessThanOrEqualTo(255);
+        // 通知内容会被截断，但标题保留；关键是通知本身没丢
+        assertThat(notificationTitles(from)).contains("工单已转出");
+    }
+
+    // ==================== P0 回归：20→20 的 CAS 守卫 ====================
+
+    @Test
+    void staleWorkerGuardRejectsSecondUpdate() throws Exception {
+        String admin = givenToken("test-rg5-admin", 3, ROLE_ADMIN, null);
+        String student = givenToken("test-rg5-student", 1, ROLE_STUDENT, null);
+        String from = givenToken("test-rg5-from", 2, ROLE_WORKER, List.of(1L));
+        givenToken("test-rg5-to1", 2, ROLE_WORKER, List.of(1L));
+        givenToken("test-rg5-to2", 2, ROLE_WORKER, List.of(1L));
+        String ticketId = dispatchedTicket(student, admin, "test-rg5-from", "test-rg5-from");
+
+        long fromId = userIdOf("test-rg5-from");
+        long to1Id = userIdOf("test-rg5-to1");
+        long to2Id = userIdOf("test-rg5-to2");
+
+        // 模拟两个调度员都读到“主责是 from”，然后各自提交转派：
+        // WHERE 里带 worker_id = from，第二个必须 rows = 0。
+        int first = ticketMapper.update(null, Wrappers.<Ticket>lambdaUpdate()
+                .eq(Ticket::getId, Long.parseLong(ticketId))
+                .eq(Ticket::getStatus, 20)
+                .eq(Ticket::getWorkerId, fromId)
+                .set(Ticket::getWorkerId, to1Id));
+        int second = ticketMapper.update(null, Wrappers.<Ticket>lambdaUpdate()
+                .eq(Ticket::getId, Long.parseLong(ticketId))
+                .eq(Ticket::getStatus, 20)
+                .eq(Ticket::getWorkerId, fromId)
+                .set(Ticket::getWorkerId, to2Id));
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).as("旧主责的第二次转派必须被 CAS 守卫挡住").isZero();
+        assertThat(ticketOf(ticketId).getWorkerId()).isEqualTo(to1Id);
+    }
+
     // ==================== 工具 ====================
+
+    /** 提交一张报修，停在 10 待派单。 */
+    private String submitTicket(String student) throws Exception {
+        MvcResult result = postJson(student, "/api/student/tickets", Map.of(
+                        "repairCode", "482913", "categoryId", 1, "description", "【测试】水管漏水"))
+                .andExpect(jsonPath("$.code").value(0)).andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .path("data").path("id").asText();
+    }
 
     /** 提交 + 派给指定师傅，停在 20 待接单。 */
     private String dispatchedTicket(String student, String admin, String workerUsername, String ignored)
             throws Exception {
-        MvcResult result = postJson(student, "/api/student/tickets", Map.of(
-                        "repairCode", "482913", "categoryId", 1, "description", "【测试】水管漏水"))
-                .andExpect(jsonPath("$.code").value(0)).andReturn();
-        String ticketId = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
-                .path("data").path("id").asText();
+        String ticketId = submitTicket(student);
         postJson(admin, "/api/admin/tickets/" + ticketId + "/dispatch",
                 Map.of("workerId", userIdOf(workerUsername))).andExpect(jsonPath("$.code").value(0));
         return ticketId;

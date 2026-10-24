@@ -2,10 +2,12 @@ package com.bluemalic.repair;
 
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.SysUserRole;
+import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
 import com.bluemalic.repair.entity.WorkerBuilding;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
+import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -61,6 +63,9 @@ class TicketReworkTest {
 
     @Autowired
     private TicketLogMapper ticketLogMapper;
+
+    @Autowired
+    private TicketEvaluationMapper ticketEvaluationMapper;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -161,6 +166,32 @@ class TicketReworkTest {
         postJson(student, "/api/worker/tickets/" + ticketId + "/finish", Map.of("resultDesc", "我修好了"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(10003));
+    }
+
+    // ==================== 边界：已有评价行时不能二次写入 ====================
+
+    @Test
+    void existingEvaluationRowIsRejectedWithoutChangingStatus() throws Exception {
+        String student = givenToken("test-rw-dup-student", 1, ROLE_STUDENT, null);
+        String worker = givenToken("test-rw-dup-worker", 2, ROLE_WORKER, List.of(1L));
+        String admin = givenToken("test-rw-dup-admin", 3, ROLE_ADMIN, null);
+        String ticketId = toVerify(student, admin, worker, "test-rw-dup-worker");
+
+        // 模拟历史上一次“评价插入成功、状态更新失败”留下的孤儿评价：
+        // 工单还在 40，评价表已有这一单。再次评价必须返回 20005，而不是写第二条。
+        TicketEvaluation orphan = new TicketEvaluation();
+        orphan.setTenantId(1L);
+        orphan.setTicketId(Long.parseLong(ticketId));
+        orphan.setStudentId(userIdOf("test-rw-dup-student"));
+        orphan.setScore(3);
+        orphan.setContent("上一次失败留下的评价");
+        ticketEvaluationMapper.insert(orphan);
+
+        postJson(student, "/api/student/tickets/" + ticketId + "/evaluate", Map.of("score", 5))
+                .andExpect(jsonPath("$.code").value(20005));
+        assertThat(statusOf(student, ticketId)).isEqualTo(40);
+        assertThat(ticketEvaluationMapper.selectCount(Wrappers.<TicketEvaluation>lambdaQuery()
+                .eq(TicketEvaluation::getTicketId, Long.parseLong(ticketId)))).isEqualTo(1);
     }
 
     // ==================== 工具：走到 40 待验收 ====================

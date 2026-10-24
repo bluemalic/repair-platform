@@ -13,7 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 超时域处理器：三个超时回调——自动关闭（50 → 60）、接单提醒、处理超时升级。
@@ -43,6 +44,7 @@ public class TicketTimeoutHandler {
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
     private final TenantSchemaCatalog schemaCatalog;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * 超时自动关闭：**按这条任务所属租户的库**处理（阶段 6 第 3 步 · ADR-021）。
@@ -73,7 +75,12 @@ public class TicketTimeoutHandler {
         String routingKey = due.tenantId() == DueTicket.LEGACY_TENANT
                 ? TenantRoutingContext.CONTROL
                 : schemaCatalog.routingKeyFor(due.tenantId());
-        TenantRoutingContext.run(routingKey, action);
+        // 事务必须在**路由键设好之后**再开：事务管理器取连接时会用当前路由键选库，
+        // 反过来（先开事务、后 pin 库）会把连接绑在平台库上。这是本类不能直接加
+        // @Transactional 的原因。
+        TenantRoutingContext.run(routingKey,
+                () -> new TransactionTemplate(transactionManager)
+                        .executeWithoutResult(status -> action.run()));
     }
 
     private void autoCloseInCurrentDatabase(long id) {
