@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @IntegrationTest
@@ -35,27 +37,35 @@ class OutboxRelayJobTest {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void relayOnceClaimsAndMarksEventSent() {
         long aggregateId = System.nanoTime();
-        try {
-            outboxService.append(1L, "TICKET", aggregateId, TicketStatusChangedEvent.EVENT_TYPE,
-                    new TicketStatusChangedEvent(aggregateId, 10, 20, "DISPATCH", 9L));
+        // 整个用例显式钉在平台库：不能依赖线程上残留的路由键。
+        // CI 的测试顺序里，前一个用例可能留下租户键；那样 append 与 relay 会查两个库，
+        // 表现就是“事件存在但 relay 永远处理不到”（本地顺序恰好为空，所以本地过、CI 红）。
+        TenantRoutingContext.run(TenantRoutingContext.CONTROL, () -> {
+            try {
+                outboxService.append(1L, "TICKET", aggregateId, TicketStatusChangedEvent.EVENT_TYPE,
+                        new TicketStatusChangedEvent(aggregateId, 10, 20, "DISPATCH", 9L));
 
-            OutboxEvent before = outboxEventMapper.selectOne(
-                    Wrappers.<OutboxEvent>lambdaQuery().eq(OutboxEvent::getAggregateId, aggregateId));
-            assertThat(before).as("relay 之前事件必须已经和业务一起落库").isNotNull();
-            assertThat(before.getStatus()).isEqualTo(OutboxStatus.NEW.name());
+                OutboxEvent before = outboxEventMapper.selectOne(
+                        Wrappers.<OutboxEvent>lambdaQuery().eq(OutboxEvent::getAggregateId, aggregateId));
+                assertThat(before).as("relay 之前事件必须已经和业务一起落库").isNotNull();
+                assertThat(before.getStatus()).isEqualTo(OutboxStatus.NEW.name());
+                assertThat(before.getNextAttemptAt())
+                        .as("事件必须立即可投递：DATETIME 秒精度舍入会让它晚 1 秒，relay 就看不到")
+                        .isBeforeOrEqualTo(LocalDateTime.now());
 
-            // 测试里定时触发被 IntegrationTest 关掉了；这里直接驱动当前库的一轮 relay。
-            TenantRoutingContext.run(TenantRoutingContext.CONTROL, relayJob::relayOnce);
+                // 测试里定时触发被 IntegrationTest 关掉了；这里直接驱动当前库的一轮 relay。
+                relayJob.relayOnce();
 
-            OutboxEvent event = outboxEventMapper.selectOne(
-                    Wrappers.<OutboxEvent>lambdaQuery().eq(OutboxEvent::getAggregateId, aggregateId));
-            assertThat(event).isNotNull();
-            assertThat(event.getStatus()).isEqualTo(OutboxStatus.SENT.name());
-            assertThat(event.getSentAt()).isNotNull();
-        } finally {
-            // NOT_SUPPORTED 会真的写入测试库，用例自己清理
-            outboxEventMapper.delete(Wrappers.<OutboxEvent>lambdaQuery()
-                    .eq(OutboxEvent::getAggregateId, aggregateId));
-        }
+                OutboxEvent event = outboxEventMapper.selectOne(
+                        Wrappers.<OutboxEvent>lambdaQuery().eq(OutboxEvent::getAggregateId, aggregateId));
+                assertThat(event).isNotNull();
+                assertThat(event.getStatus()).isEqualTo(OutboxStatus.SENT.name());
+                assertThat(event.getSentAt()).isNotNull();
+            } finally {
+                // NOT_SUPPORTED 会真的写入测试库，用例自己清理
+                outboxEventMapper.delete(Wrappers.<OutboxEvent>lambdaQuery()
+                        .eq(OutboxEvent::getAggregateId, aggregateId));
+            }
+        });
     }
 }

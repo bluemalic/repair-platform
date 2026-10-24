@@ -131,7 +131,9 @@ public class OutboxRelayJob {
                 .eq(OutboxEvent::getId, event.getId())
                 .set(OutboxEvent::getStatus, OutboxStatus.NEW.name())
                 .set(OutboxEvent::getAttempts, attempts)
-                .set(OutboxEvent::getNextAttemptAt, LocalDateTime.now().plusSeconds(backoffSeconds)));
+                // 同样截到秒：DATETIME 的舍入不该把退避时间再往后推 1 秒
+                .set(OutboxEvent::getNextAttemptAt,
+                        LocalDateTime.now().plusSeconds(backoffSeconds).withNano(0)));
         log.warn("Outbox 事件投递失败，{} 秒后重试 eventId={} attempts={}",
                 backoffSeconds, event.getEventId(), attempts, e);
     }

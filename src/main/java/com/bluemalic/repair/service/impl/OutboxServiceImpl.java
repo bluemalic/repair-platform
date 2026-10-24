@@ -26,7 +26,9 @@ public class OutboxServiceImpl implements OutboxService {
 
     @Override
     public void append(Long tenantId, String aggregateType, long aggregateId, String eventType, Object payload) {
-        LocalDateTime now = LocalDateTime.now();
+        // outbox_event.next_attempt_at 是 DATETIME（秒精度）：带纳秒写入会被 MySQL 四舍五入
+        // 到下一秒，relay 紧接着跑时会把“刚写入的事件”判成未到期。截到秒，保证立即可投递。
+        LocalDateTime now = LocalDateTime.now().withNano(0);
         OutboxEvent event = new OutboxEvent();
         event.setTenantId(tenantId == null ? 0L : tenantId);
         event.setAggregateType(aggregateType);
