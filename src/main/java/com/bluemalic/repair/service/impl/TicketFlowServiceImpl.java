@@ -1,10 +1,10 @@
 package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.MetricsRecorder;
+import com.bluemalic.repair.common.Texts;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.common.TicketStatusChangedEvent;
@@ -40,12 +40,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 工单流转域实现：submit 到 close 的全部状态跃迁。从 TicketServiceImpl 拆出（纯移动，
- * 改动建议 #4 第五步·收官）。
+ * 工单流转域实现：submit 到 close 的全部状态跃迁。
  *
  * <p>查询在 {@link TicketQueryService}、派单在 {@link TicketAssignmentService}、
- * 超时在 {@code TicketTimeoutHandler}；校验、条件更新、台账与通知复用
- * {@link TicketTransitionSupport}。学生可见自己的单、维修工见负责楼栋或派给
+ * 超时在 {@code TicketTimeoutHandler}；状态写入/日志/Outbox 在 {@link TicketTransitionSupport}，
+ * 校验在 {@link TicketReferenceValidator}，参与者判定在 {@link TicketParticipantPolicy}，
+ * 通知在 {@link TicketNoticePublisher}。学生可见自己的单、维修工见负责楼栋或派给
  * 自己的单、后勤限本租户——数据范围由拦截器注入（ADR-002）。
  */
 @Slf4j
@@ -59,17 +59,23 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TicketTransitionSupport transitions;
+    private final TicketLookup lookup;
+    private final TicketReferenceValidator referenceValidator;
+    private final TicketParticipantPolicy participantPolicy;
+    private final TicketNoticePublisher noticePublisher;
+    private final TicketNoGenerator ticketNoGenerator;
+    private final TicketReadModelAssembler readModelAssembler;
     private final MetricsRecorder metricsRecorder;
     private final OutboxService outboxService;
 
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        SysUser student = transitions.requireUser(studentId);
+        SysUser student = lookup.requireUser(studentId);
 
         Long buildingId;
         String room;
         if (dto.getRepairCode() != null && !dto.getRepairCode().isBlank()) {
-            RepairCode repairCode = transitions.requireRepairCode(dto.getRepairCode(), student.getTenantId());
+            RepairCode repairCode = referenceValidator.requireRepairCode(dto.getRepairCode(), student.getTenantId());
             buildingId = repairCode.getBuildingId();
             room = repairCode.getRoom();
         } else {
@@ -80,13 +86,13 @@ public class TicketFlowServiceImpl implements TicketFlowService {
             room = dto.getRoom();
         }
         // 楼栋校验不能只放在上面那个分支里：扫码路径同样要过（码指向的楼栋可能已被停用）
-        transitions.requireEnabledBuilding(buildingId, student.getTenantId());
+        referenceValidator.requireEnabledBuilding(buildingId, student.getTenantId());
 
-        TicketCategory category = transitions.requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
+        TicketCategory category = referenceValidator.requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
 
         Ticket ticket = new Ticket();
         ticket.setTenantId(student.getTenantId());
-        ticket.setTicketNo(transitions.nextTicketNo());
+        ticket.setTicketNo(ticketNoGenerator.nextTicketNo());
         ticket.setStudentId(studentId);
         ticket.setBuildingId(buildingId);
         ticket.setRoom(room);
@@ -110,11 +116,11 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 ticket.getId(), studentId, buildingId, room);
 
         return TicketConverter.toVO(ticket,
-                transitions.buildingNames(List.of(buildingId)), transitions.categoryNames(List.of(dto.getCategoryId())));
+                readModelAssembler.buildingNames(List.of(buildingId)), readModelAssembler.categoryNames(List.of(dto.getCategoryId())));
     }
     public void cancel(long id) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CANCELED.getCode());
 
         // 学生只能撤自己的单——数据范围由拦截器注入到 UPDATE 里，这里不再手写 student_id 条件
@@ -125,7 +131,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     }
     public void rework(long id, TicketReworkDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         if (!ticket.getStudentId().equals(studentId)) {
             throw new BizException(ErrorCode.TICKET_NOT_YOURS);
         }
@@ -141,12 +147,12 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         // 40 待验收本身不挂任何超时节点，所以这里 cancel 只是防御：万一将来给它挂了节点也不会漏撤
         timeoutService.cancel(id, ticket.getTenantId());
         timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
-        transitions.notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
+        noticePublisher.notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
         log.info("验收不通过，打回重做 ticketId={} studentId={} reason={}", id, studentId, dto.getReason());
     }
     public void evaluate(long id, TicketEvaluateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         if (!ticket.getStudentId().equals(studentId)) {
             throw new BizException(ErrorCode.TICKET_NOT_YOURS);
         }
@@ -169,15 +175,15 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { });
-        transitions.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
+        noticePublisher.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
         timeoutService.registerEval(ticket.getId(), ticket.getTenantId());
     }
     public void accept(long id) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.PROCESSING.getCode());
-        if (transitions.isNotAssignee(ticket, workerId)) {
+        if (participantPolicy.isNotAssignee(ticket, workerId)) {
             // 状态对但不是派给我的 → 并发抢单场景
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
@@ -192,21 +198,21 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         // 基准传派单时间（不是现在）：需求口径是"从派到完工"整体超期，与兜底扫描同基准
         timeoutService.cancel(id, ticket.getTenantId());
         timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
-        transitions.notifyTransition(ticket, TicketAction.ACCEPT, null, null);
+        noticePublisher.notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
     public void arrive(long id, TicketArriveDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         if (ticket.getStatus() != TicketStatus.PROCESSING.getCode()) {
             throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED, "工单不在处理中，无法到场打卡");
         }
         // 到场/完工对**参与人**开放：主责或协作者（docs/01 §4.5）。
         // 接单与驳回仍只给主责——那两件事是"我认领这单"和"这单不该我做"，属于处置权
-        if (transitions.isNotParticipant(ticket, workerId)) {
+        if (participantPolicy.isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         // 扫码到场的关键校验：码对应的位置必须和工单一致，防止"人没到先打卡"
-        RepairCode repairCode = transitions.requireRepairCode(dto.getRepairCode(), ticket.getTenantId());
+        RepairCode repairCode = referenceValidator.requireRepairCode(dto.getRepairCode(), ticket.getTenantId());
         if (!repairCode.getBuildingId().equals(ticket.getBuildingId())
                 || !repairCode.getRoom().equals(ticket.getRoom())) {
             throw new BizException(ErrorCode.REPAIR_CODE_ROOM_MISMATCH);
@@ -225,19 +231,19 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 wrapper -> {
                     wrapper.eq(Ticket::getStatus, ticket.getStatus())
                             .isNull(Ticket::getArriveTime);
-                    appendParticipantCondition(wrapper, workerId);
+                    participantPolicy.appendParticipantCondition(wrapper, workerId);
                 },
                 entity -> {
                     entity.setArriveTime(now);
                     entity.setArriveMinutes(arriveMinutes);
                 });
-        transitions.notifyTransition(ticket, TicketAction.ARRIVE, null, null);
+        noticePublisher.notifyTransition(ticket, TicketAction.ARRIVE, null, null);
     }
     public void finish(long id, TicketFinishDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_VERIFY.getCode());
-        if (transitions.isNotParticipant(ticket, workerId)) {
+        if (participantPolicy.isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
 
@@ -248,7 +254,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> {
                     wrapper.eq(Ticket::getStatus, ticket.getStatus());
-                    appendParticipantCondition(wrapper, workerId);
+                    participantPolicy.appendParticipantCondition(wrapper, workerId);
                 },
                 entity -> {
                     entity.setFinishTime(now);
@@ -258,33 +264,33 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 });
         // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
         timeoutService.cancel(id, ticket.getTenantId());
-        transitions.notifyTransition(ticket, TicketAction.FINISH, null, null);
+        noticePublisher.notifyTransition(ticket, TicketAction.FINISH, null, null);
         // 协作者完成的：主责得知道自己的单被完成了（他不会收到学生那条通知）
         if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
             notificationService.send(ticket.getTenantId(), ticket.getWorkerId(), "TICKET_FINISHED_BY_COLLABORATOR",
                     "工单已由协作者完工",
-                    "工单 " + ticket.getTicketNo() + " 已由 " + transitions.nullToEmpty(transitions.requireUser(workerId).getRealName())
+                    "工单 " + ticket.getTicketNo() + " 已由 " + Texts.nullToEmpty(lookup.requireUser(workerId).getRealName())
                             + " 完工，等待学生验收",
                     ticket.getId());
         }
     }
     public void rejectByWorker(long id, TicketRejectDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
-        if (transitions.isNotAssignee(ticket, workerId)) {
+        if (participantPolicy.isNotAssignee(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
         }
         doReject(ticket, workerId, dto.getReason(), workerId);
-        transitions.notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
+        noticePublisher.notifyTransition(ticket, TicketAction.REJECT, null, "被驳回：" + dto.getReason());
     }
     public void rejectByAdmin(long id, TicketRejectDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.REJECTED.getCode());
         doReject(ticket, adminId, dto.getReason(), null);
-        transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
-        transitions.notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
+        noticePublisher.notifyTransition(ticket, TicketAction.REJECT, ticket.getStudentId(), "被驳回：" + dto.getReason());
+        noticePublisher.notifyTransition(ticket, TicketAction.REJECT, ticket.getWorkerId(), "被驳回：" + dto.getReason());
     }
     void doReject(Ticket ticket, long operatorId, String reason, Long expectedWorkerId) {
         transitions.conditionalUpdate(ticket.getId(), TicketStatus.REJECTED.getCode(), TicketAction.REJECT, operatorId,
@@ -305,7 +311,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     }
     public void close(long id) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
 
         transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.CLOSE, adminId,
@@ -314,10 +320,5 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         // 人工关闭后取消已登记的验收超时任务，避免调度器重复处理
         timeoutService.cancel(id, ticket.getTenantId());
-    }
-    void appendParticipantCondition(LambdaUpdateWrapper<Ticket> wrapper, long workerId) {
-        wrapper.and(w -> w.eq(Ticket::getWorkerId, workerId)
-                .or().exists("SELECT 1 FROM ticket_collaborator c"
-                        + " WHERE c.ticket_id = ticket.id AND c.worker_id = {0}", workerId));
     }
 }

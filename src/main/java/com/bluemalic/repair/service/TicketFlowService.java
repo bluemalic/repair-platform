@@ -10,13 +10,12 @@ import com.bluemalic.repair.vo.TicketVO;
 
 /**
  * 工单流转域：submit 到 close 的全部状态跃迁（学生侧提交/撤销/评价/打回，
- * 维修工侧接单/到场/完工/驳回，后勤侧驳回/关闭）。从 {@code TicketService} 拆出
- * （纯移动，改动建议 #4 第五步·收官）。
+ * 维修工侧接单/到场/完工/驳回，后勤侧驳回/关闭）。
  *
  * <p>查询在 {@link TicketQueryService}、派单在 {@link TicketAssignmentService}、
  * 超时在 {@code TicketTimeoutHandler}。每次流转都经状态机校验（{@code TicketStatus.checkTransition}）、
- * 条件更新落库（受影响行数 0 = 并发改动）、写 {@code ticket_log}、发站内通知——
- * 这些口径收在 {@code TicketTransitionSupport}，四域共用。
+ * 条件更新落库（受影响行数 0 = 并发改动）、写 {@code ticket_log} 与 Outbox 事件——
+ * 状态写入收在 {@code TicketTransitionSupport}；校验、通知、读取由拆出的组件负责。
  */
 public interface TicketFlowService {
 

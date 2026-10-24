@@ -9,9 +9,8 @@ import com.bluemalic.repair.vo.TicketVO;
 /**
  * 工单查询域（只读）：报修码定位、学生列表、维修工任务、详情。
  *
- * <p>从 {@code TicketService} 拆出的四个只读方法——改动建议 #4 的第二步。
- * 状态流转仍在 {@link TicketService}；两域共用的校验与取名收在
- * {@code TicketTransitionSupport}，各自注入复用而不是复制。
+ * <p>校验与取名复用 {@code TicketReferenceValidator} / {@code TicketReadModelAssembler}，
+ * 读取入口复用 {@code TicketLookup}；不要在本域重复实现这些口径。
  *
  * <p>可见范围由数据权限拦截器注入（学生=本人 / 维修工=负责楼栋或派给我的单 / 后勤=本租户），
  * 实现里只写"这个视图要看什么"的业务筛选。
