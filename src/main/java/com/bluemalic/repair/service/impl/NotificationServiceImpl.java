@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.TextLimits;
 import com.bluemalic.repair.converter.NotificationConverter;
 import com.bluemalic.repair.entity.Notification;
 import com.bluemalic.repair.entity.SysRole;
@@ -42,12 +43,20 @@ public class NotificationServiceImpl implements NotificationService {
             return;
         }
         try {
+            String safeTitle = TextLimits.truncate(title, TextLimits.NOTIFICATION_TITLE);
+            String safeContent = TextLimits.truncate(content, TextLimits.NOTIFICATION_CONTENT);
+            if ((title != null && safeTitle.length() < title.length())
+                    || (content != null && safeContent.length() < content.length())) {
+                log.warn("站内通知文案超长已截断 receiver={} type={} titleLength={} contentLength={}",
+                        receiverId, type, title == null ? 0 : title.length(),
+                        content == null ? 0 : content.length());
+            }
             Notification notification = new Notification();
             notification.setTenantId(tenantId);
             notification.setReceiverId(receiverId);
             notification.setType(type);
-            notification.setTitle(title);
-            notification.setContent(content);
+            notification.setTitle(safeTitle);
+            notification.setContent(safeContent);
             notification.setTicketId(ticketId);
             notification.setIsRead(0);
             notificationMapper.insert(notification);
