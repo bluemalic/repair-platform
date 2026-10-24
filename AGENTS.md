@@ -34,7 +34,8 @@
 | 框架 | Spring Boot **3.5.16** + Java **17** | 不要升到 4.x |
 | ORM | MyBatis-Plus | 不要引入 JPA / Hibernate |
 | 数据库 | MySQL 8（本机端口 **13306**） | 不要连 3306，那是本机原生 MySQL |
-| 缓存 / 队列 | Redis 7（本机 **6379**，库号 **0**） | 延迟队列用它，不要引 Kafka / RabbitMQ |
+| 缓存 / 队列 | Redis 7（本机 **6379**，库号 **0**） | 缓存、限流、会话与超时兜底；不要引 Kafka / RabbitMQ |
+| 消息队列 | RocketMQ **5.3.2**（阶段 2 · ADR-023） | 只做事件通道；24h/48h 用 5.x timer 或 DB 调度，不用 4.x 延迟级别 |
 | 对象存储 | MinIO（S3 协议） | 不要直接依赖 OSS SDK，只依赖 S3 API |
 | 鉴权 | Sa-Token | 不要引入 Spring Security |
 | 接口文档 | Knife4j（OpenAPI 3） | 每个接口都要有注解 |
@@ -214,8 +215,8 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 
 | 不要做 | 原因 |
 |---|---|
-| 引入 Spring Cloud / Nacos / 微服务 | 单体里能讲透的远多于半成品微服务 |
-| 引入 Kafka / RabbitMQ | 超时升级用 Redis 延迟队列，通知用站内通知，用不上 |
+| 一次性全量拆微服务 / 为拆而拆 | 单体里能讲透的远多于半成品微服务；阶段 2 按 ADR-023 渐进抽服务，工单主链路不先拆 |
+| 引入 Kafka / RabbitMQ | 事件通道选 RocketMQ 5.x（ADR-023）；Kafka 没有单条延迟，RabbitMQ 的延迟要插件或 TTL+DLX |
 | 接微信授权登录（`wx.login`） | 只有小程序有，H5 没有，会破坏跨端 |
 | 用微信订阅消息 / 短信 / 邮件做通知 | 用站内通知，零成本且跨端通用 |
 | 做失物招领、活动报名 | 与维修无关，只会稀释主线 |

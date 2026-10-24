@@ -121,6 +121,66 @@ services:
         limits:
           memory: ${MINIO_MEM_LIMIT:-256M}
 
+  # ============================================================
+  # RocketMQ（阶段 2 · ADR-023）—— 只在 `--profile rocketmq` 时启动
+  # ============================================================
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: repair-rocketmq-namesrv
+    restart: unless-stopped
+    profiles: ["rocketmq"]
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m -Xmn128m"
+    volumes:
+      - ./logs/rocketmq/namesrv:/home/rocketmq/logs
+    ports:
+      - "127.0.0.1:9876:9876"
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${ROCKETMQ_NAMESRV_MEM_LIMIT:-384M}
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: repair-rocketmq-broker
+    restart: unless-stopped
+    profiles: ["rocketmq"]
+    depends_on: [rocketmq-namesrv]
+    command: sh mqbroker -n rocketmq-namesrv:9876 -c /home/rocketmq/conf/broker.conf
+    environment:
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn256m"
+    volumes:
+      - ./docker/rocketmq/broker.conf:/home/rocketmq/conf/broker.conf:ro
+      - ./data/rocketmq/broker:/home/rocketmq/store
+      - ./logs/rocketmq/broker:/home/rocketmq/logs
+    ports:
+      - "127.0.0.1:10909:10909"
+      - "127.0.0.1:10911:10911"
+      - "127.0.0.1:10912:10912"
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${ROCKETMQ_BROKER_MEM_LIMIT:-1G}
+
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: repair-rocketmq-dashboard
+    restart: unless-stopped
+    profiles: ["rocketmq"]
+    depends_on: [rocketmq-namesrv]
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876 -Dcom.rocketmq.sendMessageWithVIPChannel=false"
+    ports:
+      - "127.0.0.1:8082:8080"
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${ROCKETMQ_DASHBOARD_MEM_LIMIT:-512M}
+
   app:
     build:
       context: .

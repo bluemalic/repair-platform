@@ -9,6 +9,7 @@
 [![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.17-red.svg)](https://baomidou.com/)
 [![MySQL](https://img.shields.io/badge/MySQL-8-4479A1.svg)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D.svg)](https://redis.io/)
+[![RocketMQ](https://img.shields.io/badge/RocketMQ-5.3.2-D77310.svg)](https://rocketmq.apache.org/)
 [![Sa-Token](https://img.shields.io/badge/Sa--Token-1.46.0-blue.svg)](https://sa-token.cc/)
 [![MinIO](https://img.shields.io/badge/MinIO-S3%20API-C72E49.svg)](https://min.io/)
 [![LangChain4j](https://img.shields.io/badge/LangChain4j-1.20.0-1C3C3C.svg)](https://github.com/langchain4j/langchain4j)
@@ -84,6 +85,7 @@ flowchart TB
         mysql[("MySQL 8<br/>平台库 20 张表<br/>+ 每租户 18 张")]
         redis[("Redis 7<br/>会话 · 延迟队列 · 限流 · 审计去重 · 工单号序列")]
         minio[("MinIO<br/>图片对象 · 桶匿名可读")]
+        rocketmq[("RocketMQ 5.x<br/>事件通道（阶段 2）")]
     end
 
     deepseek["DeepSeek API"]
@@ -96,6 +98,7 @@ flowchart TB
     orm --> mysql
     biz --> redis
     biz -->|"S3 API 写对象"| minio
+    biz -.->|"Outbox 事件"| rocketmq
     sched --> redis
     sched --> mysql
     guard -.->|"每个请求校验 token"| redis
@@ -216,7 +219,7 @@ repair-platform/
 │   ├── application.yml  配置全部走 ${ENV_VAR:默认值}；密码与 Key 一律从环境变量读
 │   ├── db/migration/    Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
 │   └── mapper/          MyBatis XML
-├── src/test/java/       337 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
+├── src/test/java/       338 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/
