@@ -5,6 +5,7 @@ import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.TextLimits;
 import com.bluemalic.repair.common.TicketAction;
+import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.vo.TicketCollaboratorVO;
@@ -25,6 +26,7 @@ import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.NotificationService;
+import com.bluemalic.repair.service.OutboxService;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
@@ -71,6 +73,7 @@ class TicketTransitionSupport {
     private final TicketLogMapper ticketLogMapper;
     private final NotificationService notificationService;
     private final MetricsRecorder metricsRecorder;
+    private final OutboxService outboxService;
 
     /** 状态变更通知的规格：类型、标题、正文后缀、默认接收方。满载等新动作加一行即可。 */
     record NoticeSpec(String type, String title, String suffix, boolean toStudent) {
@@ -148,6 +151,10 @@ class TicketTransitionSupport {
         }
         writeLog(tenantId, id, fromStatus, toStatus, action, operatorId,
                 logRemark != null ? logRemark : entity.getRejectReason());
+        // 与业务更新、流转日志同一个本地事务：业务提交了，事件就一定在；
+        // 事件写失败则整个流转回滚，不会留下“状态改了、事件丢了”。
+        outboxService.append(tenantId, "TICKET", id, TicketStatusChangedEvent.EVENT_TYPE,
+                new TicketStatusChangedEvent(id, fromStatus, toStatus, action.name(), operatorId));
         // 指标只在**落库成功之后**记：并发失败（rows=0 已抛异常）与非法跃迁都不该算"发生了一次"
         metricsRecorder.ticketEvent(action, tenantId == null ? 0L : tenantId);
     }

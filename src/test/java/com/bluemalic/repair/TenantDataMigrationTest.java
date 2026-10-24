@@ -178,7 +178,7 @@ class TenantDataMigrationTest {
         assertThat(before.getTargetReady()).isFalse();
         assertThat(before.getDbSchema()).isNull();
 
-        // ② 搬家：16 张表逐表校验都要一致
+        // ② 搬家：搬运计划里的每张表逐表校验都要一致
         JsonNode copied = dataOf(platformPost("/api/platform/tenants/" + tenantId + "/database/copy", platform));
         assertThat(copied.path("targetReady").asBoolean()).isTrue();
         assertThat(copied.path("tables").size()).as("逐表校验的粒度是表")

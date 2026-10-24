@@ -166,6 +166,7 @@ public class DemoResetServiceImpl implements DemoResetService {
         demoResetMapper.deleteTicketLogs(tenantId);
         demoResetMapper.deleteEvaluations(tenantId);
         demoResetMapper.deleteNotifications(tenantId);
+        demoResetMapper.deleteOutboxEvents(tenantId);
         demoResetMapper.deleteWorkerBuildings(tenantId);
 
         Map<String, Long> categories = ensureCategories(tenantId);

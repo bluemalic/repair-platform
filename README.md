@@ -81,7 +81,7 @@ flowchart TB
     end
 
     subgraph infra["自建中间件（Docker，只在内网可达）"]
-        mysql[("MySQL 8<br/>平台库 19 张表<br/>+ 每租户 17 张")]
+        mysql[("MySQL 8<br/>平台库 20 张表<br/>+ 每租户 18 张")]
         redis[("Redis 7<br/>会话 · 延迟队列 · 限流 · 审计去重 · 工单号序列")]
         minio[("MinIO<br/>图片对象 · 桶匿名可读")]
     end
@@ -216,7 +216,7 @@ repair-platform/
 │   ├── application.yml  配置全部走 ${ENV_VAR:默认值}；密码与 Key 一律从环境变量读
 │   ├── db/migration/    Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
 │   └── mapper/          MyBatis XML
-├── src/test/java/       330 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
+├── src/test/java/       333 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/

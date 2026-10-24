@@ -7,6 +7,7 @@ import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.MetricsRecorder;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
@@ -22,6 +23,7 @@ import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.NotificationService;
+import com.bluemalic.repair.service.OutboxService;
 import com.bluemalic.repair.service.TicketFlowService;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -58,6 +60,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     private final TimeoutService timeoutService;
     private final TicketTransitionSupport transitions;
     private final MetricsRecorder metricsRecorder;
+    private final OutboxService outboxService;
 
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
@@ -97,7 +100,11 @@ public class TicketFlowServiceImpl implements TicketFlowService {
 
         transitions.writeLog(ticket.getTenantId(), ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
                 TicketAction.SUBMIT, studentId, null);
-        // 提交不走 conditionalUpdate（那是状态跃迁），所以这里单独记一次：**创建量**本身就是关键指标
+        // 提交不走 conditionalUpdate（那是状态跃迁），所以这里单独补一条 Outbox 事件
+        outboxService.append(ticket.getTenantId(), "TICKET", ticket.getId(), TicketStatusChangedEvent.EVENT_TYPE,
+                new TicketStatusChangedEvent(ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
+                        TicketAction.SUBMIT.name(), studentId));
+        // 提交不走 conditionalUpdate，所以这里单独记一次：**创建量**本身就是关键指标
         metricsRecorder.ticketEvent(TicketAction.SUBMIT, ticket.getTenantId());
         log.info("提交报修 ticketId={} studentId={} building={} room={}",
                 ticket.getId(), studentId, buildingId, room);
