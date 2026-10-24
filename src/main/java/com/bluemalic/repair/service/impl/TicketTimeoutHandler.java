@@ -40,6 +40,8 @@ public class TicketTimeoutHandler {
     private static final String TITLE_PROCESS_TIMEOUT = "工单处理超时升级";
 
     private final TicketTransitionSupport transitions;
+    private final TicketLookup lookup;
+    private final TicketNoticePublisher noticePublisher;
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TimeoutRule timeoutRule;
@@ -84,24 +86,24 @@ public class TicketTimeoutHandler {
     }
 
     private void autoCloseInCurrentDatabase(long id) {
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.CLOSED.getCode());
         transitions.conditionalUpdate(id, TicketStatus.CLOSED.getCode(), TicketAction.AUTO_CLOSE, SYSTEM_OPERATOR,
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
-        transitions.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
+        noticePublisher.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
         timeoutService.cancel(id, ticket.getTenantId());
     }
     private void remindAcceptTimeoutInCurrentDatabase(long id) {
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
                 NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
                         + " 无人接单，请及时调度");
     }
     private void escalateProcessTimeoutInCurrentDatabase(long id) {
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
                 NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()

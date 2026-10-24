@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.common.Texts;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.converter.TicketConverter;
@@ -34,8 +35,9 @@ import java.util.List;
 /**
  * 工单派单域实现：派单、转派、协作者管理、拆单。从 TicketServiceImpl 拆出（纯移动）。
  *
- * <p>五类动作都由后勤触发；跨楼栋强制派单的留痕、目标校验与流转台账复用
- * {@link TicketTransitionSupport}，超时节点登记走 {@code TimeoutService}。
+ * <p>五类动作都由后勤触发；目标校验与跨楼栋留痕在 {@link TicketAssignmentPolicy}，
+ * 参与者判定在 {@link TicketParticipantPolicy}，流转写入/日志/Outbox 在
+ * {@link TicketTransitionSupport}，通知在 {@link TicketNoticePublisher}。
  */
 @Slf4j
 @Service
@@ -49,6 +51,13 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     private final NotificationService notificationService;
     private final TimeoutService timeoutService;
     private final TicketTransitionSupport transitions;
+    private final TicketLookup lookup;
+    private final TicketReferenceValidator referenceValidator;
+    private final TicketAssignmentPolicy assignmentPolicy;
+    private final TicketParticipantPolicy participantPolicy;
+    private final TicketNoticePublisher noticePublisher;
+    private final TicketNoGenerator ticketNoGenerator;
+    private final TicketReadModelAssembler readModelAssembler;
 
     /**
      * 一单最多几个协作者（`docs/01` §4.5）。**再多就不叫"搭把手"了**——那种情况该看是不是该拆单。
@@ -63,10 +72,10 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
     public void dispatch(long id, TicketDispatchDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_ACCEPT.getCode());
 
-        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = assignmentPolicy.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         // 已有师傅的单不能走"派单"：那是**换人**，要走转派——它要重置计时、清掉上一轮的
         // 接单/到场时间、并单独留一条 TRANSFER 台账。两条路都能换人的话，台账就分不清了
         if (ticket.getWorkerId() != null) {
@@ -75,7 +84,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
         // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
         // 为的是不让"派错楼栋"变成一张没人能操作的单（被派的人按『派给我的单』看得到、能处理）
-        String crossBuilding = transitions.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
+        String crossBuilding = assignmentPolicy.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
 
         transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
@@ -86,7 +95,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                     entity.setDispatchTime(LocalDateTime.now());
                 },
                 crossBuilding);
-        transitions.notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
+        noticePublisher.notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
         timeoutService.registerAccept(id, ticket.getTenantId());
         log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
@@ -94,7 +103,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     }
     public void transfer(long id, TicketTransferDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         // 只有"已经派出去、还没验收"的单才谈得上换人：
         // 10 还没派（走 dispatch）、80 已驳回（走 dispatch 重新派）、40 及之后活已干完（走打回/驳回）。
         int fromStatus = ticket.getStatus();
@@ -104,13 +113,13 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                     TicketStatus.of(fromStatus).getDesc() + "的工单不能转派");
         }
 
-        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = assignmentPolicy.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         if (worker.getId().equals(ticket.getWorkerId())) {
             // 转给同一个人的唯一效果是把 dispatch_time 往后推——那是一条绕过"24h 未接单提醒"的路
             throw new BizException(ErrorCode.PARAM_INVALID, "新维修工与当前维修工相同，不需要转派");
         }
         Long previousWorkerId = ticket.getWorkerId();
-        String crossBuilding = transitions.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
+        String crossBuilding = assignmentPolicy.crossBuildingTrace(ticket.getTenantId(), ticket.getBuildingId(), worker.getId());
         String remark = "转派给 " + worker.getRealName()
                 + (crossBuilding == null ? "" : "；" + crossBuilding)
                 + "；原因：" + dto.getReason();
@@ -138,10 +147,10 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                 remark);
         // 通知原师傅（他的活没了，得知道为什么）：NoticeSpec(toStudent=false) 取的就是 ticket.workerId，
         // 而这时的 ticket 还是转派前的对象
-        transitions.notifyTransition(ticket, TicketAction.TRANSFER, null,
+        noticePublisher.notifyTransition(ticket, TicketAction.TRANSFER, null,
                 "已转给 " + worker.getRealName() + "；原因：" + dto.getReason());
         // 通知新师傅：与派单同一条文案
-        transitions.notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
+        noticePublisher.notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
         // 计时重来，超时节点也要重登记（先撤掉旧节点的登记，避免按旧时间触发）
         timeoutService.cancel(id, ticket.getTenantId());
         timeoutService.registerAccept(id, ticket.getTenantId());
@@ -150,17 +159,17 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     }
     public void addCollaborator(long id, TicketCollaboratorDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         requireCollaboratingStatus(ticket, "加协作者");
         // 与派单同一条校验：本租户、启用中的维修工（跨租户与"不存在"对外是同一个错误）
-        SysUser worker = transitions.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
+        SysUser worker = assignmentPolicy.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         if (worker.getId().equals(ticket.getWorkerId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "他就是这单的主责师傅，不用再加成协作者");
         }
-        if (transitions.isCollaborator(ticket, worker.getId())) {
+        if (participantPolicy.isCollaborator(ticket, worker.getId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "该师傅已经是这单的协作者");
         }
-        if (transitions.collaboratorCount(ticket) >= MAX_COLLABORATORS) {
+        if (participantPolicy.collaboratorCount(ticket) >= MAX_COLLABORATORS) {
             throw new BizException(ErrorCode.PARAM_INVALID,
                     "一单最多 " + MAX_COLLABORATORS + " 个协作者；活再多就该考虑拆单了");
         }
@@ -177,13 +186,13 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         }
 
         transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
-                TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + transitions.nullToEmpty(worker.getRealName()));
+                TicketAction.ADD_COLLABORATOR, adminId, "协作者：" + Texts.nullToEmpty(worker.getRealName()));
         notifyCollaboratorChange(ticket, worker, true);
         log.info("加协作者 ticketId={} workerId={} operator={}", id, worker.getId(), adminId);
     }
     public void removeCollaborator(long id, long workerId) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         requireCollaboratingStatus(ticket, "移除协作者");
 
         int rows = ticketCollaboratorMapper.delete(Wrappers.<TicketCollaborator>lambdaQuery()
@@ -197,7 +206,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         SysUser worker = sysUserMapper.selectById(workerId);
         transitions.writeLog(ticket.getTenantId(), id, ticket.getStatus(), ticket.getStatus(),
                 TicketAction.REMOVE_COLLABORATOR, adminId,
-                "移除协作者：" + (worker == null ? String.valueOf(workerId) : transitions.nullToEmpty(worker.getRealName())));
+                "移除协作者：" + (worker == null ? String.valueOf(workerId) : Texts.nullToEmpty(worker.getRealName())));
         if (worker != null) {
             // 通知当事人：他刚失去这张单的可见范围，不告诉他，他会照旧去现场
             notifyCollaboratorChange(ticket, worker, false);
@@ -206,7 +215,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     }
     public TicketVO split(long id, TicketSplitDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
-        Ticket ticket = transitions.requireTicket(id);
+        Ticket ticket = lookup.requireTicket(id);
         if (ticket.getParentTicketId() != null) {
             // 只拆一层：拆出来的单再拆下去会变成一棵谁都说不清的树（docs/01 §4.5）
             throw new BizException(ErrorCode.PARAM_INVALID, "拆出来的工单不能再拆");
@@ -216,11 +225,11 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                     TicketStatus.of(ticket.getStatus()).getDesc() + "的工单不能拆单");
         }
         Long categoryId = dto.getCategoryId() == null ? ticket.getCategoryId() : dto.getCategoryId();
-        transitions.requireEnabledCategory(categoryId, ticket.getTenantId());
+        referenceValidator.requireEnabledCategory(categoryId, ticket.getTenantId());
 
         Ticket created = new Ticket();
         created.setTenantId(ticket.getTenantId());
-        created.setTicketNo(transitions.nextTicketNo());
+        created.setTicketNo(ticketNoGenerator.nextTicketNo());
         created.setStudentId(ticket.getStudentId());
         created.setParentTicketId(ticket.getId());
         // 楼栋 / 房间 / 图片继承原单：拆出来的那件事与原来那件在同一处、由同一个学生报的，
@@ -243,8 +252,8 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         notifySplit(ticket, created);
         log.info("拆单 sourceTicketId={} newTicketId={} operator={}", id, created.getId(), adminId);
 
-        return TicketConverter.toVO(created, transitions.buildingNames(List.of(created.getBuildingId())),
-                transitions.categoryNames(List.of(created.getCategoryId())));
+        return TicketConverter.toVO(created, readModelAssembler.buildingNames(List.of(created.getBuildingId())),
+                readModelAssembler.categoryNames(List.of(created.getCategoryId())));
     }
     void requireCollaboratingStatus(Ticket ticket, String action) {
         int status = ticket.getStatus();
@@ -254,7 +263,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         }
     }
     void notifyCollaboratorChange(Ticket ticket, SysUser worker, boolean added) {
-        String name = transitions.nullToEmpty(worker.getRealName());
+        String name = Texts.nullToEmpty(worker.getRealName());
         notificationService.send(ticket.getTenantId(), worker.getId(),
                 added ? "TICKET_COLLABORATOR_ADDED" : "TICKET_COLLABORATOR_REMOVED",
                 added ? "你被加入协作" : "你已不是协作人",
@@ -286,7 +295,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         }
     }
     String location(Ticket ticket) {
-        String building = transitions.buildingNames(List.of(ticket.getBuildingId())).get(ticket.getBuildingId());
+        String building = readModelAssembler.buildingNames(List.of(ticket.getBuildingId())).get(ticket.getBuildingId());
         return (building == null ? "" : building) + ticket.getRoom();
     }
 }

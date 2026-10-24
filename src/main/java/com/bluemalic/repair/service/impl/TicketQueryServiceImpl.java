@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.Paging;
+import com.bluemalic.repair.common.Texts;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.converter.TicketConverter;
@@ -37,10 +38,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 工单查询域实现：报修码定位、学生列表、维修工任务、详情。从 TicketServiceImpl 拆出（纯移动）。
+ * 工单查询域实现：报修码定位、学生列表、维修工任务、详情。
  *
  * <p>可见范围由数据权限拦截器注入（ADR-002），这里只写"这个视图要看什么"的业务筛选；
- * 校验与批量取名复用 {@link TicketTransitionSupport}，与流转域共用同一份口径。
+ * 校验与批量取名复用 {@link TicketReferenceValidator} / {@link TicketReadModelAssembler}，
+ * 读取入口复用 {@link TicketLookup}。
  */
 @Service
 @RequiredArgsConstructor
@@ -52,7 +54,9 @@ public class TicketQueryServiceImpl implements TicketQueryService {
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final SysUserMapper sysUserMapper;
     private final BuildingMapper buildingMapper;
-    private final TicketTransitionSupport transitions;
+    private final TicketLookup lookup;
+    private final TicketReferenceValidator referenceValidator;
+    private final TicketReadModelAssembler readModelAssembler;
     private final CurrentTenantService currentTenantService;
 
     /** 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待验收）。 */
@@ -62,8 +66,8 @@ public class TicketQueryServiceImpl implements TicketQueryService {
     @Override
     public RepairCodeVO byCode(String code) {
         long userId = StpUtil.getLoginIdAsLong();
-        SysUser user = transitions.requireUser(userId);
-        RepairCode repairCode = transitions.requireRepairCode(code, user.getTenantId());
+        SysUser user = lookup.requireUser(userId);
+        RepairCode repairCode = referenceValidator.requireRepairCode(code, user.getTenantId());
         Building building = buildingMapper.selectById(repairCode.getBuildingId());
 
         RepairCodeVO vo = new RepairCodeVO();
@@ -85,8 +89,8 @@ public class TicketQueryServiceImpl implements TicketQueryService {
                         .eq(categoryId != null, Ticket::getCategoryId, categoryId)
                         .orderByDesc(Ticket::getSubmitTime));
 
-        Map<Long, String> buildings = transitions.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
-        Map<Long, String> categories = transitions.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        Map<Long, String> buildings = readModelAssembler.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = readModelAssembler.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream()
@@ -137,9 +141,9 @@ public class TicketQueryServiceImpl implements TicketQueryService {
 
         Page<Ticket> page = ticketMapper.selectPage(new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)), query);
 
-        Map<Long, String> buildings = transitions.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
-        Map<Long, String> categories = transitions.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
-        Set<Long> collaborated = transitions.collaboratedTicketIds(currentTenantService.requireTenantId(), workerId,
+        Map<Long, String> buildings = readModelAssembler.buildingNames(page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = readModelAssembler.categoryNames(page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        Set<Long> collaborated = readModelAssembler.collaboratedTicketIds(currentTenantService.requireTenantId(), workerId,
                 page.getRecords().stream().map(Ticket::getId).toList());
 
         Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -155,16 +159,16 @@ public class TicketQueryServiceImpl implements TicketQueryService {
 
     @Override
     public TicketDetailVO detail(long id) {
-        Ticket ticket = transitions.requireTicket(id);
-        Map<Long, String> buildings = transitions.buildingNames(List.of(ticket.getBuildingId()));
-        Map<Long, String> categories = transitions.categoryNames(List.of(ticket.getCategoryId()));
+        Ticket ticket = lookup.requireTicket(id);
+        Map<Long, String> buildings = readModelAssembler.buildingNames(List.of(ticket.getBuildingId()));
+        Map<Long, String> categories = readModelAssembler.categoryNames(List.of(ticket.getCategoryId()));
 
         List<TicketLog> logs = ticketLogMapper.selectList(Wrappers.<TicketLog>lambdaQuery()
                 .eq(TicketLog::getTenantId, ticket.getTenantId())
                 .eq(TicketLog::getTicketId, id).orderByAsc(TicketLog::getCreateTime));
         Map<Long, String> operators = sysUserMapper.selectByIds(
                         logs.stream().map(TicketLog::getOperatorId).distinct().toList()).stream()
-                .collect(Collectors.toMap(SysUser::getId, u -> transitions.nullToEmpty(u.getRealName())));
+                .collect(Collectors.toMap(SysUser::getId, u -> Texts.nullToEmpty(u.getRealName())));
         List<TicketLogVO> logVOs = logs.stream()
                 .map(l -> TicketConverter.toLogVO(l, operators)).toList();
 
@@ -182,12 +186,12 @@ public class TicketQueryServiceImpl implements TicketQueryService {
         }
 
         TicketDetailVO vo = TicketConverter.toDetailVO(ticket, buildings, categories,
-                transitions.collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
+                readModelAssembler.collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
         // 主责的姓名在这里补：转换器已经有 7 个参数，再加一个不如就近补一行。
         // 详情页要回答"谁负责"——只给一个 ID，看的人还得自己去别处查
         if (ticket.getWorkerId() != null) {
             SysUser worker = sysUserMapper.selectById(ticket.getWorkerId());
-            vo.setWorkerName(worker == null ? null : transitions.nullToEmpty(worker.getRealName()));
+            vo.setWorkerName(worker == null ? null : Texts.nullToEmpty(worker.getRealName()));
         }
         return vo;
     }

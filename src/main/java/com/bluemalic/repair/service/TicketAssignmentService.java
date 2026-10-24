@@ -7,11 +7,11 @@ import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.vo.TicketVO;
 
 /**
- * 工单派单域：派单、转派、协作者管理、拆单。从 {@code TicketService} 拆出（纯移动，
- * 改动建议 #4 第三步）；查询在 {@link TicketQueryService}，其余状态流转仍在 {@link TicketService}。
+ * 工单派单域：派单、转派、协作者管理、拆单。
  *
- * <p>五类动作都由后勤触发（数据范围 = 本租户），目标校验与流转台账复用
- * {@code TicketTransitionSupport}。
+ * <p>五类动作都由后勤触发（数据范围 = 本租户）；目标校验与跨楼栋留痕在
+ * {@code TicketAssignmentPolicy}，流转写入/日志/Outbox 在 {@code TicketTransitionSupport}，
+ * 通知在 {@code TicketNoticePublisher}。
  */
 public interface TicketAssignmentService {
 
