@@ -24,6 +24,11 @@
         DELETE FROM notification WHERE tenant_id = #{tenantId}
     </delete>
 
+    <!-- 演示重置也清发件箱：否则每天重置都会留下旧工单的事件，演示库越跑越脏 -->
+    <delete id="deleteOutboxEvents">
+        DELETE FROM outbox_event WHERE tenant_id = #{tenantId}
+    </delete>
+
     <!-- 维修工负责楼栋：重置时整体重建，避免演示工单落在"没人负责的楼栋"上 -->
     <delete id="deleteWorkerBuildings">
         DELETE FROM worker_building WHERE tenant_id = #{tenantId}
