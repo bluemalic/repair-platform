@@ -37,6 +37,8 @@ import java.lang.annotation.Target;
         // Outbox relay 的定时触发在测试里关掉：它会在每个库上空转、并和测试事务抢数据。
         // 需要验证 relay 的用例直接调用 OutboxRelayJob#relayOnce（包级可见）。
         "repair.outbox.relay-enabled=false",
+        // 测试不依赖 MQ：RocketMQ 关闭时 Outbox 走本地日志消费者，集成测试不需要 broker。
+        "repair.rocketmq.enabled=false",
         // 演示模式的开关**保持默认的 false**：这样测试里 DemoResetJob 根本不会被装配，
         // 后台线程也就不会跑去重置数据。这里只给一个演示口令，供 DemoResetTest 验证
         // "重置后演示账号能登录"——口令为空时登录接口过不了 @NotBlank 校验。

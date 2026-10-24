@@ -4,6 +4,7 @@ import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.entity.OutboxEvent;
 import com.bluemalic.repair.service.OutboxEventHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,6 +16,10 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+// RocketMQ 开启时由 RocketMqOutboxPublisher 接管；关闭时保留本地日志消费，
+// 保证两种模式都只有一个 handler 处理 TICKET_STATUS_CHANGED。
+@ConditionalOnProperty(prefix = "repair.rocketmq", name = "enabled",
+        havingValue = "false", matchIfMissing = true)
 public class LoggingTicketEventHandler implements OutboxEventHandler {
 
     @Override

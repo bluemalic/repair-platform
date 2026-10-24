@@ -119,6 +119,18 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 # ============================================================
+# RocketMQ（阶段 2 · ADR-023）
+# 默认关闭：本地开发与测试不依赖 MQ；生产或 smoke test 设 REPAIR_ROCKETMQ_ENABLED=true
+# ============================================================
+repair:
+  rocketmq:
+    enabled: ${REPAIR_ROCKETMQ_ENABLED:false}
+    name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+    topic: ${ROCKETMQ_TOPIC:repair-ticket-events}
+    producer-group: ${ROCKETMQ_PRODUCER_GROUP:repair-producer}
+    consumer-group: ${ROCKETMQ_CONSUMER_GROUP:repair-notification-consumer}
+
+# ============================================================
 # 鉴权（Sa-Token）
 # 用默认的 opaque token 存 Redis，不是 JWT，所以没有密钥需要管理
 # ============================================================
