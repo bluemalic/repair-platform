@@ -257,6 +257,7 @@ class Phase5PlatformTest {
                         .header("Authorization", "Bearer " + student)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
+                                "idempotencyKey", "test-" + System.nanoTime(),
                                 "buildingId", buildingId, "room", "1-101",
                                 "categoryId", 1, "description", "指标测试工单", "urgency", 1))))
                 .andExpect(jsonPath("$.code").value(0));

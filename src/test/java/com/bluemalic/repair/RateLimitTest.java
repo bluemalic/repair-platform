@@ -235,7 +235,8 @@ class RateLimitTest {
         return mockMvc.perform(post("/api/student/tickets")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"repairCode\":\"" + VALID_CODE + "\",\"categoryId\":1,"
+                .content("{\"idempotencyKey\":\"test-" + System.nanoTime()
+                        + "\",\"repairCode\":\"" + VALID_CODE + "\",\"categoryId\":1,"
                         + "\"description\":\"限流用例\"}"));
     }
 

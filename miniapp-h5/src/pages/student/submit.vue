@@ -5,6 +5,7 @@ import { listEnabledCategories } from '@/api/category'
 import { uploadImage } from '@/api/file'
 import { getLocations } from '@/api/location'
 import { createTicket, getPositionByCode } from '@/api/ticket'
+import { newIdempotencyKey } from '@/utils/idempotency'
 import type { CategoryVO, LocationItem, LocationVO, RepairCodeVO } from '@/types'
 
 /**
@@ -17,6 +18,12 @@ import type { CategoryVO, LocationItem, LocationVO, RepairCodeVO } from '@/types
 const code = ref('')
 const position = ref<RepairCodeVO | null>(null)
 const looking = ref(false)
+
+/**
+ * 提交幂等键：进入本页时生成一次，**重试复用**，离开页面（提交成功后会 reLaunch）即作废。
+ * 不用 crypto.randomUUID：小程序端没有它；这个值只用于去重，不需要密码学强度。
+ */
+const idempotencyKey = ref(newIdempotencyKey())
 
 /**
  * 位置输入有两条路（docs/01 §4.6）：
@@ -174,6 +181,7 @@ async function submit() {
         ? { buildingId: currentBuilding.value!.buildingId, room: currentLocation.value!.room }
         : { repairCode: code.value.trim() }
     await createTicket({
+      idempotencyKey: idempotencyKey.value,
       ...locationPart,
       categoryId: categories.value[categoryIndex.value].id,
       description: description.value.trim(),

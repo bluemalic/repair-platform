@@ -48,6 +48,7 @@ import { computed, nextTick, ref } from 'vue'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { intake } from '@/api/agent'
 import { createTicket } from '@/api/ticket'
+import { newIdempotencyKey } from '@/utils/idempotency'
 import type { AgentDraft } from '@/types'
 
 /**
@@ -68,6 +69,8 @@ const messages = ref<Message[]>([{ role: 'assistant', text: '哪儿坏了？跟�
 const input = ref('')
 const thinking = ref(false)
 const submitting = ref(false)
+/** 与报修页同一套幂等语义：同一份草稿的重试复用同一个 key，提交成功后 reLaunch 换新 */
+const idempotencyKey = ref(newIdempotencyKey())
 const sessionId = ref('')
 const repairCode = ref('')
 const draft = ref<AgentDraft | null>(null)
@@ -153,6 +156,7 @@ async function confirm() {
   submitting.value = true
   try {
     await createTicket({
+      idempotencyKey: idempotencyKey.value,
       repairCode: repairCode.value,
       categoryId: d.categoryId,
       description: d.description ?? '',

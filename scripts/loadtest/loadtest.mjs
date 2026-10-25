@@ -105,6 +105,8 @@ const actions = {
       method: 'POST',
       token: ctx.studentToken,
       body: {
+        // 每次提交都是一个独立意图：幂等键必须唯一，否则会被服务端当成同一次重试
+        idempotencyKey: `lt-${seq}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         repairCode: args.code,
         categoryId: Number(args.category),
         description: `压测工单 #${seq}（${ctx.label}）`,

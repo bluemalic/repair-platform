@@ -1,6 +1,7 @@
 package com.bluemalic.repair.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.MetricsRecorder;
@@ -72,6 +73,24 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         long studentId = StpUtil.getLoginIdAsLong();
         SysUser student = lookup.requireUser(studentId);
 
+        String idempotencyKey = dto.getIdempotencyKey();
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            // 接口层 @NotBlank 已经挡住；这里兜住绕过接口的直接调用，避免空 key 让所有人共用一把“锁”
+            throw new BizException(ErrorCode.PARAM_INVALID, "幂等键不能为空");
+        }
+        // 不手写 tenant_id / student_id：ticket 的数据权限拦截器会注入（ADR-002），
+        // 所以同一个 key 也只可能命中当前学生自己的工单。
+        // 用 selectList 而不是 selectOne：MP 3.5.17 的 selectOne 走 selectWithCursor，
+        // 而 MyBatis 插件的 beforeQuery 不拦截 queryCursor——数据权限条件会被**静默跳过**。
+        // 这里按 key 查全表就等于跨学生读，所以必须用走普通 query 的 selectList。
+        Ticket submitted = ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
+                        .eq(Ticket::getIdempotencyKey, idempotencyKey))
+                .stream().findFirst().orElse(null);
+        if (submitted != null) {
+            log.info("重复提交命中幂等键，返回原工单 ticketId={} studentId={}", submitted.getId(), studentId);
+            return toVO(submitted);
+        }
+
         Long buildingId;
         String room;
         if (dto.getRepairCode() != null && !dto.getRepairCode().isBlank()) {
@@ -94,6 +113,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         ticket.setTenantId(student.getTenantId());
         ticket.setTicketNo(ticketNoGenerator.nextTicketNo());
         ticket.setStudentId(studentId);
+        ticket.setIdempotencyKey(idempotencyKey);
         ticket.setBuildingId(buildingId);
         ticket.setRoom(room);
         ticket.setCategoryId(dto.getCategoryId());
@@ -102,7 +122,23 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         ticket.setUrgency(dto.getUrgency() == null ? category.getDefaultUrgency() : dto.getUrgency());
         ticket.setStatus(TicketStatus.TO_DISPATCH.getCode());
         ticket.setSubmitTime(LocalDateTime.now());
-        ticketMapper.insert(ticket);
+        try {
+            ticketMapper.insert(ticket);
+        } catch (DuplicateKeyException e) {
+            // 并发下两个请求都没查到、同时插入：唯一键让后到的失败，回查后返回同一张单。
+            // 必须用当前读（FOR UPDATE）：REPEATABLE READ 的普通 SELECT 还停在旧快照，
+            // 看不到另一个事务刚提交的行，会把幂等冲突误判成未知错误。
+            Ticket duplicated = ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
+                            .eq(Ticket::getIdempotencyKey, idempotencyKey)
+                            .last("FOR UPDATE"))
+                    .stream().findFirst().orElse(null);
+            if (duplicated == null) {
+                // 不是幂等键冲突（例如工单号撞了），照常失败，不能吞
+                throw e;
+            }
+            log.info("并发提交命中幂等键，返回已创建工单 ticketId={} studentId={}", duplicated.getId(), studentId);
+            return toVO(duplicated);
+        }
 
         transitions.writeLog(ticket.getTenantId(), ticket.getId(), null, TicketStatus.TO_DISPATCH.getCode(),
                 TicketAction.SUBMIT, studentId, null);
@@ -115,9 +151,15 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         log.info("提交报修 ticketId={} studentId={} building={} room={}",
                 ticket.getId(), studentId, buildingId, room);
 
-        return TicketConverter.toVO(ticket,
-                readModelAssembler.buildingNames(List.of(buildingId)), readModelAssembler.categoryNames(List.of(dto.getCategoryId())));
+        return toVO(ticket);
     }
+
+    private TicketVO toVO(Ticket ticket) {
+        return TicketConverter.toVO(ticket,
+                readModelAssembler.buildingNames(List.of(ticket.getBuildingId())),
+                readModelAssembler.categoryNames(List.of(ticket.getCategoryId())));
+    }
+
     public void cancel(long id) {
         long studentId = StpUtil.getLoginIdAsLong();
         Ticket ticket = lookup.requireTicket(id);

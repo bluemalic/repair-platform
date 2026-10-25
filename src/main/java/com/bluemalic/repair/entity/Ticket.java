@@ -28,6 +28,9 @@ public class Ticket {
 
     private Long studentId;
 
+    /** 提交幂等键（客户端生成）；拆单产生的子工单与历史数据为 null */
+    private String idempotencyKey;
+
     /** 未派单时为 null */
     private Long workerId;
 
