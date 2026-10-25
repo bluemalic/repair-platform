@@ -35,16 +35,19 @@ class LocalNotificationEventHandler implements OutboxEventHandler {
 
     @Override
     public void handle(OutboxEvent event) {
+        NotificationCommand command;
         try {
-            NotificationCommand command = objectMapper.readValue(event.getPayload(), NotificationCommand.class);
-            notificationService.send(command.tenantId(), command.receiverId(), command.type(),
-                    command.title(), command.content(), command.ticketId());
-            log.info("本地 Outbox 站内信已发送 eventId={} receiver={} type={}",
-                    event.getEventId(), command.receiverId(), command.type());
+            command = objectMapper.readValue(event.getPayload(), NotificationCommand.class);
         } catch (Exception e) {
             // 解析失败重试也不会成功，记录后消费掉，避免 relay 无限重投
             log.warn("本地 Outbox 站内信事件解析失败 eventId={} payload={}",
                     event.getEventId(), event.getPayload(), e);
+            return;
         }
+        // 用 sendOrThrow：写库失败让 relay 重试，而不是静默丢通知
+        notificationService.sendOrThrow(command.tenantId(), command.receiverId(), command.type(),
+                command.title(), command.content(), command.ticketId());
+        log.info("本地 Outbox 站内信已发送 eventId={} receiver={} type={}",
+                event.getEventId(), command.receiverId(), command.type());
     }
 }

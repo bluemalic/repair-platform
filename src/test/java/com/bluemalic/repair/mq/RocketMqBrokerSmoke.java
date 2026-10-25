@@ -4,7 +4,7 @@ import com.bluemalic.repair.common.NotificationCommand;
 import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.entity.OutboxEvent;
-import com.bluemalic.repair.service.NotificationService;
+import com.bluemalic.repair.service.impl.NotificationConsumerService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
@@ -14,6 +14,7 @@ import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -23,6 +24,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -63,13 +67,15 @@ class RocketMqBrokerSmoke {
             // 先发一条 warmup，确保 topic 已创建；否则 consumer 订阅一个不存在的 topic 可能拿不到路由
             producer.send(new Message(topic, "WARMUP", "warmup".getBytes(StandardCharsets.UTF_8)));
 
+            RocketMqProperties properties = new RocketMqProperties(true, namesrv, topic,
+                    "repair-smoke-producer", "repair-smoke-consumer", true);
             DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("repair-smoke-consumer");
             try {
                 consumer.setNamesrvAddr(namesrv);
                 consumer.setVipChannelEnabled(false);
                 consumer.subscribe(topic, "*");
                 RocketMqEventConsumer appConsumer = new RocketMqEventConsumer(
-                        mock(NotificationService.class), new ObjectMapper());
+                        mock(NotificationConsumerService.class), new ObjectMapper(), properties);
                 consumer.registerMessageListener((MessageListenerConcurrently) (messages, context) -> {
                     appConsumer.consume(messages);
                     for (MessageExt message : messages) {
@@ -84,8 +90,6 @@ class RocketMqBrokerSmoke {
                 // 等 consumer 拿到路由
                 Thread.sleep(1500);
 
-                RocketMqProperties properties = new RocketMqProperties(
-                        true, namesrv, topic, "repair-smoke-producer", "repair-smoke-consumer");
                 RocketMqOutboxPublisher publisher = new RocketMqOutboxPublisher(producer, properties);
 
                 OutboxEvent event = new OutboxEvent();
@@ -124,11 +128,11 @@ class RocketMqBrokerSmoke {
         String payload = objectMapper.writeValueAsString(command);
         CountDownLatch latch = new CountDownLatch(1);
 
-        NotificationService notificationService = mock(NotificationService.class);
+        NotificationConsumerService consumerService = mock(NotificationConsumerService.class);
         doAnswer(invocation -> {
             latch.countDown();
             return null;
-        }).when(notificationService).send(any(), any(), any(), any(), any(), any());
+        }).when(consumerService).consume(anyLong(), anyString(), anyString(), any(NotificationCommand.class));
 
         DefaultMQProducer producer = new DefaultMQProducer("repair-smoke-producer-notify");
         producer.setNamesrvAddr(namesrv);
@@ -140,19 +144,19 @@ class RocketMqBrokerSmoke {
         try {
             producer.send(new Message(topic, "WARMUP", "warmup".getBytes(StandardCharsets.UTF_8)));
 
+            RocketMqProperties properties = new RocketMqProperties(true, namesrv, topic,
+                    "repair-smoke-producer-notify", "repair-smoke-consumer-notify", true);
             DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("repair-smoke-consumer-notify");
             try {
                 consumer.setNamesrvAddr(namesrv);
                 consumer.setVipChannelEnabled(false);
                 consumer.subscribe(topic, "*");
-                RocketMqEventConsumer appConsumer = new RocketMqEventConsumer(notificationService, objectMapper);
+                RocketMqEventConsumer appConsumer = new RocketMqEventConsumer(consumerService, objectMapper, properties);
                 consumer.registerMessageListener((MessageListenerConcurrently) (messages, context) ->
                         appConsumer.consume(messages));
                 consumer.start();
                 Thread.sleep(1500);
 
-                RocketMqProperties properties = new RocketMqProperties(true, namesrv, topic,
-                        "repair-smoke-producer-notify", "repair-smoke-consumer-notify");
                 RocketMqOutboxPublisher publisher = new RocketMqOutboxPublisher(producer, properties);
 
                 OutboxEvent event = new OutboxEvent();
@@ -164,9 +168,12 @@ class RocketMqBrokerSmoke {
                 publisher.handle(event);
 
                 assertThat(latch.await(10, TimeUnit.SECONDS))
-                        .as("10 秒内消费者应调用 NotificationService.send").isTrue();
-                verify(notificationService).send(1L, 2L, "TICKET_ACCEPTED",
-                        "维修工已接单", "工单 WX1 已被接单", 42L);
+                        .as("10 秒内消费者应调用 NotificationConsumerService.consume").isTrue();
+                ArgumentCaptor<NotificationCommand> captor = ArgumentCaptor.forClass(NotificationCommand.class);
+                verify(consumerService).consume(eq(1L), eq("repair-smoke-consumer-notify"),
+                        anyString(), captor.capture());
+                assertThat(captor.getValue().receiverId()).isEqualTo(2L);
+                assertThat(captor.getValue().type()).isEqualTo("TICKET_ACCEPTED");
             } finally {
                 consumer.shutdown();
             }

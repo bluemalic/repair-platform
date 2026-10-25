@@ -39,30 +39,35 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public void send(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId) {
-        if (receiverId == null) {
-            return;
-        }
         try {
-            String safeTitle = TextLimits.truncate(title, TextLimits.NOTIFICATION_TITLE);
-            String safeContent = TextLimits.truncate(content, TextLimits.NOTIFICATION_CONTENT);
-            if ((title != null && safeTitle.length() < title.length())
-                    || (content != null && safeContent.length() < content.length())) {
-                log.warn("站内通知文案超长已截断 receiver={} type={} titleLength={} contentLength={}",
-                        receiverId, type, title == null ? 0 : title.length(),
-                        content == null ? 0 : content.length());
-            }
-            Notification notification = new Notification();
-            notification.setTenantId(tenantId);
-            notification.setReceiverId(receiverId);
-            notification.setType(type);
-            notification.setTitle(safeTitle);
-            notification.setContent(safeContent);
-            notification.setTicketId(ticketId);
-            notification.setIsRead(0);
-            notificationMapper.insert(notification);
+            sendOrThrow(tenantId, receiverId, type, title, content, ticketId);
         } catch (Exception e) {
             log.warn("站内通知发送失败（不影响主流程） receiver={} type={}", receiverId, type, e);
         }
+    }
+
+    @Override
+    public void sendOrThrow(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId) {
+        if (receiverId == null) {
+            return;
+        }
+        String safeTitle = TextLimits.truncate(title, TextLimits.NOTIFICATION_TITLE);
+        String safeContent = TextLimits.truncate(content, TextLimits.NOTIFICATION_CONTENT);
+        if ((title != null && safeTitle.length() < title.length())
+                || (content != null && safeContent.length() < content.length())) {
+            log.warn("站内通知文案超长已截断 receiver={} type={} titleLength={} contentLength={}",
+                    receiverId, type, title == null ? 0 : title.length(),
+                    content == null ? 0 : content.length());
+        }
+        Notification notification = new Notification();
+        notification.setTenantId(tenantId);
+        notification.setReceiverId(receiverId);
+        notification.setType(type);
+        notification.setTitle(safeTitle);
+        notification.setContent(safeContent);
+        notification.setTicketId(ticketId);
+        notification.setIsRead(0);
+        notificationMapper.insert(notification);
     }
 
     @Override

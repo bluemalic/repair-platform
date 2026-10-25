@@ -77,8 +77,9 @@ public class TenantDataMigrator {
             new CopyTable("audit_log", "tenant_id = ?"),
             new CopyTable("knowledge_entry", "tenant_id = ?"),
             // 发件箱也搬：切换前还没投递的事件不能丢（SENT 的历史行一并复制，目标库 relay 只处理 NEW）。
-            // 它不参与业务外键，放在最后。
-            new CopyTable("outbox_event", "tenant_id = ?"));
+            // 幂等记录也搬：切换后同一个 eventId 不会被重复消费。
+            new CopyTable("outbox_event", "tenant_id = ?"),
+            new CopyTable("consumed_event", "tenant_id = ?"));
 
     private static final String COLUMNS_SQL =
             "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS"

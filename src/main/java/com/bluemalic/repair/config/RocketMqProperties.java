@@ -19,17 +19,20 @@ public class RocketMqProperties {
     private final String topic;
     private final String producerGroup;
     private final String consumerGroup;
+    private final boolean consumerEnabled;
 
     public RocketMqProperties(
             @Value("${repair.rocketmq.enabled:false}") boolean enabled,
             @Value("${repair.rocketmq.name-server:127.0.0.1:9876}") String nameServer,
             @Value("${repair.rocketmq.topic:repair-ticket-events}") String topic,
             @Value("${repair.rocketmq.producer-group:repair-producer}") String producerGroup,
-            @Value("${repair.rocketmq.consumer-group:repair-notification-consumer}") String consumerGroup) {
+            @Value("${repair.rocketmq.consumer-group:repair-notification-consumer}") String consumerGroup,
+            @Value("${repair.rocketmq.consumer-enabled:true}") boolean consumerEnabled) {
         this.enabled = enabled;
         this.nameServer = nameServer;
         this.topic = topic;
         this.producerGroup = producerGroup;
         this.consumerGroup = consumerGroup;
+        this.consumerEnabled = consumerEnabled;
     }
 }

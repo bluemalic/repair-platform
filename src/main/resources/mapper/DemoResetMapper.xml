@@ -29,6 +29,11 @@
         DELETE FROM outbox_event WHERE tenant_id = #{tenantId}
     </delete>
 
+    <!-- 幂等记录与旧工单一起清，避免重置后同一个 eventId 被永久跳过 -->
+    <delete id="deleteConsumedEvents">
+        DELETE FROM consumed_event WHERE tenant_id = #{tenantId}
+    </delete>
+
     <!-- 维修工负责楼栋：重置时整体重建，避免演示工单落在"没人负责的楼栋"上 -->
     <delete id="deleteWorkerBuildings">
         DELETE FROM worker_building WHERE tenant_id = #{tenantId}
