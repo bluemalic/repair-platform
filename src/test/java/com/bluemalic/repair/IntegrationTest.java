@@ -37,6 +37,9 @@ import java.lang.annotation.Target;
         // Outbox relay 的定时触发在测试里关掉：它会在每个库上空转、并和测试事务抢数据。
         // 需要验证 relay 的用例直接调用 OutboxRelayJob#relayOnce（包级可见）。
         "repair.outbox.relay-enabled=false",
+        // 保留期清理的定时触发同样关掉：它会在每个库上跑 DELETE，不该在测试里自己动数据。
+        // 需要验证的用例直接调用 ConsumedEventCleanupJob#cleanExpired（包级可见）。
+        "repair.event-retention.enabled=false",
         // 测试不依赖 MQ：RocketMQ 关闭时 Outbox 走本地日志消费者，集成测试不需要 broker。
         "repair.rocketmq.enabled=false",
         // 测试保持同步站内信，现有断言（请求返回后立刻查通知）不用改。
