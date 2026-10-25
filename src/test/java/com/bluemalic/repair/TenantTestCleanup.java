@@ -1,5 +1,6 @@
 package com.bluemalic.repair;
 
+import com.bluemalic.repair.config.TenancyProperties;
 import com.bluemalic.repair.tenancy.TenantSchemas;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -27,8 +28,12 @@ public class TenantTestCleanup {
 
     private final DataSource controlDataSource;
 
-    public TenantTestCleanup(@Qualifier("controlDataSource") DataSource controlDataSource) {
+    private final TenancyProperties tenancyProperties;
+
+    public TenantTestCleanup(@Qualifier("controlDataSource") DataSource controlDataSource,
+                             TenancyProperties tenancyProperties) {
         this.controlDataSource = controlDataSource;
+        this.tenancyProperties = tenancyProperties;
     }
 
     /**
@@ -52,6 +57,11 @@ public class TenantTestCleanup {
                             schema = rs.getString(2);
                         }
                     }
+                }
+                if (schema == null && tenantId != null) {
+                    // 搬家用例最后一步是"回退到共享库"：把 db_schema 置空，但建好的库还在。
+                    // 库名由编码唯一确定（TenantSchemas），所以这里按编码补算一次，否则每跑一轮就漏一个库。
+                    schema = tenancyProperties.schemaFor(code);
                 }
                 if (schema != null) {
                     TenantSchemas.requireSafe(schema);
