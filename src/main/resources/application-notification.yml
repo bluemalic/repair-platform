@@ -1,0 +1,8 @@
+# notification-service 独立进程的 profile（阶段 2 · ADR-023）
+# 启动：--spring.profiles.active=notification
+spring:
+  main:
+    web-application-type: none
+  # 表结构由单体/部署负责，consumer 进程不跑迁移
+  flyway:
+    enabled: false

@@ -32,7 +32,7 @@ import java.lang.annotation.Target;
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest(properties = {
+@SpringBootTest(classes = RepairPlatformApplication.class, properties = {
         "repair.timeout.scheduler-enabled=false",
         // Outbox relay 的定时触发在测试里关掉：它会在每个库上空转、并和测试事务抢数据。
         // 需要验证 relay 的用例直接调用 OutboxRelayJob#relayOnce（包级可见）。

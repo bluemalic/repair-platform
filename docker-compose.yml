@@ -181,6 +181,57 @@ services:
         limits:
           memory: ${ROCKETMQ_DASHBOARD_MEM_LIMIT:-512M}
 
+  # ============================================================
+  # notification-service（阶段 2 · ADR-023）—— 与 app 共用镜像，独立进程
+  # 启动：docker compose --profile rocketmq --profile notification up -d
+  # 单体必须设 ROCKETMQ_CONSUMER_ENABLED=false，避免两个进程同时消费
+  # ============================================================
+  notification:
+    image: ${IMAGE_NAME:-repair-app:latest}
+    container_name: repair-notification-service
+    restart: unless-stopped
+    profiles: ["notification"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: notification
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${NOTIFICATION_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REPAIR_ROCKETMQ_ENABLED: "true"
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      ROCKETMQ_CONSUMER_GROUP: repair-notification-service
+      ROCKETMQ_CONSUMER_ENABLED: "true"
+    # 同一个 boot jar，用 PropertiesLauncher 指定 notification 入口
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -Duser.timezone=Asia/Shanghai
+        -Dloader.main=com.bluemalic.repair.notification.NotificationServiceApplication
+        -cp app.jar
+        org.springframework.boot.loader.launch.PropertiesLauncher
+    volumes:
+      - ./logs/notification:/app/logs
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${NOTIFICATION_MEM_LIMIT:-512M}
+
   app:
     build:
       context: .

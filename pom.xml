@@ -225,6 +225,9 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <!-- 现在有两个 @SpringBootApplication（单体 + notification-service），
+                         必须显式指定默认入口，否则 repackage 会报 "Unable to find a single main class" -->
+                    <mainClass>com.bluemalic.repair.RepairPlatformApplication</mainClass>
                     <excludes>
                         <!-- Lombok 是编译期依赖，不打进可执行 jar -->
                         <exclude>
