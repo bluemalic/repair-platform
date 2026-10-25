@@ -309,7 +309,34 @@ jobs:
             echo "已回滚到 previous"
 
   # ============================================================
-  # 3. 前端产物：**与后端完全独立的一条链**
+  # 3. 构建缓存清理：**单独一个 job，不是 deploy-app 的最后一步**
+  #
+  #    构建缓存会随每次部署长大（一次完整构建能留下几 GB 中间层）。2C2G 的 40G 系统盘上
+  #    它是磁盘占用的第一大户：2026-10-25 实测 17.7G，其中 16.5G 已不被任何镜像引用。
+  #
+  #    为什么不塞进 deploy-app：那边的失败处理是 `if: failure()` → 回滚。清理失败
+  #    （比如 docker 命令参数变了）不该把一次成功的部署判成失败、更不该触发回滚。
+  #    `needs` 让它在部署失败时直接跳过——失败现场要留给回滚和排障，那些层可能还有用。
+  # ============================================================
+  prune-cache:
+    name: 清理构建缓存
+    needs: deploy-app
+    runs-on: ubuntu-latest
+    steps:
+      - name: 清理构建缓存（保留 8G）
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            # --keep-storage 是"清理后不超过"的上限，不是额外保留；-f 是因为流水线没有交互终端
+            docker builder prune -f --keep-storage 8GB
+            docker system df
+
+  # ============================================================
+  # 4. 前端产物：**与后端完全独立的一条链**
   #
   #    这一条解决的是"手工步骤最容易漏"的问题：原来前端产物靠手工上传，
   #    漏过一次 `VITE_DEMO_ACCOUNTS`（见 docs/05 §4.2）。前端产物只有几 MB，
