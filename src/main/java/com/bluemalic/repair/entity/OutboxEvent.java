@@ -38,6 +38,7 @@ public class OutboxEvent {
 
     private Integer attempts;
 
+    /** 下次可处理时间：失败退避的到期点，或 claim 租约的到期点（见 OutboxRelayJob） */
     private LocalDateTime nextAttemptAt;
 
     private LocalDateTime createdAt;
