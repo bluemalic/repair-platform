@@ -134,6 +134,12 @@ repair:
   notification:
     # sync（默认）：TicketNoticePublisher 直接写站内信；mq：写 Outbox，由 MQ 或本地 handler 投递
     delivery: ${REPAIR_NOTIFICATION_DELIVERY:sync}
+  event-retention:
+    # consumed_event 是追加型表，不清理会无限增长（唯一索引越大，消费插入越慢）。
+    # 保留期只要覆盖 MQ 的最大重投窗口：RocketMQ 默认保留 72 小时，30 天有充足余量。
+    enabled: ${REPAIR_EVENT_RETENTION_ENABLED:true}
+    days: ${REPAIR_EVENT_RETENTION_DAYS:30}
+    cron: ${REPAIR_EVENT_RETENTION_CRON:0 20 4 * * *}
 
 # ============================================================
 # 鉴权（Sa-Token）
