@@ -1,5 +1,6 @@
 package com.bluemalic.repair.mq;
 
+import com.bluemalic.repair.common.NotificationCommand;
 import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.entity.OutboxEvent;
@@ -34,7 +35,8 @@ public class RocketMqOutboxPublisher implements OutboxEventHandler {
 
     @Override
     public boolean supports(String eventType) {
-        return TicketStatusChangedEvent.EVENT_TYPE.equals(eventType);
+        return TicketStatusChangedEvent.EVENT_TYPE.equals(eventType)
+                || NotificationCommand.EVENT_TYPE.equals(eventType);
     }
 
     @Override

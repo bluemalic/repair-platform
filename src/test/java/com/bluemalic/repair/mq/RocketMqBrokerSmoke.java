@@ -1,8 +1,11 @@
 package com.bluemalic.repair.mq;
 
+import com.bluemalic.repair.common.NotificationCommand;
 import com.bluemalic.repair.common.TicketStatusChangedEvent;
 import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.entity.OutboxEvent;
+import com.bluemalic.repair.service.NotificationService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
@@ -19,6 +22,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * 真实 RocketMQ 的手动 smoke test（默认不跑，CI 不依赖 MQ）。
@@ -48,6 +55,9 @@ class RocketMqBrokerSmoke {
         DefaultMQProducer producer = new DefaultMQProducer("repair-smoke-producer");
         producer.setNamesrvAddr(namesrv);
         producer.setVipChannelEnabled(false);
+        // 连续跑两个用例时，第二个 producer group 的首次路由/心跳可能来不及在默认 3s 内完成
+        producer.setSendMsgTimeout(10_000);
+        producer.setRetryTimesWhenSendFailed(2);
         producer.start();
         try {
             // 先发一条 warmup，确保 topic 已创建；否则 consumer 订阅一个不存在的 topic 可能拿不到路由
@@ -58,7 +68,8 @@ class RocketMqBrokerSmoke {
                 consumer.setNamesrvAddr(namesrv);
                 consumer.setVipChannelEnabled(false);
                 consumer.subscribe(topic, "*");
-                RocketMqEventConsumer appConsumer = new RocketMqEventConsumer();
+                RocketMqEventConsumer appConsumer = new RocketMqEventConsumer(
+                        mock(NotificationService.class), new ObjectMapper());
                 consumer.registerMessageListener((MessageListenerConcurrently) (messages, context) -> {
                     appConsumer.consume(messages);
                     for (MessageExt message : messages) {
@@ -95,6 +106,67 @@ class RocketMqBrokerSmoke {
                 assertThat(message.getUserProperty("eventId")).isEqualTo(eventId);
                 assertThat(message.getUserProperty("tenantId")).isEqualTo("1");
                 assertThat(new String(message.getBody(), StandardCharsets.UTF_8)).isEqualTo(payload);
+            } finally {
+                consumer.shutdown();
+            }
+        } finally {
+            producer.shutdown();
+        }
+    }
+
+    @Test
+    void publishesAndConsumesNotificationCommand() throws Exception {
+        String namesrv = System.getProperty("rocketmq.smoke.namesrv", "127.0.0.1:9876");
+        String topic = "repair-ticket-events";
+        ObjectMapper objectMapper = new ObjectMapper();
+        NotificationCommand command = new NotificationCommand(
+                1L, 2L, "TICKET_ACCEPTED", "维修工已接单", "工单 WX1 已被接单", 42L);
+        String payload = objectMapper.writeValueAsString(command);
+        CountDownLatch latch = new CountDownLatch(1);
+
+        NotificationService notificationService = mock(NotificationService.class);
+        doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(notificationService).send(any(), any(), any(), any(), any(), any());
+
+        DefaultMQProducer producer = new DefaultMQProducer("repair-smoke-producer-notify");
+        producer.setNamesrvAddr(namesrv);
+        producer.setVipChannelEnabled(false);
+        // 连续跑两个用例时，第二个 producer group 的首次路由/心跳可能来不及在默认 3s 内完成
+        producer.setSendMsgTimeout(10_000);
+        producer.setRetryTimesWhenSendFailed(2);
+        producer.start();
+        try {
+            producer.send(new Message(topic, "WARMUP", "warmup".getBytes(StandardCharsets.UTF_8)));
+
+            DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("repair-smoke-consumer-notify");
+            try {
+                consumer.setNamesrvAddr(namesrv);
+                consumer.setVipChannelEnabled(false);
+                consumer.subscribe(topic, "*");
+                RocketMqEventConsumer appConsumer = new RocketMqEventConsumer(notificationService, objectMapper);
+                consumer.registerMessageListener((MessageListenerConcurrently) (messages, context) ->
+                        appConsumer.consume(messages));
+                consumer.start();
+                Thread.sleep(1500);
+
+                RocketMqProperties properties = new RocketMqProperties(true, namesrv, topic,
+                        "repair-smoke-producer-notify", "repair-smoke-consumer-notify");
+                RocketMqOutboxPublisher publisher = new RocketMqOutboxPublisher(producer, properties);
+
+                OutboxEvent event = new OutboxEvent();
+                event.setEventId("smoke-notify-" + UUID.randomUUID());
+                event.setTenantId(1L);
+                event.setAggregateId(42L);
+                event.setEventType(NotificationCommand.EVENT_TYPE);
+                event.setPayload(payload);
+                publisher.handle(event);
+
+                assertThat(latch.await(10, TimeUnit.SECONDS))
+                        .as("10 秒内消费者应调用 NotificationService.send").isTrue();
+                verify(notificationService).send(1L, 2L, "TICKET_ACCEPTED",
+                        "维修工已接单", "工单 WX1 已被接单", 42L);
             } finally {
                 consumer.shutdown();
             }
