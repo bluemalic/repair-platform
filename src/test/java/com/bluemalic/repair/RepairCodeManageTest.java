@@ -106,6 +106,7 @@ class RepairCodeManageTest {
 
         // 也能直接用它提交报修（扫码报修的完整闭环）
         postJson(student, "/api/student/tickets", Map.of(
+                "idempotencyKey", "test-" + System.nanoTime(),
                 "repairCode", code, "categoryId", SEED_CATEGORY, "description", "新码报修"))
                 .andExpect(jsonPath("$.code").value(0));
     }

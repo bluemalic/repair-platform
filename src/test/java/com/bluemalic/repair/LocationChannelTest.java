@@ -135,6 +135,7 @@ class LocationChannelTest {
         submit.put("categoryId", waterCategoryId);
         submit.put("description", "大厅吊灯不亮");
         submit.put("urgency", 1);
+        submit.put("idempotencyKey", "test-" + System.nanoTime());
         MvcResult created = mockMvc.perform(post("/api/student/tickets")
                         .header("Authorization", "Bearer " + student)
                         .contentType(MediaType.APPLICATION_JSON)

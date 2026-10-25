@@ -229,6 +229,7 @@ class WorkerManageTest {
     /** 学生用种子报修码提交一张 1 号楼的工单，返回工单 ID。 */
     private String submitTicket(String student) throws Exception {
         MvcResult result = postJson(student, "/api/student/tickets", Map.of(
+                "idempotencyKey", "test-" + System.nanoTime(),
                 "repairCode", "482913", "categoryId", 1, "description", "维修工管理测试"))
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();

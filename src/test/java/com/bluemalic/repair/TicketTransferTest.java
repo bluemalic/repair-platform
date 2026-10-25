@@ -382,6 +382,7 @@ class TicketTransferTest {
     /** 提交一张报修，停在 10 待派单。 */
     private String submitTicket(String student) throws Exception {
         MvcResult result = postJson(student, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-" + System.nanoTime(),
                         "repairCode", "482913", "categoryId", 1, "description", "【测试】水管漏水"))
                 .andExpect(jsonPath("$.code").value(0)).andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))

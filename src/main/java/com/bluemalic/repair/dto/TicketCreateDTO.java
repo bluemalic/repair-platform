@@ -14,6 +14,12 @@ import java.util.List;
 @Schema(description = "提交报修入参")
 public class TicketCreateDTO {
 
+    @Schema(description = "提交幂等键：客户端生成，重试时必须复用同一个值；同 key 只会产生一张工单",
+            example = "1719300000000-8f3a2c1d9b7e")
+    @NotBlank(message = "幂等键不能为空")
+    @Size(max = 64, message = "幂等键最长 64 字符")
+    private String idempotencyKey;
+
     @Schema(description = "报修码（扫码 / 手输），带上后自动定位楼栋与房间")
     private String repairCode;
 

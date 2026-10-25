@@ -44,6 +44,8 @@ export function getPositionByCode(code: string) {
  * 两条路落到同一张工单表、同一套到场核验：位置清单里的每个位置都有一张码。
  */
 export function createTicket(body: {
+  /** 客户端生成的幂等键：重试必须复用同一个值，同 key 只会产生一张工单 */
+  idempotencyKey: string
   repairCode?: string
   buildingId?: string
   room?: string

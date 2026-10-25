@@ -224,6 +224,7 @@ class DictionaryManageTest {
                 "name", "测试类别", "defaultUrgency", 2, "sort", 0, "status", 0))
                 .andExpect(jsonPath("$.code").value(0));
         postJson(student, "/api/student/tickets", Map.of(
+                "idempotencyKey", "test-" + System.nanoTime(),
                 "repairCode", "482913", "categoryId", categoryId, "description", "停用类别"))
                 .andExpect(jsonPath("$.code").value(10001))
                 .andExpect(jsonPath("$.message").value("报修类别不存在或已停用"));
@@ -297,6 +298,7 @@ class DictionaryManageTest {
 
     private void submitTicket(String student, long buildingId, long categoryId) throws Exception {
         postJson(student, "/api/student/tickets", Map.of(
+                "idempotencyKey", "test-" + System.nanoTime(),
                 "buildingId", buildingId, "room", "9-101",
                 "categoryId", categoryId, "description", "字典管理测试"))
                 .andExpect(jsonPath("$.code").value(0));

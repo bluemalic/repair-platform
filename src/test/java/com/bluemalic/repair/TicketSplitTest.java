@@ -260,6 +260,7 @@ class TicketSplitTest {
 
     private String submittedTicket(String student, List<String> images) throws Exception {
         MvcResult result = postJson(student, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-" + System.nanoTime(),
                         "repairCode", "482913", "categoryId", 1, "description", "【测试】灯坏了，顺便水龙头也漏",
                         "images", images))
                 .andExpect(jsonPath("$.code").value(0)).andReturn();

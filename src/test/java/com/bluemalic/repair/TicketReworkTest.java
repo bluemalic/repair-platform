@@ -213,6 +213,7 @@ class TicketReworkTest {
 
     private String submitTicket(String token) throws Exception {
         MvcResult result = postJson(token, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-" + System.nanoTime(),
                         "repairCode", "482913", "categoryId", 1, "description", "水管漏水"))
                 .andExpect(jsonPath("$.code").value(0)).andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))

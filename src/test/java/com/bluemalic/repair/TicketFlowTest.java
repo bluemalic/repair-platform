@@ -189,6 +189,7 @@ class TicketFlowTest {
 
         // 紧急度只有 1/2/3；越界应在参数校验层被拦（10001），不该落库成"0 普通"之外的脏值
         postJson(student, "/api/student/tickets", Map.of(
+                "idempotencyKey", "test-" + System.nanoTime(),
                 "repairCode", "482913", "categoryId", 1, "description", "紧急度越界",
                 "urgency", 9)).andExpect(jsonPath("$.code").value(10001));
     }
@@ -252,7 +253,9 @@ class TicketFlowTest {
     // ==================== 工具 ====================
 
     private void assertSubmitRejected(String token, Map<String, Object> body) throws Exception {
-        postJson(token, "/api/student/tickets", body)
+        Map<String, Object> withKey = new java.util.HashMap<>(body);
+        withKey.put("idempotencyKey", "test-" + System.nanoTime());
+        postJson(token, "/api/student/tickets", withKey)
                 .andExpect(jsonPath("$.code").value(10001))
                 .andExpect(jsonPath("$.message").value("楼栋不存在或已停用"));
     }
@@ -271,6 +274,7 @@ class TicketFlowTest {
     private String submitTicket(String token, String repairCode) throws Exception {
         // 始终用 1 号楼的报修码提交，方便按楼栋断言数据范围
         MvcResult result = postJson(token, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-" + System.nanoTime(),
                         "repairCode", "482913", "categoryId", 1, "description", "水管漏水"))
                 .andExpect(jsonPath("$.code").value(0)).andReturn();
         JsonNode node = objectMapper.readTree(

@@ -331,6 +331,7 @@ class TicketCollaboratorTest {
     /** 提交 + 派给指定师傅（停在 20 待接单），并登记进本用例的清理名单。 */
     private String dispatchedTicket(String student, String admin, String workerUsername) throws Exception {
         MvcResult result = postJson(student, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-" + System.nanoTime(),
                         "repairCode", "482913", "categoryId", 1, "description", "【测试】协作测试用单"))
                 .andExpect(jsonPath("$.code").value(0)).andReturn();
         String ticketId = objectMapper.readTree(result.getResponse().getContentAsString(StandardCharsets.UTF_8))
