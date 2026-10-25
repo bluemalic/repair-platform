@@ -25,5 +25,7 @@ public interface DemoResetMapper {
 
     int deleteOutboxEvents(@Param("tenantId") long tenantId);
 
+    int deleteConsumedEvents(@Param("tenantId") long tenantId);
+
     int deleteWorkerBuildings(@Param("tenantId") long tenantId);
 }

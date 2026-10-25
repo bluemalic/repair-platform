@@ -37,6 +37,8 @@ public class RocketMqConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "repair.rocketmq", name = "consumer-enabled",
+            havingValue = "true", matchIfMissing = true)
     public DefaultMQPushConsumer rocketMqConsumer(RocketMqEventConsumer consumer) throws MQClientException {
         DefaultMQPushConsumer pushConsumer = new DefaultMQPushConsumer(properties.getConsumerGroup());
         pushConsumer.setNamesrvAddr(properties.getNameServer());

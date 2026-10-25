@@ -19,7 +19,7 @@ class LocalNotificationEventHandlerTest {
     void localHandlerSendsWhenRocketMqDisabled() throws Exception {
         NotificationService notificationService = mock(NotificationService.class);
         RocketMqProperties properties = new RocketMqProperties(
-                false, "127.0.0.1:9876", "topic", "producer", "consumer");
+                false, "127.0.0.1:9876", "topic", "producer", "consumer", true);
         LocalNotificationEventHandler handler = new LocalNotificationEventHandler(
                 notificationService, objectMapper, properties);
 
@@ -32,14 +32,14 @@ class LocalNotificationEventHandlerTest {
         assertThat(handler.supports(NotificationCommand.EVENT_TYPE)).isTrue();
         handler.handle(event);
 
-        verify(notificationService).send(1L, 2L, "TICKET_ACCEPTED",
+        verify(notificationService).sendOrThrow(1L, 2L, "TICKET_ACCEPTED",
                 "维修工已接单", "工单 WX1 已被接单", 99L);
     }
 
     @Test
     void localHandlerYieldsToRocketMqWhenEnabled() {
         RocketMqProperties properties = new RocketMqProperties(
-                true, "127.0.0.1:9876", "topic", "producer", "consumer");
+                true, "127.0.0.1:9876", "topic", "producer", "consumer", true);
         LocalNotificationEventHandler handler = new LocalNotificationEventHandler(
                 mock(NotificationService.class), objectMapper, properties);
 

@@ -24,7 +24,7 @@ class RocketMqOutboxPublisherTest {
         DefaultMQProducer producer = mock(DefaultMQProducer.class);
         when(producer.send(any(Message.class))).thenReturn(new SendResult());
         RocketMqProperties properties = new RocketMqProperties(
-                true, "127.0.0.1:9876", "repair-ticket-events", "repair-producer", "repair-consumer");
+                true, "127.0.0.1:9876", "repair-ticket-events", "repair-producer", "repair-consumer", true);
         RocketMqOutboxPublisher publisher = new RocketMqOutboxPublisher(producer, properties);
 
         OutboxEvent event = new OutboxEvent();

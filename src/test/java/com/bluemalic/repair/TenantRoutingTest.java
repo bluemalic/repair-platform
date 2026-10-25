@@ -152,16 +152,17 @@ class TenantRoutingTest {
                 "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '" + schema
                         + "' AND TABLE_NAME = 'tenant'"))
                 .as("租户库里不该有 tenant（学校名录只在平台库）").isZero();
-        for (String table : List.of("ticket", "sys_user", "sys_user_role", "knowledge_entry", "worker_skill", "outbox_event")) {
+        for (String table : List.of("ticket", "sys_user", "sys_user_role", "knowledge_entry", "worker_skill",
+                "outbox_event", "consumed_event")) {
             assertThat(scalar(TenantRoutingContext.CONTROL,
                     "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '" + schema
                             + "' AND TABLE_NAME = '" + table + "'"))
                     .as("租户库里应当有 %s", table).isEqualTo(1);
         }
-        // 它跑的是**租户库自己那套脚本**（V1..V2 + R__seed 三条），与平台库的 V1..V14 不是同一个历史
+        // 它跑的是**租户库自己那套脚本**（V1..V3 + R__seed 四条），与平台库的 V1..V15 不是同一个历史
         assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history"))
-                .as("租户库的迁移历史只有它自己那三条").isEqualTo(3);
-        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '14'"))
+                .as("租户库的迁移历史只有它自己那四条").isEqualTo(4);
+        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '15'"))
                 .as("平台库的版本号不该出现在租户库里").isZero();
 
         // ② 首个管理员只在租户库：同一句 SQL、两个库、两个答案
