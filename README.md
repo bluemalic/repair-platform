@@ -216,12 +216,12 @@ repair-platform/
 │   ├── converter/       Entity ↔ DTO ↔ VO
 │   ├── interceptor/     数据权限、鉴权、限流、平台域收口、首登强制改密
 │   ├── ai/              Schema 注入、SQL 生成、四层安全网关、问数编排与 SSE 流式
-│   └── job/             超时调度、Outbox relay、幂等记录清理、演示数据重置、平台账号引导
+│   └── job/             超时调度、Outbox relay、事件记录清理、演示数据重置、平台账号引导
 ├── src/main/resources/
 │   ├── application.yml  配置全部走 ${ENV_VAR:默认值}；密码与 Key 一律从环境变量读
 │   ├── db/migration/    Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
 │   └── mapper/          MyBatis XML
-├── src/test/java/       345 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
+├── src/test/java/       346 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/
