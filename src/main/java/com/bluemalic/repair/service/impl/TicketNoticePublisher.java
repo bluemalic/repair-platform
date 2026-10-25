@@ -1,9 +1,11 @@
 package com.bluemalic.repair.service.impl;
 
+import com.bluemalic.repair.common.NotificationCommand;
 import com.bluemalic.repair.common.TicketAction;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.service.NotificationService;
-import lombok.RequiredArgsConstructor;
+import com.bluemalic.repair.service.OutboxService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -13,10 +15,19 @@ import java.util.Map;
  * 调用方只负责“触发”与必要的补充参数。
  */
 @Component
-@RequiredArgsConstructor
 class TicketNoticePublisher {
 
     private final NotificationService notificationService;
+    private final OutboxService outboxService;
+    private final boolean mqDelivery;
+
+    TicketNoticePublisher(NotificationService notificationService,
+                          OutboxService outboxService,
+                          @Value("${repair.notification.delivery:sync}") String delivery) {
+        this.notificationService = notificationService;
+        this.outboxService = outboxService;
+        this.mqDelivery = "mq".equalsIgnoreCase(delivery);
+    }
 
     /** 状态变更通知的规格：类型、标题、正文后缀、默认接收方。新动作加一行即可。 */
     record NoticeSpec(String type, String title, String suffix, boolean toStudent) {
@@ -52,7 +63,15 @@ class TicketNoticePublisher {
             // 不要用 long 拆箱换一个 500。
             return;
         }
-        notificationService.send(ticket.getTenantId(), receiver, spec.type(), spec.title(),
-                "工单 " + ticket.getTicketNo() + (suffix == null ? spec.suffix() : suffix), ticket.getId());
+        String content = "工单 " + ticket.getTicketNo() + (suffix == null ? spec.suffix() : suffix);
+        if (mqDelivery) {
+            // 与状态变更同一个本地事务：通知事件先落 Outbox，再异步投递；
+            // 这样业务提交了，通知命令一定在，MQ/消费者失败只会重试。
+            outboxService.append(ticket.getTenantId(), "TICKET", ticket.getId(), NotificationCommand.EVENT_TYPE,
+                    new NotificationCommand(ticket.getTenantId(), receiver, spec.type(),
+                            spec.title(), content, ticket.getId()));
+            return;
+        }
+        notificationService.send(ticket.getTenantId(), receiver, spec.type(), spec.title(), content, ticket.getId());
     }
 }

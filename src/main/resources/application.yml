@@ -129,6 +129,9 @@ repair:
     topic: ${ROCKETMQ_TOPIC:repair-ticket-events}
     producer-group: ${ROCKETMQ_PRODUCER_GROUP:repair-producer}
     consumer-group: ${ROCKETMQ_CONSUMER_GROUP:repair-notification-consumer}
+  notification:
+    # sync（默认）：TicketNoticePublisher 直接写站内信；mq：写 Outbox，由 MQ 或本地 handler 投递
+    delivery: ${REPAIR_NOTIFICATION_DELIVERY:sync}
 
 # ============================================================
 # 鉴权（Sa-Token）

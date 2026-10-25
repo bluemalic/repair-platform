@@ -39,6 +39,8 @@ import java.lang.annotation.Target;
         "repair.outbox.relay-enabled=false",
         // 测试不依赖 MQ：RocketMQ 关闭时 Outbox 走本地日志消费者，集成测试不需要 broker。
         "repair.rocketmq.enabled=false",
+        // 测试保持同步站内信，现有断言（请求返回后立刻查通知）不用改。
+        "repair.notification.delivery=sync",
         // 演示模式的开关**保持默认的 false**：这样测试里 DemoResetJob 根本不会被装配，
         // 后台线程也就不会跑去重置数据。这里只给一个演示口令，供 DemoResetTest 验证
         // "重置后演示账号能登录"——口令为空时登录接口过不了 @NotBlank 校验。
