@@ -68,4 +68,54 @@ class OutboxRelayJobTest {
             }
         });
     }
+
+    /**
+     * claim 后进程崩溃会留下 SENDING；租约到期必须放回 NEW，否则那条事件永远不再被投递。
+     * 还在租约内的行不能动——那可能是另一个实例正在处理。
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void reclaimsExpiredSendingLeaseButLeavesFreshOne() {
+        LocalDateTime now = LocalDateTime.now();
+        TenantRoutingContext.run(TenantRoutingContext.CONTROL, () -> {
+            OutboxEvent expired = insertEvent(OutboxStatus.SENDING, now.minusSeconds(5));
+            OutboxEvent fresh = insertEvent(OutboxStatus.SENDING, now.plusSeconds(30));
+            try {
+                relayJob.relayOnce();
+
+                OutboxEvent reclaimed = outboxEventMapper.selectById(expired.getId());
+                assertThat(reclaimed.getStatus()).as("租约到期的 SENDING 必须放回 NEW")
+                        .isEqualTo(OutboxStatus.NEW.name());
+                assertThat(reclaimed.getAttempts()).as("回收也算一次尝试，毒消息的退避才有上限")
+                        .isEqualTo(1);
+                assertThat(reclaimed.getNextAttemptAt()).as("回收后按退避推迟，不能立刻重投")
+                        .isAfter(LocalDateTime.now());
+
+                OutboxEvent untouched = outboxEventMapper.selectById(fresh.getId());
+                assertThat(untouched.getStatus()).as("租约未到期的行不能动——可能另一个实例正在处理")
+                        .isEqualTo(OutboxStatus.SENDING.name());
+                assertThat(untouched.getAttempts()).isZero();
+            } finally {
+                outboxEventMapper.deleteById(expired.getId());
+                outboxEventMapper.deleteById(fresh.getId());
+            }
+        });
+    }
+
+    private OutboxEvent insertEvent(OutboxStatus status, LocalDateTime nextAttemptAt) {
+        long aggregateId = System.nanoTime();
+        OutboxEvent event = new OutboxEvent();
+        event.setTenantId(1L);
+        event.setAggregateType("TICKET");
+        event.setAggregateId(aggregateId);
+        event.setEventType(TicketStatusChangedEvent.EVENT_TYPE);
+        event.setEventId("test-lease-" + aggregateId);
+        event.setPayload("{}");
+        event.setStatus(status.name());
+        event.setAttempts(0);
+        event.setNextAttemptAt(nextAttemptAt);
+        event.setCreatedAt(LocalDateTime.now().minusDays(1));
+        outboxEventMapper.insert(event);
+        return event;
+    }
 }
