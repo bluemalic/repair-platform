@@ -86,6 +86,7 @@ flowchart TB
         redis[("Redis 7<br/>会话 · 延迟队列 · 限流 · 审计去重 · 工单号序列")]
         minio[("MinIO<br/>图片对象 · 桶匿名可读")]
         rocketmq[("RocketMQ 5.x<br/>事件通道（阶段 2）")]
+        notification[("notification-service<br/>独立 consumer 进程")]
     end
 
     deepseek["DeepSeek API"]
@@ -99,6 +100,7 @@ flowchart TB
     biz --> redis
     biz -->|"S3 API 写对象"| minio
     biz -.->|"Outbox 事件"| rocketmq
+    rocketmq -.->|"TICKET_NOTIFICATION"| notification
     sched --> redis
     sched --> mysql
     guard -.->|"每个请求校验 token"| redis
