@@ -1,0 +1,27 @@
+# Prometheus 抓取配置（本地与线上共用同一份）
+#
+# 应用只暴露 /actuator/prometheus（ADR-020：nginx 不反代它），所以抓取必须发生在
+# 容器网络里：线上是 app:8080，本地 IDEA 跑应用时用 host.docker.internal:8080。
+#
+# 目标地址不在 YAML 里写死：compose 启动脚本把 __PROMETHEUS_TARGET__ 替换成
+# PROMETHEUS_TARGET 的值（Prometheus 本身不展开 targets 里的环境变量）。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  - job_name: repair-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['__PROMETHEUS_TARGET__']
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+# 说明：notification-service 目前是 WebApplicationType.NONE，没有 HTTP 端口，
+# 抓不到 /actuator/prometheus；它的健康状况先通过 outbox 积压与日志间接观察。
+# 要把它纳入监控，需要给它加一个只跑 actuator 的管理端口（单独一个改动）。

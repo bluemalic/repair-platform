@@ -311,7 +311,84 @@ services:
       - ./miniapp-h5/dist/build/h5:/usr/share/nginx/html/h5:ro
     networks: [frontend]
 
+  # ============================================================
+  # 可观测性（profile observability）—— **默认不启动**
+  #
+  # ⚠️ 2C4G 以下不要启用：两个进程冷启动实测约 90M，长期随序列数增长（一般 200–300M），
+  #    2C2G 上会和应用抢内存、把应用挤进 swap。
+  #    2C2G 上会把 app 挤进 swap。本地开发或升级实例后再用：
+  #      docker compose --profile observability up -d prometheus grafana
+  #
+  #    本机 IDEA 跑应用时设 PROMETHEUS_TARGET=host.docker.internal:8080；
+  #    compose 里起应用（app:8080）时用默认值即可。
+  #
+  # 安全：两个端口都只绑 127.0.0.1；线上用 SSH 隧道访问 Grafana，
+  #      不要把 9090/3000 映射到公网（ADR-020：指标会暴露内部结构）。
+  #
+  # 说明：应用侧的 /actuator/prometheus 已经存在；notification-service
+  #      是 WebApplicationType.NONE，暂时没有 HTTP 端口可抓（见 observability/prometheus.yml）。
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: repair-prometheus
+    restart: unless-stopped
+    profiles: ["observability"]
+    # Prometheus 不展开 targets 里的环境变量，所以在启动脚本里先替换占位符再启动。
+    # 目标默认 app:8080（compose 网络内）；本地 IDEA 跑应用时用 PROMETHEUS_TARGET 覆盖。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s|__PROMETHEUS_TARGET__|${PROMETHEUS_TARGET:-app:8080}|g" \
+            /etc/prometheus/prometheus.yml > /tmp/prometheus.yml
+        exec /bin/prometheus \
+            --config.file=/tmp/prometheus.yml \
+            --storage.tsdb.path=/prometheus \
+            --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d} \
+            --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${PROMETHEUS_MEM_LIMIT:-384M}
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: repair-grafana
+    restart: unless-stopped
+    profiles: ["observability"]
+    depends_on: [prometheus]
+    environment:
+      # 不设匿名访问；密码只从 .env 读，默认 admin 仅用于本地首次登录
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # 数据源与看板都走 provisioning：换机器只要带上这几个文件
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${GRAFANA_MEM_LIMIT:-256M}
+
 networks:
   backend:
     internal: false
   frontend:
+
+volumes:
+  # 只在使用 observability profile 时才会被创建
+  prometheus-data:
+  grafana-data:
