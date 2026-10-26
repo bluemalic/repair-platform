@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import TicketDetail from '@/components/TicketDetail.vue'
-import { acceptTicket, arriveTicket, getAdvice, getWorkerTicketDetail, rejectTicket } from '@/api/ticket'
+import { acceptTicket, arriveTicket, getAdvice, getWorkerTicketDetail, markUnrepairable, rejectTicket, resumeWorkerTicket, waitMaterial } from '@/api/ticket'
 import type { KnowledgeAdviceVO, TicketDetailVO } from '@/types'
 
 /**
@@ -21,6 +21,10 @@ const canAccept = computed(() => detail.value?.status === 20)
 const canReject = computed(() => detail.value?.status === 20 || detail.value?.status === 30)
 const canArrive = computed(() => detail.value?.status === 30 && !detail.value?.arriveTime)
 const canFinish = computed(() => detail.value?.status === 30 && !!detail.value?.arriveTime)
+/** 缺材料 / 修不了都发生在处理中；恢复只在待料（45 的恢复是后勤的决定） */
+const canWaitMaterial = computed(() => detail.value?.status === 30)
+const canUnrepairable = computed(() => detail.value?.status === 30)
+const canResume = computed(() => detail.value?.status === 35)
 
 onLoad((options) => {
   ticketId.value = options?.id ?? ''
@@ -109,6 +113,32 @@ function goFinish() {
   uni.navigateTo({ url: `/pages/worker/finish?id=${ticketId.value}` })
 }
 
+/** 待料 / 无法维修都要写原因：学生和后勤看到的不能只是"师傅点了某个按钮"。 */
+async function promptReason(kind: 'wait' | 'unrepairable') {
+  const waiting = kind === 'wait'
+  const res = await uni.showModal({
+    title: waiting ? '标记待料' : '判定无法维修',
+    editable: true,
+    placeholderText: waiting ? '缺什么材料（必填）' : '为什么修不了（必填）',
+  })
+  if (!res.confirm) {
+    return
+  }
+  const reason = (res.content ?? '').trim()
+  if (!reason) {
+    uni.showToast({ title: '请填写原因', icon: 'none' })
+    return
+  }
+  await run(
+    () => (waiting ? waitMaterial(ticketId.value, reason) : markUnrepairable(ticketId.value, reason)),
+    waiting ? '已标记待料' : '已提交给后勤',
+  )
+}
+
+function doResume() {
+  return run(() => resumeWorkerTicket(ticketId.value), '已恢复处理')
+}
+
 /**
  * AI 排查建议（阶段 2 · ADR-018）：**按需触发**，不做成自动加载——
  * 每次都要花钱，而且师傅多数时候不需要它。失败（含模型不可用 40004）由 request 统一提示。
@@ -180,6 +210,13 @@ async function loadAdvice() {
         <button v-if="canAccept" class="primary" :disabled="busy" @click="doAccept">接单</button>
         <button v-if="canArrive" class="primary" :disabled="busy" @click="doArrive">确认到场</button>
         <button v-if="canFinish" class="primary" :disabled="busy" @click="goFinish">完工上报</button>
+        <button v-if="canWaitMaterial" class="secondary" :disabled="busy" @click="promptReason('wait')">
+          缺材料，标记待料
+        </button>
+        <button v-if="canUnrepairable" class="danger" :disabled="busy" @click="promptReason('unrepairable')">
+          修不了，交给后勤
+        </button>
+        <button v-if="canResume" class="primary" :disabled="busy" @click="doResume">材料到了，继续处理</button>
         <button v-if="canReject" class="danger" :disabled="busy" @click="doReject">驳回</button>
       </view>
     </template>
@@ -316,6 +353,11 @@ async function loadAdvice() {
 .danger {
   color: #f56c6c;
   background: #fff;
+  border-radius: 8rpx;
+}
+.secondary {
+  color: #2c6cf6;
+  background: #f0f7ff;
   border-radius: 8rpx;
 }
 </style>

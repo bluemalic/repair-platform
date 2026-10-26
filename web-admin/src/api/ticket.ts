@@ -45,6 +45,19 @@ export function closeTicket(id: string) {
   return http.post<void>(`/admin/tickets/${id}/close`)
 }
 
+/** 恢复处理（待料 / 无法维修 → 处理中）：45 的处理超时按原派单时间重新登记。 */
+export function resumeTicket(id: string) {
+  return http.post<void>(`/admin/tickets/${id}/resume`)
+}
+
+/**
+ * 合并重复工单：把当前单并进 targetId 指向的那张单（当前单 → 75 终态，目标单不动）。
+ * 目标不能是自己、已撤单或已合并。
+ */
+export function mergeTicket(id: string, targetId: string, remark?: string) {
+  return http.post<void>(`/admin/tickets/${id}/merge`, { targetId, remark })
+}
+
 /**
  * 加协作者：一件活要两个人干时，把另一个师傅拉进来（`docs/01` §4.5）。
  *
