@@ -37,6 +37,9 @@ public class Ticket {
     /** 拆单来源工单ID，非拆单产生的为 null。**只拆一层**，所以是父指针、不是树——别按树写查询 */
     private Long parentTicketId;
 
+    /** 合并目标工单ID：只有 75 已合并时有值，指向被合并进的那张单 */
+    private Long mergedIntoId;
+
     private Long buildingId;
 
     private String room;
@@ -52,7 +55,7 @@ public class Ticket {
     /** 1普通 2紧急 3特急 */
     private Integer urgency;
 
-    /** 10待派单 20待接单 30处理中 40待验收 50已完成 60已关闭 70已撤单 80已驳回 */
+    /** 10待派单 20待接单 30处理中 35待料 40待验收 45无法维修 50已完成 60已关闭 70已撤单 75已合并 80已驳回 */
     private Integer status;
 
     /** 派单方式 1手动 2自动 */

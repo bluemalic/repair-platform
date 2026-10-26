@@ -59,9 +59,10 @@ public class TicketQueryServiceImpl implements TicketQueryService {
     private final TicketReadModelAssembler readModelAssembler;
     private final CurrentTenantService currentTenantService;
 
-    /** 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待验收）。 */
+    /** 维修工「我的任务」默认要显示的进行中状态（待接单 / 处理中 / 待料 / 待验收）。 */
     private static final List<Integer> ACTIVE_STATUSES = List.of(
-            TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode(), TicketStatus.TO_VERIFY.getCode());
+            TicketStatus.TO_ACCEPT.getCode(), TicketStatus.PROCESSING.getCode(),
+            TicketStatus.WAITING_MATERIAL.getCode(), TicketStatus.TO_VERIFY.getCode());
 
     @Override
     public RepairCodeVO byCode(String code) {
@@ -185,8 +186,17 @@ public class TicketQueryServiceImpl implements TicketQueryService {
             parentTicketNo = parent == null ? null : parent.getTicketNo();
         }
 
+        // 合并目标：按 id 取工单号。取不到就留空——目标单可能不在当前用户的可见范围里
+        // （两个学生报同一处时，被合并单的学生看不到对方的单），那是正常的，不该泄露
+        String mergedIntoNo = null;
+        if (ticket.getMergedIntoId() != null) {
+            Ticket mergedInto = ticketMapper.selectById(ticket.getMergedIntoId());
+            mergedIntoNo = mergedInto == null ? null : mergedInto.getTicketNo();
+        }
+
         TicketDetailVO vo = TicketConverter.toDetailVO(ticket, buildings, categories,
                 readModelAssembler.collaboratorsOf(ticket), parentTicketNo, logVOs, evaluation);
+        vo.setMergedIntoNo(mergedIntoNo);
         // 主责的姓名在这里补：转换器已经有 7 个参数，再加一个不如就近补一行。
         // 详情页要回答"谁负责"——只给一个 ID，看的人还得自己去别处查
         if (ticket.getWorkerId() != null) {

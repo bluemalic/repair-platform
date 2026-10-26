@@ -2,6 +2,7 @@ package com.bluemalic.repair.service;
 
 import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
+import com.bluemalic.repair.dto.TicketMergeDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -15,7 +16,7 @@ import com.bluemalic.repair.vo.TicketVO;
  */
 public interface TicketAssignmentService {
 
-    /** 后勤派单（10/80 → 20）；已驳回的工单可重新派单。 */
+    /** 后勤派单（10/45/80 → 20）；已驳回或"无法维修"的工单可重新派单，上一轮的接单/到场时间清空。 */
     void dispatch(long id, TicketDispatchDTO dto);
 
     /**
@@ -26,6 +27,22 @@ public interface TicketAssignmentService {
      * 不能让新师傅背前一个人的延迟。
      */
     void transfer(long id, TicketTransferDTO dto);
+
+    /**
+     * 后勤恢复处理（35 待料 / 45 无法维修 → 30），`docs/01` §4.7。
+     *
+     * <p>45 进来时处理超时节点已经撤掉；恢复时按**原派单时间**重新登记——超期就立即升级，
+     * 不能因为"等后勤拍板"把计时清零。
+     */
+    void resume(long id);
+
+    /**
+     * 合并重复工单（10/20/30/35/40/45/80 → 75），`docs/01` §4.7。
+     *
+     * <p>把当前单并进 `targetId` 指向的那张单：当前单变成终态 75、记下 `merged_into_id`、
+     * 清空维修工并撤掉超时节点；目标单**不动**。被合并单的学生会收到一条带目标工单号的通知。
+     */
+    void merge(long id, TicketMergeDTO dto);
 
     /**
      * 加协作者（`docs/01` §4.5）：一件活要两个人干时，后勤把另一个师傅拉进来。

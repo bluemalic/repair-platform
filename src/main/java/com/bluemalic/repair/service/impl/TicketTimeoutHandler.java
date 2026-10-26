@@ -12,6 +12,7 @@ import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -97,21 +98,23 @@ public class TicketTimeoutHandler {
     }
     private void remindAcceptTimeoutInCurrentDatabase(long id) {
         Ticket ticket = lookup.requireTicket(id);
-        notifyTimeoutOnce(ticket, TicketStatus.TO_ACCEPT.getCode(), TicketAction.ACCEPT_TIMEOUT,
+        notifyTimeoutOnce(ticket, Set.of(TicketStatus.TO_ACCEPT.getCode()), TicketAction.ACCEPT_TIMEOUT,
                 NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
                         + " 无人接单，请及时调度");
     }
     private void escalateProcessTimeoutInCurrentDatabase(long id) {
         Ticket ticket = lookup.requireTicket(id);
-        notifyTimeoutOnce(ticket, TicketStatus.PROCESSING.getCode(), TicketAction.PROCESS_TIMEOUT,
+        // 35 待料也算"未完工"：待料不暂停 SLA，卡住一样升级给后勤（docs/01 §4.7）
+        notifyTimeoutOnce(ticket, Set.of(TicketStatus.PROCESSING.getCode(),
+                        TicketStatus.WAITING_MATERIAL.getCode()), TicketAction.PROCESS_TIMEOUT,
                 NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()
                         + " 仍未完工，请及时跟进");
     }
-    private void notifyTimeoutOnce(Ticket ticket, int expectedStatus, TicketAction action,
+    private void notifyTimeoutOnce(Ticket ticket, Set<Integer> expectedStatuses, TicketAction action,
                                    String noticeType, String noticeTitle, String content) {
-        if (ticket.getStatus() != expectedStatus) {
+        if (!expectedStatuses.contains(ticket.getStatus())) {
             // 已流转（接单/完工/驳回/关闭）——提醒没有意义，静默跳过
             return;
         }

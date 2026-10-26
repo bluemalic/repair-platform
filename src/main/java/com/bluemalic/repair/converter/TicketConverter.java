@@ -36,6 +36,7 @@ public class TicketConverter {
         vo.setId(ticket.getId());
         vo.setTicketNo(ticket.getTicketNo());
         vo.setStatus(ticket.getStatus());
+        vo.setMergedIntoId(ticket.getMergedIntoId());
         vo.setUrgency(ticket.getUrgency());
         vo.setBuildingId(ticket.getBuildingId());
         vo.setBuildingName(buildingNames.get(ticket.getBuildingId()));

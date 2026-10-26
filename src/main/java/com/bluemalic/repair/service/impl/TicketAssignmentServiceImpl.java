@@ -10,6 +10,7 @@ import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
+import com.bluemalic.repair.dto.TicketMergeDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.entity.SysUser;
@@ -77,9 +78,15 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
         SysUser worker = assignmentPolicy.requireEnabledWorker(dto.getWorkerId(), ticket.getTenantId());
         // 已有师傅的单不能走"派单"：那是**换人**，要走转派——它要重置计时、清掉上一轮的
-        // 接单/到场时间、并单独留一条 TRANSFER 台账。两条路都能换人的话，台账就分不清了
-        if (ticket.getWorkerId() != null) {
+        // 接单/到场时间、并单独留一条 TRANSFER 台账。两条路都能换人的话，台账就分不清了。
+        // 例外是 45 无法维修：师傅已经明确"修不了"，后勤重新派给**别人**是标准处置
+        if (ticket.getWorkerId() != null && ticket.getStatus() != TicketStatus.UNREPAIRABLE.getCode()) {
             throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED, "该工单已有维修工，换人请用转派");
+        }
+        if (ticket.getStatus() == TicketStatus.UNREPAIRABLE.getCode()
+                && worker.getId().equals(ticket.getWorkerId())) {
+            // 派回给原师傅等于把 dispatch_time 重置、让计时重来；要让他继续修，走"恢复处理"
+            throw new BizException(ErrorCode.PARAM_INVALID, "重新派单必须换人；让原师傅继续修请用恢复处理");
         }
 
         // 跨楼栋派单 = 紧急抽调（docs/01 §4.2）：**放行**，但要留痕——为什么允许见 §4.2，
@@ -88,7 +95,16 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
 
         transitions.conditionalUpdate(id, TicketStatus.TO_ACCEPT.getCode(), TicketAction.DISPATCH, adminId,
                 ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    if (ticket.getStatus() == TicketStatus.UNREPAIRABLE.getCode()) {
+                        // 45 是从 30 转过来的，上一轮的接单/到场时间属于原师傅；
+                        // 新师傅是新的一轮，不清掉会让他的到场打卡被幂等判断跳过
+                        wrapper.set(Ticket::getAcceptTime, null)
+                                .set(Ticket::getArriveTime, null)
+                                .set(Ticket::getArriveMinutes, null);
+                    }
+                },
                 entity -> {
                     entity.setWorkerId(dto.getWorkerId());
                     entity.setDispatchType(1);
@@ -136,7 +152,8 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                     // 上一轮的接单/到场时间必须清掉：响应时长口径是"到场 − 派单"，
                     // 留着旧值会算出负数或虚高的数。谁来过在 ticket_log 里，不丢
                     wrapper.set(Ticket::getAcceptTime, null)
-                            .set(Ticket::getArriveTime, null);
+                            .set(Ticket::getArriveTime, null)
+                            .set(Ticket::getArriveMinutes, null);
                 },
                 entity -> {
                     entity.setWorkerId(worker.getId());
@@ -157,6 +174,65 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         log.info("转派 ticketId={} from={} to={} operator={} reason={}",
                 id, previousWorkerId, worker.getId(), adminId, dto.getReason());
     }
+
+    public void resume(long id) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = lookup.requireTicket(id);
+        int fromStatus = ticket.getStatus();
+        if (fromStatus != TicketStatus.WAITING_MATERIAL.getCode()
+                && fromStatus != TicketStatus.UNREPAIRABLE.getCode()) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED,
+                    TicketStatus.of(fromStatus).getDesc() + "的工单不能恢复处理");
+        }
+        transitions.conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.RESUME,
+                adminId, ticket.getTenantId(), fromStatus,
+                wrapper -> wrapper.eq(Ticket::getStatus, fromStatus),
+                entity -> { });
+        // 45 进来时撤过处理节点；35 没撤（待料不暂停 SLA）。两种情况都按**原派单时间**重登记：
+        // 已经超期就立即升级——不能因为等后勤拍板把计时清零
+        timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
+        noticePublisher.notifyTransition(ticket, TicketAction.RESUME, null, null);
+        log.info("后勤恢复处理 ticketId={} operator={} fromStatus={}", id, adminId, fromStatus);
+    }
+
+    public void merge(long id, TicketMergeDTO dto) {
+        long adminId = StpUtil.getLoginIdAsLong();
+        Ticket source = lookup.requireTicket(id);
+        int fromStatus = source.getStatus();
+        // 状态机就是白名单：10/20/30/35/40/45/80 → 75；50/60/70/75 会被 20002 挡下
+        TicketStatus.checkTransition(fromStatus, TicketStatus.MERGED.getCode());
+        if (dto.getTargetId().equals(id)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "不能把工单合并到自己");
+        }
+        // 目标单必须在本租户可见范围内（跨租户与不存在对外都是 20001）
+        Ticket target = lookup.requireTicket(dto.getTargetId());
+        if (target.getStatus() == TicketStatus.CANCELED.getCode()
+                || target.getStatus() == TicketStatus.MERGED.getCode()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "目标工单已撤单或已合并，不能作为合并目标");
+        }
+        String remark = "合并到 " + target.getTicketNo()
+                + (dto.getRemark() == null || dto.getRemark().isBlank() ? "" : "；说明：" + dto.getRemark());
+
+        transitions.conditionalUpdate(id, TicketStatus.MERGED.getCode(), TicketAction.MERGE, adminId,
+                source.getTenantId(), fromStatus,
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, fromStatus);
+                    // MP 跳过实体里的 null 字段：清维修工必须显式写在 wrapper 上
+                    wrapper.set(Ticket::getWorkerId, null);
+                },
+                entity -> {
+                    entity.setMergedIntoId(dto.getTargetId());
+                    entity.setCloseTime(LocalDateTime.now());
+                },
+                remark);
+        // 合并是终态：未接单/处理超时/验收超时节点全部作废
+        timeoutService.cancel(id, source.getTenantId());
+        // 通知被合并单的学生（正文里带目标工单号）；目标单不动
+        noticePublisher.notifyTransition(source, TicketAction.MERGE, null, remark);
+        log.info("合并工单 ticketId={} into={} operator={} fromStatus={}",
+                id, target.getId(), adminId, fromStatus);
+    }
+
     public void addCollaborator(long id, TicketCollaboratorDTO dto) {
         long adminId = StpUtil.getLoginIdAsLong();
         Ticket ticket = lookup.requireTicket(id);
