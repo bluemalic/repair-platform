@@ -22,10 +22,13 @@ const STATUS: Record<number, { label: string; color: string }> = {
   10: { label: '待派单', color: '#e6a23c' },
   20: { label: '待接单', color: '#409eff' },
   30: { label: '处理中', color: '#409eff' },
+  35: { label: '待料', color: '#e6a23c' },
   40: { label: '待验收', color: '#909399' },
+  45: { label: '无法维修', color: '#f56c6c' },
   50: { label: '已完成', color: '#67c23a' },
   60: { label: '已关闭', color: '#909399' },
   70: { label: '已撤单', color: '#909399' },
+  75: { label: '已合并', color: '#909399' },
   80: { label: '已驳回', color: '#f56c6c' },
 }
 
@@ -34,6 +37,9 @@ const ACTION: Record<string, string> = {
   DISPATCH: '派单',
   ACCEPT: '接单',
   ARRIVE: '到场打卡',
+  WAIT_MATERIAL: '待料',
+  UNREPAIRABLE: '无法维修',
+  RESUME: '恢复处理',
   FINISH: '完工上报',
   EVALUATE: '验收评价',
   CANCEL: '撤销工单',
@@ -44,6 +50,7 @@ const ACTION: Record<string, string> = {
   ADD_COLLABORATOR: '加协作者',
   REMOVE_COLLABORATOR: '移除协作者',
   SPLIT: '拆单',
+  MERGE: '合并工单',
   AUTO_CLOSE: '超时自动关闭',
   ACCEPT_TIMEOUT: '接单超时提醒',
   PROCESS_TIMEOUT: '处理超时升级',
@@ -99,6 +106,9 @@ function statusLabel(status: number | null): string {
       </view>
       <view v-if="detail.parentTicketNo" class="meta">
         <text>由工单 {{ detail.parentTicketNo }} 拆出</text>
+      </view>
+      <view v-if="detail.mergedIntoNo" class="meta">
+        <text>已合并到工单 {{ detail.mergedIntoNo }}</text>
       </view>
     </view>
 

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { closeTicket, dispatchTicket, getDispatchCandidates, getTicketDetail, pageTickets, rejectTicket, transferTicket } from '@/api/ticket'
+import { closeTicket, dispatchTicket, getDispatchCandidates, getTicketDetail, mergeTicket, pageTickets, rejectTicket, resumeTicket, transferTicket } from '@/api/ticket'
 import { addCollaborator, removeCollaborator, splitTicket } from '@/api/ticket'
 import { listCategories } from '@/api/category'
 import { pageWorkers } from '@/api/worker'
@@ -13,10 +13,13 @@ const STATUS: Record<number, { label: string; type: 'info' | 'warning' | 'primar
   10: { label: '待派单', type: 'warning' },
   20: { label: '待接单', type: 'primary' },
   30: { label: '处理中', type: 'primary' },
+  35: { label: '待料', type: 'warning' },
   40: { label: '待验收', type: 'info' },
+  45: { label: '无法维修', type: 'danger' },
   50: { label: '已完成', type: 'success' },
   60: { label: '已关闭', type: 'info' },
   70: { label: '已撤单', type: 'info' },
+  75: { label: '已合并', type: 'info' },
   80: { label: '已驳回', type: 'danger' },
 }
 
@@ -28,6 +31,9 @@ const ACTION: Record<string, string> = {
   DISPATCH: '派单',
   ACCEPT: '接单',
   ARRIVE: '到场打卡',
+  WAIT_MATERIAL: '待料',
+  UNREPAIRABLE: '无法维修',
+  RESUME: '恢复处理',
   FINISH: '完工上报',
   EVALUATE: '验收评价',
   CANCEL: '撤销工单',
@@ -38,6 +44,7 @@ const ACTION: Record<string, string> = {
   ADD_COLLABORATOR: '加协作者',
   REMOVE_COLLABORATOR: '移除协作者',
   SPLIT: '拆单',
+  MERGE: '合并工单',
   AUTO_CLOSE: '超时自动关闭',
   ACCEPT_TIMEOUT: '接单超时提醒',
   PROCESS_TIMEOUT: '处理超时升级',
@@ -276,6 +283,76 @@ async function doClose(row: TicketVO) {
   await load()
 }
 
+async function doResume(row: TicketVO) {
+  await ElMessageBox.confirm(
+    `让 ${row.ticketNo} 恢复处理？处理超时按原派单时间继续计算，已超期会立即升级。`,
+    '恢复处理',
+    { type: 'warning' },
+  )
+  await resumeTicket(row.id)
+  ElMessage.success('已恢复处理')
+  await load()
+}
+
+// ==================== 合并重复单 ====================
+
+const mergeVisible = ref(false)
+const mergeTarget = ref<TicketVO | null>(null)
+const mergeTargetId = ref<string | undefined>(undefined)
+const mergeRemark = ref('')
+const mergeOptions = ref<TicketVO[]>([])
+const mergeLoading = ref(false)
+
+/** 可以作为**来源**被合并掉的状态（与 docs/02 §5 一致）；50/60/70/75 不行 */
+const MERGEABLE_SOURCES = [10, 20, 30, 35, 40, 45, 80]
+
+async function openMerge(row: TicketVO) {
+  mergeTarget.value = row
+  mergeTargetId.value = undefined
+  mergeRemark.value = ''
+  mergeVisible.value = true
+  await searchMergeTargets()
+}
+
+/**
+ * 候选目标：最近 50 张单里排除自己、已撤单与已合并。
+ * 演示规模（单校几百单）一页足够；数据量再大时应改成后端按工单号搜索。
+ */
+async function searchMergeTargets() {
+  mergeLoading.value = true
+  try {
+    const page = await pageTickets({ pageNum: 1, pageSize: 50 })
+    mergeOptions.value = page.list.filter(
+      (item) => item.id !== mergeTarget.value?.id && ![70, 75].includes(item.status),
+    )
+  } finally {
+    mergeLoading.value = false
+  }
+}
+
+function mergeOptionLabel(ticket: TicketVO): string {
+  return `${ticket.ticketNo} · ${ticket.buildingName} ${ticket.room} · ${STATUS[ticket.status]?.label ?? ticket.status}`
+}
+
+async function doMerge() {
+  const target = mergeTarget.value
+  const targetId = mergeTargetId.value
+  if (!target || !targetId) return
+  const chosen = mergeOptions.value.find((item) => item.id === targetId)
+  await ElMessageBox.confirm(
+    `把 ${target.ticketNo} 合并进 ${chosen?.ticketNo ?? '所选工单'}？合并后本单进入终态「已合并」，目标单不变。`,
+    '合并工单',
+    { type: 'warning', confirmButtonText: '确认合并' },
+  )
+  await mergeTicket(target.id, targetId, mergeRemark.value.trim() || undefined)
+  mergeVisible.value = false
+  ElMessage.success('已合并')
+  await load()
+  if (detail.value?.id === target.id) {
+    detail.value = await getTicketDetail(target.id)
+  }
+}
+
 // ==================== 工单详情 ====================
 
 const route = useRoute()
@@ -329,10 +406,11 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="submitTime" label="提交时间" width="170" />
-      <el-table-column label="操作" width="380" fixed="right">
+      <el-table-column label="操作" width="460" fixed="right">
         <template #default="{ row }">
           <el-button link @click="openDetailById(row.id)">详情</el-button>
-          <el-button v-if="row.status === 10 || row.status === 80" link type="primary" @click="openDispatch(row)">
+          <!-- 45 无法维修也是"重新派单"的入口；后端要求必须换人 -->
+          <el-button v-if="[10, 45, 80].includes(row.status)" link type="primary" @click="openDispatch(row)">
             派单
           </el-button>
           <!-- 换人：待接单还没接、或接了还没完工时才谈得上换（40 之后该走驳回/打回） -->
@@ -346,7 +424,11 @@ onMounted(async () => {
           <!-- 拆单：一张单里其实是两件事；同样只在活还没干完时可用 -->
           <el-button v-if="[10, 20, 30].includes(row.status)" link @click="openSplit(row)">拆单</el-button>
           <el-button v-if="[20, 30, 40].includes(row.status)" link type="danger" @click="doReject(row)">驳回</el-button>
-          <el-button v-if="row.status === 50" link type="primary" @click="doClose(row)">关闭</el-button>
+          <!-- 待料/无法维修：后勤可以直接让单回到处理中（45 的处理超时按原派单时间重算） -->
+          <el-button v-if="[35, 45].includes(row.status)" link type="primary" @click="doResume(row)">恢复</el-button>
+          <!-- 合并重复单：活动状态都可作为来源；目标在弹窗里选 -->
+          <el-button v-if="MERGEABLE_SOURCES.includes(row.status)" link @click="openMerge(row)">合并</el-button>
+          <el-button v-if="[45, 50, 80].includes(row.status)" link type="primary" @click="doClose(row)">关闭</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -388,6 +470,9 @@ onMounted(async () => {
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.parentTicketNo" label="拆单来源" :span="2">
             由工单 {{ detail.parentTicketNo }} 拆出
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detail.mergedIntoNo" label="合并目标" :span="2">
+            已合并到工单 {{ detail.mergedIntoNo }}
           </el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ detail.submitTime }}</el-descriptions-item>
           <el-descriptions-item label="派单时间">{{ detail.dispatchTime ?? '—' }}</el-descriptions-item>
@@ -576,6 +661,43 @@ onMounted(async () => {
         <el-button type="primary" :disabled="!splitForm.description.trim()" @click="confirmSplit">
           确认拆单
         </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 合并重复单：来源单进入终态，目标单不动。目标只从最近 50 张单里选 -->
+    <el-dialog v-model="mergeVisible" title="合并重复工单" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="被合并单">
+          <span>{{ mergeTarget?.ticketNo }} · {{ mergeTarget?.buildingName }} {{ mergeTarget?.room }}</span>
+        </el-form-item>
+        <el-form-item label="合并到">
+          <el-select
+            v-model="mergeTargetId"
+            filterable
+            :loading="mergeLoading"
+            placeholder="选择目标工单（工单号 / 位置）"
+            style="width: 100%"
+          >
+            <el-option v-for="t in mergeOptions" :key="t.id" :label="mergeOptionLabel(t)" :value="t.id" />
+          </el-select>
+          <div class="hint">
+            只列最近 50 张、排除已撤单与已合并的单。合并后本单进入终态「已合并」，目标单不变。
+          </div>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="mergeRemark"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+            show-word-limit
+            placeholder="可选，会进流转日志与通知"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mergeVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!mergeTargetId" @click="doMerge">确认合并</el-button>
       </template>
     </el-dialog>
   </div>

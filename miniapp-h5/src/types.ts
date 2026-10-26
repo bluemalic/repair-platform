@@ -30,8 +30,10 @@ export interface LoginVO {
 export interface TicketVO {
   id: string
   ticketNo: string
-  /** 10待派单 20待接单 30处理中 40待验收 50已完成 60已关闭 70已撤单 80已驳回 */
+  /** 10待派单 20待接单 30处理中 35待料 40待验收 45无法维修 50已完成 60已关闭 70已撤单 75已合并 80已驳回 */
   status: number
+  /** 合并目标工单ID；只有 75 已合并时有值 */
+  mergedIntoId: string | null
   /** 1普通 2紧急 3特急 */
   urgency: number
   buildingName: string
@@ -118,6 +120,8 @@ export interface TicketDetailVO extends TicketVO {
   workerName: string | null
   /** 拆单来源（非拆单产生的为 null） */
   parentTicketNo: string | null
+  /** 合并目标工单号（75 已合并时填；目标单不在可见范围时为空） */
+  mergedIntoNo: string | null
   logs: TicketLogVO[]
   evaluation: TicketEvaluationVO | null
 }

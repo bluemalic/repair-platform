@@ -9,8 +9,10 @@ const detail = ref<TicketDetailVO | null>(null)
 const loading = ref(true)
 const ticketId = ref('')
 
-/** 只有"待派单"能撤（docs/02 状态机：10 → 70）。 */
-const canCancel = computed(() => detail.value?.status === 10)
+/** 10/20/30/35/45/80 都能撤（docs/02 状态机）。派单后会通知师傅；40 已完成就不该再让学生单方面撤。 */
+const canCancel = computed(() =>
+  [10, 20, 30, 35, 45, 80].includes(detail.value?.status ?? -1),
+)
 
 /** 待验收（40）才能评价（40 → 50）。 */
 const canEvaluate = computed(() => detail.value?.status === 40)

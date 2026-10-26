@@ -73,7 +73,7 @@ export function getWorkerTicketDetail(id: string) {
   return request<TicketDetailVO>({ url: `/worker/tickets/${id}` })
 }
 
-/** 撤单：只有"待派单"可以撤（10 → 70）。 */
+/** 撤单：10/20/30/35/45/80 → 已撤单；派单后会通知当前师傅。 */
 export function cancelTicket(id: string) {
   return request<void>({ url: `/student/tickets/${id}/cancel`, method: 'POST' })
 }
@@ -102,6 +102,21 @@ export function finishTicket(id: string, resultDesc: string, resultImages?: stri
     method: 'POST',
     data: { resultDesc, resultImages },
   })
+}
+
+/** 待料：处理中 → 待料（缺材料，单还在师傅手上）。理由必填；不暂停 SLA。 */
+export function waitMaterial(id: string, reason: string) {
+  return request<void>({ url: `/worker/tickets/${id}/wait-material`, method: 'POST', data: { reason } })
+}
+
+/** 待料恢复：待料 → 处理中（材料到了）。 */
+export function resumeWorkerTicket(id: string) {
+  return request<void>({ url: `/worker/tickets/${id}/resume`, method: 'POST' })
+}
+
+/** 判定无法维修：处理中 → 无法维修。理由必填；后勤会收到通知并决定重新派单/恢复/关闭。 */
+export function markUnrepairable(id: string, reason: string) {
+  return request<void>({ url: `/worker/tickets/${id}/unrepairable`, method: 'POST', data: { reason } })
 }
 
 /** 验收评价：待验收 → 已完成（40 → 50）。评分 1-5 必填，留言选填。 */
