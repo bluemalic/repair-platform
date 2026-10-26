@@ -4,6 +4,7 @@ import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
+import com.bluemalic.repair.dto.TicketReasonDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.vo.TicketVO;
@@ -22,7 +23,7 @@ public interface TicketFlowService {
     /** 学生提交报修（可带报修码自动定位楼栋房间）。 */
     TicketVO submit(TicketCreateDTO dto);
 
-    /** 学生撤销（10 → 70）。 */
+    /** 学生撤销（10/20/30/35/45/80 → 70）；派单后撤单会通知当前师傅，超时节点一并撤销。 */
     void cancel(long id);
 
     /** 学生验收评价（40 → 50），写 ticket_evaluation，唯一索引兜底幂等。 */
@@ -45,12 +46,30 @@ public interface TicketFlowService {
     /** 维修工完工上报（30 → 40）。 */
     void finish(long id, TicketFinishDTO dto);
 
+    /**
+     * 维修工标记待料（30 → 35），`docs/01` §4.7。理由必填并进时间线。
+     *
+     * <p>**不暂停超时计时**：SLA 口径仍是"从派到完工"，卡在待料同样要升级给后勤——
+     * 后勤正是那个能催料/调人的人。
+     */
+    void waitMaterial(long id, TicketReasonDTO dto);
+
+    /** 维修工恢复处理（35 → 30）：材料到了，继续干。 */
+    void resumeByWorker(long id);
+
+    /**
+     * 维修工判定无法维修（30 → 45），`docs/01` §4.7。理由必填。
+     *
+     * <p>进入 45 会撤掉处理超时节点并通知后勤：接下来是后勤的决定（重新派单 / 退回继续修 / 关闭）。
+     */
+    void markUnrepairable(long id, TicketReasonDTO dto);
+
     /** 维修工驳回（20/30 → 80）。 */
     void rejectByWorker(long id, TicketRejectDTO dto);
 
     /** 后勤驳回（20/30/40 → 80）。 */
     void rejectByAdmin(long id, TicketRejectDTO dto);
 
-    /** 后勤关闭（50 → 60），超时自动关闭是 M3 的事，这里是人工兜底。 */
+    /** 后勤关闭（45/50/80 → 60），超时自动关闭是 M3 的事，这里是人工兜底。 */
     void close(long id);
 }

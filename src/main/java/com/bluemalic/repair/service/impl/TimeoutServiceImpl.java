@@ -131,13 +131,15 @@ public class TimeoutServiceImpl implements TimeoutService {
     @Override
     public List<DueTicket> backstopScanAccept() {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.acceptDuration());
-        return scanOverdueTickets(TicketStatus.TO_ACCEPT.getCode(), cutoff);
+        return scanOverdueTickets(List.of(TicketStatus.TO_ACCEPT.getCode()), cutoff);
     }
 
     @Override
     public List<DueTicket> backstopScanProcess() {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.processDuration());
-        return scanOverdueTickets(TicketStatus.PROCESSING.getCode(), cutoff);
+        // 35 待料不暂停 SLA：它也属于"派出去还没完工"，Redis 丢任务后的兜底必须一起捞
+        return scanOverdueTickets(
+                List.of(TicketStatus.PROCESSING.getCode(), TicketStatus.WAITING_MATERIAL.getCode()), cutoff);
     }
 
     @Override
@@ -176,13 +178,13 @@ public class TimeoutServiceImpl implements TimeoutService {
      * <p>状态过滤与单轮上限都必须带：漏了状态过滤，N 会单调增长（每分钟 N 次无效查询 + N 行日志）。
      * 查询本身不带 `tenant_id`——它要在一整个库里找，租户归属由返回的 `tenant_id` 列带回来。
      */
-    private List<DueTicket> scanOverdueTickets(int status, LocalDateTime cutoff) {
+    private List<DueTicket> scanOverdueTickets(List<Integer> statuses, LocalDateTime cutoff) {
         List<DueTicket> result = new ArrayList<>();
         for (String routingKey : scanTargets()) {
             List<DueTicket> found = TenantRoutingContext.call(routingKey, () -> {
                 Page<Ticket> page = ticketMapper.selectPage(new Page<>(1, SCAN_LIMIT, false),
                         Wrappers.<Ticket>lambdaQuery()
-                                .eq(Ticket::getStatus, status)
+                                .in(Ticket::getStatus, statuses)
                                 .lt(Ticket::getDispatchTime, cutoff)
                                 .orderByAsc(Ticket::getDispatchTime)
                                 .select(Ticket::getId, Ticket::getTenantId));

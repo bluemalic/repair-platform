@@ -5,6 +5,7 @@ import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
+import com.bluemalic.repair.dto.TicketReasonDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.KnowledgeAdviceService;
@@ -45,7 +46,7 @@ public class WorkerTicketController {
     private final KnowledgeAdviceService knowledgeAdviceService;
 
     @Operation(summary = "我的任务",
-            description = "两个视图：scope=mine（默认）只给派给我的单，默认状态为待接单/处理中/待验收；"
+            description = "两个视图：scope=mine（默认）只给派给我的单，默认状态为待接单/处理中/待料/待验收；"
                     + "scope=building 给我负责楼栋的全部工单（含终态与别人负责的）。"
                     + "两者都可用 status 覆盖默认过滤。排序：紧急度高的置顶，同档内先来的在前")
     @SaCheckPermission("ticket:list:assigned")
@@ -101,6 +102,36 @@ public class WorkerTicketController {
     public Result<Void> finish(@Parameter(description = "工单ID") @PathVariable long id,
                                @Valid @RequestBody TicketFinishDTO dto) {
         flowService.finish(id, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "标记待料",
+            description = "处理中 → 待料（缺材料，单还在师傅手上）。理由必填，会进时间线并通知学生。"
+                    + "**不暂停超时计时**：SLA 口径仍是「从派到完工」，卡住同样会升级给后勤")
+    @SaCheckPermission("ticket:finish")
+    @PostMapping("/{id}/wait-material")
+    public Result<Void> waitMaterial(@Parameter(description = "工单ID") @PathVariable long id,
+                                     @Valid @RequestBody TicketReasonDTO dto) {
+        flowService.waitMaterial(id, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "待料恢复", description = "待料 → 处理中（材料到了，继续干）")
+    @SaCheckPermission("ticket:finish")
+    @PostMapping("/{id}/resume")
+    public Result<Void> resume(@Parameter(description = "工单ID") @PathVariable long id) {
+        flowService.resumeByWorker(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "判定无法维修",
+            description = "处理中 → 无法维修。理由必填；进入后会撤掉处理超时并通知本租户后勤，"
+                    + "由后勤决定重新派单 / 退回继续修 / 关闭（docs/01 §4.7）")
+    @SaCheckPermission("ticket:finish")
+    @PostMapping("/{id}/unrepairable")
+    public Result<Void> unrepairable(@Parameter(description = "工单ID") @PathVariable long id,
+                                     @Valid @RequestBody TicketReasonDTO dto) {
+        flowService.markUnrepairable(id, dto);
         return Result.ok();
     }
 

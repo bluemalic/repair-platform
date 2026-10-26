@@ -15,8 +15,11 @@ public class TicketVO {
 
     private String ticketNo;
 
-    @Schema(description = "状态：10待派单 20待接单 30处理中 40待验收 50已完成 60已关闭 70已撤单 80已驳回")
+    @Schema(description = "状态：10待派单 20待接单 30处理中 35待料 40待验收 45无法维修 50已完成 60已关闭 70已撤单 75已合并 80已驳回")
     private Integer status;
+
+    @Schema(description = "合并目标工单ID；只有 75 已合并时有值")
+    private Long mergedIntoId;
 
     @Schema(description = "紧急度 1普通 2紧急 3特急")
     private Integer urgency;

@@ -116,9 +116,10 @@ class TicketFlowTest {
         assertThat(statusOf(admin, ticketId)).isEqualTo(60);
 
         // 通知回归（B4 收敛后的触发不改变数量与接收方）：
-        // 学生应已收 3 条（接单/到场/完工），维修工 2 条（派单/评价）
+        // 学生应已收 4 条（接单/到场/完工/关闭），维修工 2 条（派单/评价）。
+        // 「关闭」那条是 2026-10 扩展状态时加的：45/80 也能关闭，学生需要知道单被关掉了
         JsonNode studentUnread = getJson(student, "/api/notifications/unread-count");
-        assertThat(studentUnread.get("data").asInt()).isEqualTo(3);
+        assertThat(studentUnread.get("data").asInt()).isEqualTo(4);
         JsonNode workerUnread = getJson(worker, "/api/notifications/unread-count");
         assertThat(workerUnread.get("data").asInt()).isEqualTo(2);
 

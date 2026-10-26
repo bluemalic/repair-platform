@@ -14,6 +14,7 @@ import com.bluemalic.repair.dto.TicketArriveDTO;
 import com.bluemalic.repair.dto.TicketCreateDTO;
 import com.bluemalic.repair.dto.TicketEvaluateDTO;
 import com.bluemalic.repair.dto.TicketFinishDTO;
+import com.bluemalic.repair.dto.TicketReasonDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
 import com.bluemalic.repair.entity.RepairCode;
@@ -170,6 +171,11 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
+        // 派单后的撤单会留下未接单/处理超时节点，必须一并撤掉；10 本来就没有节点，cancel 是幂等的
+        timeoutService.cancel(id, ticket.getTenantId());
+        // 已派单时告诉师傅"这单学生不修了"；10/80 没有师傅，接收人为空会静默跳过
+        noticePublisher.notifyTransition(ticket, TicketAction.CANCEL, null, null);
+        log.info("学生撤单 ticketId={} studentId={} fromStatus={}", id, studentId, ticket.getStatus());
     }
     public void rework(long id, TicketReworkDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
@@ -316,6 +322,73 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                     ticket.getId());
         }
     }
+
+    public void waitMaterial(long id, TicketReasonDTO dto) {
+        long workerId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = lookup.requireTicket(id);
+        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.WAITING_MATERIAL.getCode());
+        if (participantPolicy.isNotParticipant(ticket, workerId)) {
+            throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
+        }
+        transitions.conditionalUpdate(id, TicketStatus.WAITING_MATERIAL.getCode(), TicketAction.WAIT_MATERIAL,
+                workerId, ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    participantPolicy.appendParticipantCondition(wrapper, workerId);
+                },
+                entity -> { }, dto.getReason());
+        // 不撤处理超时节点：待料不暂停 SLA（docs/01 §4.7），超期一样升级给后勤
+        noticePublisher.notifyTransition(ticket, TicketAction.WAIT_MATERIAL, null, "待料：" + dto.getReason());
+        log.info("工单转为待料 ticketId={} workerId={} reason={}", id, workerId, dto.getReason());
+    }
+
+    public void resumeByWorker(long id) {
+        long workerId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = lookup.requireTicket(id);
+        // 只允许从 35 恢复。45 也是 →30 的合法跃迁，但那是后勤的决定（重新派单 / 退回 / 关闭），
+        // 不能让师傅自己把"无法维修"撤回成处理中
+        if (ticket.getStatus() != TicketStatus.WAITING_MATERIAL.getCode()) {
+            throw new BizException(ErrorCode.TICKET_STATUS_NOT_ALLOWED,
+                    TicketStatus.of(ticket.getStatus()).getDesc() + "的工单不能恢复处理");
+        }
+        if (participantPolicy.isNotParticipant(ticket, workerId)) {
+            throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
+        }
+        transitions.conditionalUpdate(id, TicketStatus.PROCESSING.getCode(), TicketAction.RESUME,
+                workerId, ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    participantPolicy.appendParticipantCondition(wrapper, workerId);
+                },
+                entity -> { });
+        noticePublisher.notifyTransition(ticket, TicketAction.RESUME, null, null);
+        log.info("待料恢复处理 ticketId={} workerId={}", id, workerId);
+    }
+
+    public void markUnrepairable(long id, TicketReasonDTO dto) {
+        long workerId = StpUtil.getLoginIdAsLong();
+        Ticket ticket = lookup.requireTicket(id);
+        TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.UNREPAIRABLE.getCode());
+        if (participantPolicy.isNotParticipant(ticket, workerId)) {
+            throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
+        }
+        transitions.conditionalUpdate(id, TicketStatus.UNREPAIRABLE.getCode(), TicketAction.UNREPAIRABLE,
+                workerId, ticket.getTenantId(), ticket.getStatus(),
+                wrapper -> {
+                    wrapper.eq(Ticket::getStatus, ticket.getStatus());
+                    participantPolicy.appendParticipantCondition(wrapper, workerId);
+                },
+                entity -> { }, dto.getReason());
+        // 师傅的活到此为止：处理超时节点撤掉，接下来等后勤拍板
+        timeoutService.cancel(id, ticket.getTenantId());
+        noticePublisher.notifyTransition(ticket, TicketAction.UNREPAIRABLE, null, "无法维修：" + dto.getReason());
+        // 45 是**等后勤处理**的状态：通知本租户所有后勤，否则这张单会安静地停在那里
+        notificationService.sendToTenantAdmins(ticket.getTenantId(), "TICKET_UNREPAIRABLE_ADMIN",
+                "有工单无法维修，请跟进",
+                "工单 " + ticket.getTicketNo() + " 被判定无法维修：" + dto.getReason(), ticket.getId());
+        log.info("工单判定无法维修 ticketId={} workerId={} reason={}", id, workerId, dto.getReason());
+    }
+
     public void rejectByWorker(long id, TicketRejectDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = lookup.requireTicket(id);
@@ -343,8 +416,19 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                         // 维修工驳回时把主责写进 WHERE：与转派并发时，旧主责无法再驳回
                         wrapper.eq(Ticket::getWorkerId, expectedWorkerId);
                     }
-                    // MP 默认跳过实体里的 null 字段，清空必须显式写在 wrapper 上
-                    wrapper.set(Ticket::getWorkerId, null);
+                    // MP 默认跳过实体里的 null 字段，清空必须显式写在 wrapper 上。
+                    // 除了 worker_id，上一轮的接单/到场/完工时间与结果也要清：
+                    // 重新派单是**新一轮**，留着 arrive_time 会让新师傅的到场打卡被幂等判断直接跳过，
+                    // finish_time/handle_minutes 则会把上一轮的时长算到新师傅头上（40 → 80 也会走这里）
+                    wrapper.set(Ticket::getWorkerId, null)
+                            .set(Ticket::getAcceptTime, null)
+                            .set(Ticket::getArriveTime, null)
+                            .set(Ticket::getArriveMinutes, null)
+                            .set(Ticket::getFinishTime, null)
+                            .set(Ticket::getHandleMinutes, null)
+                            .set(Ticket::getResultDesc, null)
+                            // JSON 列必须用 SQL 常量清空：`set(..., null)` 在 JSON 类型上拿不到 jdbcType
+                            .setSql("result_images = NULL");
                 },
                 entity -> entity.setRejectReason(reason));
         // 驳回后原节点作废（可能是未接单提醒，也可能是待验收的验收超时）；重新派单会重新登记
@@ -360,7 +444,9 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 ticket.getTenantId(), ticket.getStatus(),
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
-        // 人工关闭后取消已登记的验收超时任务，避免调度器重复处理
+        // 人工关闭后取消已登记的超时任务，避免调度器重复处理
         timeoutService.cancel(id, ticket.getTenantId());
+        noticePublisher.notifyTransition(ticket, TicketAction.CLOSE, null, null);
+        log.info("关闭工单 ticketId={} operator={} fromStatus={}", id, adminId, ticket.getStatus());
     }
 }

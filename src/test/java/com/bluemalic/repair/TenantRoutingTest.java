@@ -159,10 +159,10 @@ class TenantRoutingTest {
                             + "' AND TABLE_NAME = '" + table + "'"))
                     .as("租户库里应当有 %s", table).isEqualTo(1);
         }
-        // 它跑的是**租户库自己那套脚本**（V1..V6 + R__seed 七条），与平台库的 V1..V18 不是同一个历史
+        // 它跑的是**租户库自己那套脚本**（V1..V7 + R__seed 八条），与平台库的 V1..V19 不是同一个历史
         assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history"))
-                .as("租户库的迁移历史只有它自己那七条").isEqualTo(7);
-        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '18'"))
+                .as("租户库的迁移历史只有它自己那八条").isEqualTo(8);
+        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '19'"))
                 .as("平台库的版本号不该出现在租户库里").isZero();
 
         // ② 首个管理员只在租户库：同一句 SQL、两个库、两个答案

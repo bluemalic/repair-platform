@@ -21,7 +21,7 @@
 
     <select id="loadStats" resultType="com.bluemalic.repair.vo.WorkerScoreStatVO">
         SELECT t.worker_id                                                             AS workerId,
-               COUNT(DISTINCT CASE WHEN t.status IN (20, 30, 40) THEN t.id END)        AS activeCount,
+               COUNT(DISTINCT CASE WHEN t.status IN (20, 30, 35, 40) THEN t.id END)  AS activeCount,
                AVG(e.score)                                                            AS avgScore
         FROM ticket t
                  LEFT JOIN ticket_evaluation e ON e.ticket_id = t.id

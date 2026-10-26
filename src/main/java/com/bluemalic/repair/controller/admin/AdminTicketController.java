@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.dto.TicketCollaboratorDTO;
 import com.bluemalic.repair.dto.TicketDispatchDTO;
+import com.bluemalic.repair.dto.TicketMergeDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
@@ -87,12 +88,35 @@ public class AdminTicketController {
         return Result.ok(dispatchScoreService.candidates(id));
     }
 
-    @Operation(summary = "派单", description = "待派单/已驳回 → 待接单。**已有维修工的单不能走这里**：换人用转派")
+    @Operation(summary = "派单",
+            description = "待派单/无法维修/已驳回 → 待接单。无法维修时**必须换人**（让原师傅继续修请用恢复处理）；"
+                    + "重新派单会清空上一轮的接单/到场时间")
     @SaCheckPermission("ticket:dispatch")
     @PostMapping("/{id}/dispatch")
     public Result<Void> dispatch(@Parameter(description = "工单ID") @PathVariable long id,
                                  @Valid @RequestBody TicketDispatchDTO dto) {
         assignmentService.dispatch(id, dto);
+        return Result.ok();
+    }
+
+    @Operation(summary = "恢复处理",
+            description = "待料/无法维修 → 处理中。按**原派单时间**重新登记处理超时：已经超期就立即升级，"
+                    + "不能因为等后勤拍板把计时清零")
+    @SaCheckPermission("ticket:dispatch")
+    @PostMapping("/{id}/resume")
+    public Result<Void> resume(@Parameter(description = "工单ID") @PathVariable long id) {
+        assignmentService.resume(id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "合并重复工单",
+            description = "把当前单并进目标单：当前单 → 已合并（终态），记录 merged_into_id、清空维修工、撤掉超时节点；"
+                    + "目标单不动。目标不能是自己、已撤单或已合并；被合并单的学生会收到带目标工单号的通知")
+    @SaCheckPermission("ticket:dispatch")
+    @PostMapping("/{id}/merge")
+    public Result<Void> merge(@Parameter(description = "工单ID") @PathVariable long id,
+                              @Valid @RequestBody TicketMergeDTO dto) {
+        assignmentService.merge(id, dto);
         return Result.ok();
     }
 
@@ -122,7 +146,7 @@ public class AdminTicketController {
         return Result.ok();
     }
 
-    @Operation(summary = "关闭工单", description = "已完成 → 已关闭；超时自动关闭在 M3，这里是人工兜底")
+    @Operation(summary = "关闭工单", description = "已完成/无法维修/已驳回 → 已关闭；超时自动关闭在 M3，这里是人工兜底")
     @SaCheckPermission("ticket:close")
     @PostMapping("/{id}/close")
     public Result<Void> close(@Parameter(description = "工单ID") @PathVariable long id) {

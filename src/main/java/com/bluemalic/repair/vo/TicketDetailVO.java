@@ -41,6 +41,9 @@ public class TicketDetailVO extends TicketVO {
     @Schema(description = "拆单来源工单的工单号（前端直接显示这个，不用再查一次）")
     private String parentTicketNo;
 
+    @Schema(description = "合并目标工单的工单号（75 已合并时填；目标单不在当前用户可见范围时为空）")
+    private String mergedIntoNo;
+
     @Schema(description = "流转时间线")
     private List<TicketLogVO> logs;
 
