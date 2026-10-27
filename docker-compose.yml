@@ -314,20 +314,43 @@ services:
   # ============================================================
   # 可观测性（profile observability）—— **默认不启动**
   #
-  # ⚠️ 2C4G 以下不要启用：两个进程冷启动实测约 90M，长期随序列数增长（一般 200–300M），
-  #    2C2G 上会和应用抢内存、把应用挤进 swap。
-  #    2C2G 上会把 app 挤进 swap。本地开发或升级实例后再用：
-  #      docker compose --profile observability up -d prometheus grafana
+  # ⚠️ 2C4G 以下不要启用：Prometheus + Grafana 冷启动实测约 90M，长期随序列数增长
+  #    （一般 200–300M），2C2G 上会和应用抢内存、把应用挤进 swap。
   #
+  #    本地或升级实例后：
+  #      docker compose --profile observability up -d prometheus grafana node-exporter
   #    本机 IDEA 跑应用时设 PROMETHEUS_TARGET=host.docker.internal:8080；
   #    compose 里起应用（app:8080）时用默认值即可。
   #
-  # 安全：两个端口都只绑 127.0.0.1；线上用 SSH 隧道访问 Grafana，
-  #      不要把 9090/3000 映射到公网（ADR-020：指标会暴露内部结构）。
+  # 安全：端口都只绑 127.0.0.1；线上用 SSH 隧道访问 Grafana，
+  #      不要把 9090/3000/9100 映射到公网（ADR-020：指标会暴露内部结构）。
   #
   # 说明：应用侧的 /actuator/prometheus 已经存在；notification-service
   #      是 WebApplicationType.NONE，暂时没有 HTTP 端口可抓（见 observability/prometheus.yml）。
   # ============================================================
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: repair-node-exporter
+    restart: unless-stopped
+    profiles: ["observability"]
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      # 只读挂宿主机的 /proc、/sys、/：node_exporter 靠它们读 CPU/内存/磁盘
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${NODE_EXPORTER_MEM_LIMIT:-64M}
+
   prometheus:
     image: prom/prometheus:v3.0.1
     container_name: repair-prometheus
@@ -350,7 +373,6 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
       - prometheus-data:/prometheus
     networks: [backend]
     deploy:
@@ -370,6 +392,9 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+      # 企业微信群机器人 Webhook。占位值让 Grafana 总能完成 provisioning；
+      # 没配真实地址时告警发不出去（日志可见），但监控本身不受影响。
+      WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=REPLACE_ME}
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -382,6 +407,35 @@ services:
       resources:
         limits:
           memory: ${GRAFANA_MEM_LIMIT:-256M}
+
+  # cAdvisor 单独一个 profile：官方镜像在 gcr.io，而中国大陆服务器通常拉不到
+  # （腾讯云镜像站只代理 Docker Hub）。需要容器级 CPU/内存时显式开启：
+  #   CADVISOR_IMAGE=mirror.ccs.tencentyun.com/zcube/cadvisor:v0.49.1 \
+  #     docker compose --profile observability --profile observability-cadvisor up -d ...
+  # 本地 Docker Desktop 能直连 gcr.io 时不用改。
+  # 注意：cAdvisor 需要 privileged，属于额外权限；只要宿主/应用指标时不要开它。
+  cadvisor:
+    image: ${CADVISOR_IMAGE:-gcr.io/cadvisor/cadvisor:v0.49.1}
+    container_name: repair-cadvisor
+    restart: unless-stopped
+    profiles: ["observability-cadvisor"]
+    privileged: true
+    command:
+      - --housekeeping_interval=30s
+      - --docker_only=true
+    ports:
+      - "127.0.0.1:9105:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${CADVISOR_MEM_LIMIT:-128M}
 
 networks:
   backend:

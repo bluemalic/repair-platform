@@ -1,0 +1,20 @@
+# 企业微信群机器人（Webhook）。Grafana 11.3 原生支持 wecom 类型，不需要 Alertmanager。
+#
+# URL 从 .env 的 WECOM_WEBHOOK_URL 读取；compose 给了一个占位默认值，
+# 没配置时告警会发不出去（Grafana 日志里能看到失败），但不会影响监控本身。
+# 群机器人地址就是“钥匙”，不要提交真实值。
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: wecom
+    receivers:
+      - uid: wecom
+        type: wecom
+        disableResolveMessage: false
+        settings:
+          url: ${WECOM_WEBHOOK_URL}
+          message: |
+            {{ range .Alerts }}[{{ .Status }}] {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
