@@ -1,0 +1,172 @@
+# Grafana 统一告警（替代“Prometheus 规则 + Alertmanager”的组合）：
+# 规则由 Grafana 评估、按上面的策略送到企业微信。
+#
+# 条件用 math 表达式把查询结果变成 0/1：直接拿查询节点当 condition 也能跑，
+# 但阈值写在查询里会让“规则为什么触发”变得不直观。
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: repair-platform
+    folder: 报修平台
+    interval: 1m
+    rules:
+      - uid: repair-app-down
+        title: 应用不可达
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: up{job="repair-app"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: $A < 1
+              type: math
+              refId: B
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: 应用不可达
+          description: Prometheus 已持续 2 分钟抓不到应用
+        labels:
+          severity: critical
+
+      - uid: repair-high-5xx
+        title: 5xx 比例超过 5%
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: $A > 0.05
+              type: math
+              refId: B
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: 5xx 比例超过 5%
+          description: 近 5 分钟 5xx 占比超过阈值，先看 Grafana 的「5xx 比例」与响应码分布
+        labels:
+          severity: warning
+
+      - uid: repair-high-p95
+        title: HTTP P95 超过 1 秒
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket[5m])))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: $A > 1
+              type: math
+              refId: B
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: HTTP P95 超过 1 秒
+          description: 近 5 分钟 P95 超过阈值，先看 QPS 与数据库连接池
+        labels:
+          severity: warning
+
+      - uid: repair-heap-high
+        title: JVM 堆使用率超过 90%
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum(jvm_memory_used_bytes{area="heap"}) / clamp_min(sum(jvm_memory_max_bytes{area="heap"}), 1)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: $A > 0.9
+              type: math
+              refId: B
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: JVM 堆使用率超过 90%
+          description: 先看是不是流量上涨或内存泄漏；必要时下调 JAVA_MAX_RAM_PERCENTAGE 或扩容
+        labels:
+          severity: warning
+
+      - uid: repair-hikari-pending
+        title: 数据库连接池出现排队
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: hikaricp_connections_pending
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: $A > 0
+              type: math
+              refId: B
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: 数据库连接池出现排队
+          description: 有线程在等连接，先看慢查询与连接池上限
+        labels:
+          severity: warning

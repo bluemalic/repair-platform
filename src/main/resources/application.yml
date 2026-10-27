@@ -140,6 +140,12 @@ repair:
     enabled: ${REPAIR_EVENT_RETENTION_ENABLED:true}
     days: ${REPAIR_EVENT_RETENTION_DAYS:30}
     cron: ${REPAIR_EVENT_RETENTION_CRON:0 20 4 * * *}
+  outbox:
+    # relay 扫描开关（测试里关掉；排障时可临时关）
+    relay-enabled: ${REPAIR_OUTBOX_RELAY_ENABLED:true}
+    # 积压指标：NEW 事件总数 + 最老一条的年龄，供 Prometheus 抓取
+    metrics-enabled: ${REPAIR_OUTBOX_METRICS_ENABLED:true}
+    metrics-interval-ms: ${OUTBOX_METRICS_INTERVAL_MS:30000}
 
 # ============================================================
 # 鉴权（Sa-Token）
