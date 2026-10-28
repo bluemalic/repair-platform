@@ -30,6 +30,13 @@
             <artifactId>repair-domain</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- 通知写路径（sync 直写 + 单体内可选消费者）都在 notification 模块，
+             单体按 delivery 开关决定走哪条路（见 application.yml 的 repair.notification.delivery）。 -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-notification-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- ===== Web ===== -->
         <dependency>

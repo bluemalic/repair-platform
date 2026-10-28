@@ -27,6 +27,20 @@
       将来 notification / timeout 只用得到这里的 Result / 枚举 / 工具，web 相关类不会被加载。
     -->
     <dependencies>
+        <!-- 租户路由要读平台库的 tenant 表（TenantMapper/Tenant）并复用 MyBatis-Plus 生态，
+             所以 common 依赖 domain；domain 不反向依赖 common，无环。 -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- TenantRoutingDataSource 继承 spring-jdbc 的 AbstractRoutingDataSource，
+             Registry 直接建 Hikari 池，TenantDataSourceConfig 用 @ConfigurationProperties 绑
+             spring.datasource.*——starter-jdbc 一次带齐 spring-jdbc / HikariCP / autoconfigure。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-webmvc</artifactId>

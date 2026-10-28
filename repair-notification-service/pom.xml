@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-notification-service</artifactId>
+    <name>repair-notification-service</name>
+    <description>通知消费者独立进程（阶段 2 · ADR-023/024）：消费 TICKET_* 事件写站内信。与单体共用 common/domain，本模块只含通知链路与入口</description>
+
+    <!--
+      这里的类（NotificationService / ConsumerService / 转换器 / VO / MQ 消费者装配）是
+      「两个进程都可能跑」的通知写路径：单体在 delivery=sync 时进程内直写，独立进程从 MQ 消费。
+      所以它们放本模块、单体依赖本模块，而不是复制两份。
+      没有 web 依赖：进程是 WebApplicationType.NONE（入口类 + application-notification.yml 双保险）。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+            <version>${swagger.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.bluemalic.repair.notification.NotificationServiceApplication</mainClass>
+                    <!-- 关键：repackage 默认会把主构件替换成 BOOT-INF 结构的可执行 jar，
+                         同 reactor 的 repair-app 编译时就找不到普通类。加 classifier 后
+                         可执行包变成 *-exec.jar，普通 jar 仍是主构件，依赖方照常编译。 -->
+                    <classifier>exec</classifier>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

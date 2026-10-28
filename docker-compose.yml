@@ -182,12 +182,20 @@ services:
           memory: ${ROCKETMQ_DASHBOARD_MEM_LIMIT:-512M}
 
   # ============================================================
-  # notification-service（阶段 2 · ADR-023）—— 与 app 共用镜像，独立进程
+  # notification-service（阶段 2 · ADR-023/024）—— 独立构件、独立镜像
   # 启动：docker compose --profile rocketmq --profile notification up -d
   # 单体必须设 ROCKETMQ_CONSUMER_ENABLED=false，避免两个进程同时消费
+  #
+  # CD 目前只构建单体镜像（生产没开 MQ profile）；要在这里跑 notification 前，
+  # 先在 CD 里加 `docker compose build notification`。
   # ============================================================
   notification:
-    image: ${IMAGE_NAME:-repair-app:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.notification
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-notification-service:latest
     container_name: repair-notification-service
     restart: unless-stopped
     profiles: ["notification"]
@@ -212,7 +220,7 @@ services:
       ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
       ROCKETMQ_CONSUMER_GROUP: repair-notification-service
       ROCKETMQ_CONSUMER_ENABLED: "true"
-    # 同一个 boot jar，用 PropertiesLauncher 指定 notification 入口
+    # 独立可执行 jar，直接 -jar 启动；不再是"共用单体 jar + PropertiesLauncher 指入口"
     entrypoint:
       - sh
       - -c
@@ -220,10 +228,10 @@ services:
         java
         -XX:+UseContainerSupport
         -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
         -Duser.timezone=Asia/Shanghai
-        -Dloader.main=com.bluemalic.repair.notification.NotificationServiceApplication
-        -cp app.jar
-        org.springframework.boot.loader.launch.PropertiesLauncher
+        -jar app.jar
     volumes:
       - ./logs/notification:/app/logs
     networks: [backend]

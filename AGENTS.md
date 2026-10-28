@@ -87,11 +87,11 @@
 
 | 模块 | 职责 | 状态 |
 |---|---|---|
-| `pom.xml` | 聚合 POM：Spring Boot parent + 模块列表 | ✅ 已存在 |
+| `pom.xml` | 聚合 POM：Spring Boot parent + 版本属性 + 模块列表 | ✅ 已存在 |
 | `repair-app/` | 单体应用：identity / ticket / knowledge + REST + 调度 | ✅ 已存在 |
-| `repair-common/` | 跨模块依赖库：Result / 错误码 / 租户路由 / trace / 当前用户 | 规划中 |
-| `repair-domain/` | entity / mapper / 状态枚举共享库 | 规划中 |
-| `repair-notification-service/` | 通知消费者，独立 boot jar | 规划中 |
+| `repair-common/` | 共享库：Result / 错误码 / 枚举 / 租户路由 / 限流 / 指标；**application.yml 也在这里**（所有服务共用同一份默认配置） | ✅ 已存在 |
+| `repair-domain/` | 共享库：entity / mapper / 读模型 VO（含 mapper XML）；阶段 3/4 按服务切数据归属 | ✅ 已存在 |
+| `repair-notification-service/` | 通知消费者 + 通知写路径，独立 boot jar / 独立镜像（`Dockerfile.notification`）；单体依赖它做 sync 投递 | ✅ 已存在 |
 | `repair-timeout-service/` | 延迟消息 + 超时调度，独立 boot jar | 规划中 |
 
 **新代码默认放 `repair-app`**；只有被两个以上服务共用的东西才下沉到 `repair-common` / `repair-domain`——不要为了分层提前搬。
