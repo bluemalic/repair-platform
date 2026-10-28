@@ -205,23 +205,25 @@ cd miniapp-h5 && npm run build:h5      # 产物 dist/build/h5/（uni-app 的约�
 
 ```
 repair-platform/
-├── src/main/java/com/bluemalic/repair/
-│   ├── common/          统一返回体、业务异常、错误码、领域枚举（状态 / 动作 / 角色）
-│   ├── config/          配置类：MyBatis-Plus、Sa-Token、Redis、Knife4j、线程池、超时规则
-│   ├── controller/      按端分包：student / worker / admin / platform
-│   ├── service/         业务接口
-│   │   └── impl/        实现（工单按动作域拆成 Query / Flow / Assignment / Timeout + 共享件）
-│   ├── mapper/          MyBatis-Plus Mapper（SQL 只在这里）
-│   ├── entity/ dto/ vo/ 实体 / 入参 / 出参（三者严格分离，entity 不进接口）
-│   ├── converter/       Entity ↔ DTO ↔ VO
-│   ├── interceptor/     数据权限、鉴权、限流、平台域收口、首登强制改密
-│   ├── ai/              Schema 注入、SQL 生成、四层安全网关、问数编排与 SSE 流式
-│   └── job/             超时调度、Outbox relay、事件记录清理、演示数据重置、平台账号引导
-├── src/main/resources/
-│   ├── application.yml  配置全部走 ${ENV_VAR:默认值}；密码与 Key 一律从环境变量读
-│   ├── db/migration/    Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
-│   └── mapper/          MyBatis XML
-├── src/test/java/       359 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
+├── pom.xml              聚合 POM（Spring Boot parent + 模块列表，阶段 2 · ADR-024）
+├── repair-app/          单体应用（当前全部后端代码）
+│   ├── src/main/java/com/bluemalic/repair/
+│   │   ├── common/          统一返回体、业务异常、错误码、领域枚举（状态 / 动作 / 角色）
+│   │   ├── config/          配置类：MyBatis-Plus、Sa-Token、Redis、Knife4j、线程池、超时规则
+│   │   ├── controller/      按端分包：student / worker / admin / platform
+│   │   ├── service/         业务接口
+│   │   │   └── impl/        实现（工单按动作域拆成 Query / Flow / Assignment / Timeout + 共享件）
+│   │   ├── mapper/          MyBatis-Plus Mapper（SQL 只在这里）
+│   │   ├── entity/ dto/ vo/ 实体 / 入参 / 出参（三者严格分离，entity 不进接口）
+│   │   ├── converter/       Entity ↔ DTO ↔ VO
+│   │   ├── interceptor/     数据权限、鉴权、限流、平台域收口、首登强制改密
+│   │   ├── ai/              Schema 注入、SQL 生成、四层安全网关、问数编排与 SSE 流式
+│   │   └── job/             超时调度、Outbox relay、事件记录清理、演示数据重置、平台账号引导
+│   ├── src/main/resources/
+│   │   ├── application.yml  配置全部走 ${ENV_VAR:默认值}；密码与 Key 一律从环境变量读
+│   │   ├── db/migration/    Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
+│   │   └── mapper/          MyBatis XML
+│   └── src/test/java/       359 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/

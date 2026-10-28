@@ -150,8 +150,8 @@ jobs:
         with:
           name: cd-test-reports
           path: |
-            target/surefire-reports/
-            target/site/jacoco/
+            repair-app/target/surefire-reports/
+            repair-app/target/site/jacoco/
           retention-days: 7
 
   # ============================================================

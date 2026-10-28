@@ -83,6 +83,21 @@
 
 ## 4. 包结构
 
+后端是 **Maven 多模块工程**（阶段 2 · ADR-024）：
+
+| 模块 | 职责 | 状态 |
+|---|---|---|
+| `pom.xml` | 聚合 POM：Spring Boot parent + 模块列表 | ✅ 已存在 |
+| `repair-app/` | 单体应用：identity / ticket / knowledge + REST + 调度 | ✅ 已存在 |
+| `repair-common/` | 跨模块依赖库：Result / 错误码 / 租户路由 / trace / 当前用户 | 规划中 |
+| `repair-domain/` | entity / mapper / 状态枚举共享库 | 规划中 |
+| `repair-notification-service/` | 通知消费者，独立 boot jar | 规划中 |
+| `repair-timeout-service/` | 延迟消息 + 超时调度，独立 boot jar | 规划中 |
+
+**新代码默认放 `repair-app`**；只有被两个以上服务共用的东西才下沉到 `repair-common` / `repair-domain`——不要为了分层提前搬。
+
+`repair-app/src/main/java` 下：
+
 ```
 com.bluemalic.repair
 ├── common/        统一返回体、业务异常、错误码、常量、工具

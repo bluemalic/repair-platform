@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-app</artifactId>
+    <name>repair-app</name>
+    <description>单体应用（identity / ticket / knowledge 模块 + REST + 调度）</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <awssdk.version>2.29.12</awssdk.version>
+        <sa-token.version>1.46.0</sa-token.version>
+        <!-- 阶段 2 事件通道（ADR-023）。直连客户端，不用 spring-boot-starter：
+             starter 2.3.5 的 parent 仍编译在 Spring Boot 2.7.18 上，Boot 3 自动装配有已知问题。 -->
+        <rocketmq.version>5.3.2</rocketmq.version>
+        <knife4j.version>4.5.0</knife4j.version>
+        <!-- OpenAPI 描述生成器。Knife4j 的 starter 需配 2.3.0（Spring Boot 3.2 时代），
+             而 Spring Boot 3.5 必须用 2.8.x —— 所以这里走「springdoc 生成 + Knife4j 静态 UI」。 -->
+        <springdoc.version>2.8.17</springdoc.version>
+        <!-- AI 框架（ADR-005）。只引稳定核心，不引它的 Spring Boot starter（那个还是 beta） -->
+        <langchain4j.version>1.20.0</langchain4j.version>
+        <!-- Excel 导出（ADR-014）。4.0.3 是这个坐标的**最后一个版本**：
+             EasyExcel 已更名为 FastExcel（cn.idev.excel:fastexcel），详见 ADR-014 的"负面后果" -->
+        <easyexcel.version>4.0.3</easyexcel.version>
+        <!-- 覆盖率。版本其实由 spring-boot-starter-parent 管理（当前解析到 0.8.15），
+             这里**显式钉住只是为了消掉 Maven 那句 plugin.version is missing 的警告**——
+             构建输出里不该有每次都要人眼过滤一遍的噪音。想去掉这个 property 直接删，
+             Boot 会接管。 -->
+        <jacoco.version>0.8.15</jacoco.version>
+    </properties>
+
+    <dependencies>
+        <!-- ===== Web ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- ===== 数据 ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- ===== 消息队列（阶段 2 · ADR-023）===== -->
+        <!-- 直连 rocketmq-client，不引 rocketmq-spring-boot-starter：
+             starter 2.3.5 的 parent 仍编译在 Spring Boot 2.7.18 上，Boot 3 自动装配有已知问题；
+             这里只需要一个 producer 和一个 consumer Bean。 -->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ===== 数据库迁移 ===== -->
+        <!-- 表结构由迁移脚本（src/main/resources/db/migration）管理，应用启动时自动执行。
+             在这之前用的是 docs/schema.sql：它只在 MySQL 容器首次初始化时跑一次，库里有数据之后
+             改表就只剩「手工进容器 ALTER」——没有版本、没有记录，换台机器要重来一遍。
+             详见 docs/04 的 ADR-010。
+             flyway-mysql 必须单独引：MySQL 支持从 flyway-core 里拆出来了，只引 core 会在
+             启动时报 "Unsupported Database: MySQL"。
+             两个版本都由 Spring Boot 统一管理，不写版本号。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
+        <!-- ===== ORM ===== -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+        <!-- MyBatis-Plus 从 3.5.9 起把 JSqlParser 拆成可选依赖。
+             分页插件与数据权限拦截器都依赖它，不显式引入会在启动时报类找不到。 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+
+        <!-- ===== 鉴权 ===== -->
+        <!--
+            MinIO 用 S3 协议接入（ADR：不绑厂商）。选官方 AWS SDK 而不是 MinIO 自己的 SDK：
+            换阿里云 OSS / 腾讯 COS 时只改 endpoint 与密钥，不动代码。
+            只引 s3 这一个模块，不引整个 SDK 全家桶。
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${awssdk.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- 登录态落 Redis，服务重启不掉线。用默认 opaque token 模式，不是 JWT，所以不需要密钥 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-jackson</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- BCrypt 密码加密。注意：这是从 Spring Security 项目拆出来的**纯加密工具包**
+             （BCrypt / Argon2 / PBKDF2），不含过滤器链、没有自动装配，不违反 AGENTS 里
+             「不要引入 Spring Security」那条约定；鉴权仍然走 Sa-Token。
+             版本由 Spring Boot 统一管理，不写版本号。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
+        <!-- ===== 接口文档 ===== -->
+        <!-- 只引 Knife4j 的静态 UI（doc.html + webjars），不引它的 starter：
+             starter 4.5.0 的 Java 代码是按 springdoc 2.3.0 编译的，与下面的 2.8.x 组合会在
+             运行时抛 NoSuchMethodError（SpringDocConfigProperties.getGroupConfigs）。
+             UI 包是纯静态资源、零 Java 类，不存在这个耦合；页面由 Spring Boot 自动提供。 -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-openapi3-ui</artifactId>
+            <version>${knife4j.version}</version>
+        </dependency>
+        <!-- OpenAPI 3 描述由 springdoc 生成，UI 从 /v3/api-docs/swagger-config 读取接口清单 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+
+        <!-- ===== 运维 ===== -->
+        <!-- 部署脚本的健康检查与 nginx 都依赖 /actuator/health -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- 轻量可观测性：只暴露 /actuator/prometheus 文本端点，不部署 Prometheus/Grafana 容器（2C2G 装不下，ADR-020） -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ===== 工具 ===== -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ===== AI（M4）===== -->
+        <!--
+            用 LangChain4j 的 open-ai 模块对接 DeepSeek：DeepSeek 没有专用模块，官方推荐就是
+            「open-ai 模块 + 自定义 baseUrl」（ADR-005）。
+
+            ⚠️ **不引它的 Spring Boot starter**：核心是稳定版，而 starter 到 1.20.0 还是 beta；
+            这里只需要一个 ChatModel Bean，自己写二十行配置类就能替代。见 ADR-005。
+
+            只用 open-ai 一个模块（它会带进 core）：不需要 embedding、不需要 pgvector 之类的
+            额外模块——Schema 注入是全量拼提示词，没用到向量检索。
+        -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+
+        <!-- ===== Excel 导出（P1）===== -->
+        <!--
+            统计看板的 Excel 导出用 EasyExcel（选型见 ADR-014）。它在 POI 之上做了一层
+            「对象列表 → 工作表」的封装，写多 sheet 不用手工拼 Row/Cell。
+
+            ⚠️ 它带进来的东西比想象中多（这也是 ADR-014 里权衡的主要代价）：**21 个 jar、约 21MB**，
+            大头是 POI 那一家（poi + poi-ooxml + poi-ooxml-lite + xmlbeans ≈ 12.5MB），
+            另外还有 commons-csv、ehcache（EasyExcel 用它缓存共享字符串，连带 jaxb）。
+            而本项目的导出结果集只有几百行——这个体积是为"将来可能有的明细导出"提前付的。
+
+            ⚠️ ehcache 在 EasyExcel 里声明的是 3.9.11，但 Spring Boot 的依赖管理把它抬到 3.10.9
+            （slf4j 也被抬到 2.0.18）。**这两个版本不是 EasyExcel 测过的组合**——现在的用例
+            （多 sheet、自动列宽、读回）没问题，将来升级 Spring Boot 后若它出怪问题，先查这里。
+
+            ⚠️ 版本锁在 4.0.3：作者已把项目更名为 FastExcel，com.alibaba:easyexcel 不再有新版本。
+            升级路径写在 ADR-014 里（真要动的时候是一次坐标替换，不是重写）。
+        -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>easyexcel</artifactId>
+            <version>${easyexcel.version}</version>
+        </dependency>
+
+        <!-- ===== 测试 ===== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 现在有两个 @SpringBootApplication（单体 + notification-service），
+                         必须显式指定默认入口，否则 repackage 会报 "Unable to find a single main class" -->
+                    <mainClass>com.bluemalic.repair.RepairPlatformApplication</mainClass>
+                    <excludes>
+                        <!-- Lombok 是编译期依赖，不打进可执行 jar -->
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- 覆盖率（jacoco-maven-plugin 的版本由 spring-boot-starter-parent 管理，不自己钉）。
+                 report / check 都绑在 test 阶段而不是默认的 verify：
+                 **验证命令是 `mvn -B clean package`，而 package 在 verify 之前就结束了**——
+                 绑 verify 的话，这个门槛在日常命令里根本不会跑，等于没有。
+                 报告落在 target/site/jacoco/index.html，CI 里当构建产物上传。
+
+                 门槛值的来历（2026-10-14 接入时的实测，不是拍脑袋）：
+                   service.impl 行覆盖 90.6%（1860/2052）→ 门槛取 85%，留约 5 个点的余量
+                   整包行覆盖约 87.2%                    → 门槛取 80%
+                 余量的用途是让"正常加几十行没测试的代码"不至于立刻红；**红了请补测试，
+                 不要调低这两个数字**——它们只有在能被突破时才有意义。 -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 只instrument本项目自己的类。默认是"所有被加载的类"，包括依赖 jar——
+                                 那会让 jsqlparser 的生成代码（CCJSqlParserTokenManager 里那个巨型方法）
+                                 在每个测试 JVM 里抛一次 MethodTooLargeException 并打一串栈，
+                                 既刷屏又白拖慢启动。报告本来也只统计 target/classes，收窄没有副作用。 -->
+                            <includes>
+                                <include>com.bluemalic.repair.*</include>
+                            </includes>
+                            <!-- append=true（默认）会把**上一轮**的 jacoco.exec 累加进来。
+                                 那意味着门槛校验的是"几轮测试的并集"：先跑全量再单独跑一个类，
+                                 覆盖率仍然漂亮，门槛被旧数据骗过去。每次以本轮为准。 -->
+                            <append>false</append>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- 业务逻辑几乎全在 service.impl（也是回归风险最集中的地方），单独盯住它 -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.bluemalic.repair.service.impl.*</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- 整包兜底：防止新增一个"整包零测试"的模块悄悄进来 -->
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
