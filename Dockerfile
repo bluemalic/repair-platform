@@ -17,11 +17,16 @@ RUN if [ -n "$MAVEN_MIRROR" ]; then \
     fi
 
 # 先只拷 pom 并预下载依赖 —— 利用 Docker 层缓存，改代码时不必重新下载依赖。
-# 多模块后根 pom 只是聚合，模块自己的 pom 也要一起拷，否则 go-offline 解析不到 repair-app。
+# 多模块（ADR-024）后 reactor 里有 common / domain / app 三个模块：
+# 聚合 POM 和每个模块自己的 pom 都要拷，go-offline 与 package 才能解析。
 COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
+COPY repair-common/src ./repair-common/src
+COPY repair-domain/src ./repair-domain/src
 COPY repair-app/src ./repair-app/src
 RUN mvn -B clean package -DskipTests
 
