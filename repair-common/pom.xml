@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-common</artifactId>
+    <name>repair-common</name>
+    <description>跨模块依赖库：统一返回体 / 错误码 / 业务异常 / 状态与动作枚举 / 限流 / 指标 / SQL AST 工具（不是服务）</description>
+
+    <!--
+      依赖面来自 common 包现在的真实 import（Result / GlobalExceptionHandler / TraceIdFilter /
+      MetricsRecorder / RateLimiter / SqlAst），不是"以防万一"的预留：
+      · spring-webmvc —— @RestControllerAdvice / ResponseEntity / NoHandlerFoundException 在这里，
+        spring-context / spring-core 由它传递带入；
+      · spring-data-redis —— RateLimiter 用 StringRedisTemplate + Lua 脚本做限流；
+      · sa-token-core —— 全局异常处理器把 NotLogin / NotPermission / NotRole 转成业务错误码；
+      · jsqlparser —— SqlAst 给数据权限拦截器与 AI 网关做 SQL 改写，5.2 与 mybatis-plus-jsqlparser
+        传递引入的版本一致（见根 POM 注释）。
+      将来 notification / timeout 只用得到这里的 Result / 枚举 / 工具，web 相关类不会被加载。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-core</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>5.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>
