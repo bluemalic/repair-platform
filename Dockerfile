@@ -16,11 +16,13 @@ RUN if [ -n "$MAVEN_MIRROR" ]; then \
       echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
     fi
 
-# 先只拷 pom 并预下载依赖 —— 利用 Docker 层缓存，改代码时不必重新下载依赖
+# 先只拷 pom 并预下载依赖 —— 利用 Docker 层缓存，改代码时不必重新下载依赖。
+# 多模块后根 pom 只是聚合，模块自己的 pom 也要一起拷，否则 go-offline 解析不到 repair-app。
 COPY pom.xml .
+COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
-COPY src ./src
+COPY repair-app/src ./repair-app/src
 RUN mvn -B clean package -DskipTests
 
 # ================= 运行阶段 =================
@@ -34,7 +36,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 RUN useradd -r -u 1001 appuser && chown -R appuser /app
 USER appuser
 
-COPY --from=builder /build/target/*.jar app.jar
+COPY --from=builder /build/repair-app/target/*.jar app.jar
 
 EXPOSE 8080
 

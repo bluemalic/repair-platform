@@ -16,6 +16,7 @@
 
 # 构建产物与依赖
 target
+**/target
 **/node_modules
 web-admin/dist
 miniapp-h5/dist
