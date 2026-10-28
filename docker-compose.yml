@@ -386,12 +386,46 @@ services:
     restart: unless-stopped
     profiles: ["observability"]
     depends_on: [prometheus]
+    # 联系人里的 URL / 收件地址在启动时渲染：Compose 会在解析 YAML 时先把 ${VAR} 插值掉
+    # （.env 没配就是空串），而空值会让 Grafana 的 provisioning 直接失败退出
+    # （实测报错：`either url or secret is required`）。所以用 $$ 让变量留到容器内展开，
+    # 并做空值兜底。渲染到 /tmp 是因为 /etc/grafana/provisioning 是只读挂载，不能原地改。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        rm -rf /tmp/provisioning
+        mkdir -p /tmp/provisioning/alerting
+        cp -r /etc/grafana/provisioning/. /tmp/provisioning/
+        # $$ 是 Compose 的转义：不写 $$ 的话 Compose 会在解析 YAML 时就把变量换成空串。
+        HOOK="$${WECOM_WEBHOOK_URL:-https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=REPLACE_ME}"
+        HOOK_ESC=$(printf '%s' "$$HOOK" | sed 's/[&|]/\\&/g')
+        MAIL_TO="$${ALERT_EMAIL_TO:-REPLACE_ME@example.com}"
+        MAIL_ESC=$(printf '%s' "$$MAIL_TO" | sed 's/[&|]/\\&/g')
+        sed -e "s|__WECOM_WEBHOOK_URL__|$$HOOK_ESC|g" \
+            -e "s|__ALERT_EMAIL_TO__|$$MAIL_ESC|g" \
+            /etc/grafana/provisioning/alerting/contact-points.yml \
+            > /tmp/provisioning/alerting/contact-points.yml
+        exec /run.sh
     environment:
+      GF_PATHS_PROVISIONING: /tmp/provisioning
       # 不设匿名访问；密码只从 .env 读，默认 admin 仅用于本地首次登录
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+      # 邮件告警。QQ 邮箱：smtp.qq.com:465（隐式 TLS）+ 授权码，不是登录密码。
+      # SMTP_USER 为空时 enabled 自动为 false，Grafana 照常启动，只是邮件发不出去。
+      GF_SMTP_ENABLED: ${SMTP_USER:+true}
+      GF_SMTP_HOST: ${SMTP_HOST:-smtp.qq.com:465}
+      GF_SMTP_USER: ${SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${SMTP_AUTH_CODE:-}
+      GF_SMTP_FROM_ADDRESS: ${SMTP_USER:-}
+      GF_SMTP_FROM_NAME: 报修平台监控
+      GF_SMTP_SKIP_VERIFY: "false"
+      # 收件地址：entrypoint 里用它渲染 email 联系人，所以必须显式注入容器环境。
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       # 企业微信群机器人 Webhook。占位值让 Grafana 总能完成 provisioning；
       # 没配真实地址时告警发不出去（日志可见），但监控本身不受影响。
       WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=REPLACE_ME}
