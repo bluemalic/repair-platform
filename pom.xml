@@ -6,8 +6,9 @@
 
     <!--
       聚合 POM（阶段 2 · ADR-024）。
-      只放 Spring Boot parent、坐标与模块列表；依赖和构建插件在各模块自己的 pom.xml 里。
-      这样 common / domain 是普通 jar，只有 app / notification / timeout 才打可执行包。
+      只放 Spring Boot parent、版本属性与模块列表；依赖和可执行打包在各模块自己的 pom.xml 里。
+      repair-common / repair-domain 是普通 jar（依赖库，不是服务），
+      只有 repair-app / notification / timeout 才配 spring-boot-maven-plugin 打可执行包。
     -->
     <parent>
         <groupId>org.springframework.boot</groupId>
@@ -23,7 +24,55 @@
     <name>repair-platform</name>
     <description>高校后勤报修 SaaS 平台（含 AI 数据助手）</description>
 
+    <properties>
+        <java.version>17</java.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <awssdk.version>2.29.12</awssdk.version>
+        <sa-token.version>1.46.0</sa-token.version>
+        <!-- 阶段 2 事件通道（ADR-023）。直连客户端，不用 spring-boot-starter：
+             starter 2.3.5 的 parent 仍编译在 Spring Boot 2.7.18 上，Boot 3 自动装配有已知问题。 -->
+        <rocketmq.version>5.3.2</rocketmq.version>
+        <knife4j.version>4.5.0</knife4j.version>
+        <!-- OpenAPI 描述生成器。Knife4j 的 starter 需配 2.3.0（Spring Boot 3.2 时代），
+             而 Spring Boot 3.5 必须用 2.8.x —— 所以这里走「springdoc 生成 + Knife4j 静态 UI」。 -->
+        <springdoc.version>2.8.17</springdoc.version>
+        <!-- swagger-annotations 由 springdoc 2.8.17 带入（2.2.47）；repair-domain 里的读模型 VO
+             用它写接口文档注解，这里钉住同版本，避免 domain 与 app 各自解析出不同版本。 -->
+        <swagger.version>2.2.47</swagger.version>
+        <!-- AI 框架（ADR-005）。只引稳定核心，不引它的 Spring Boot starter（那个还是 beta） -->
+        <langchain4j.version>1.20.0</langchain4j.version>
+        <!-- Excel 导出（ADR-014）。4.0.3 是这个坐标的**最后一个版本**：
+             EasyExcel 已更名为 FastExcel（cn.idev.excel:fastexcel），详见 ADR-014 的"负面后果" -->
+        <easyexcel.version>4.0.3</easyexcel.version>
+        <!-- 覆盖率。版本其实由 spring-boot-starter-parent 管理（当前解析到 0.8.15），
+             这里**显式钉住只是为了消掉 Maven 那句 plugin.version is missing 的警告**——
+             构建输出里不该有每次都要人眼过滤一遍的噪音。想去掉这个 property 直接删，
+             Boot 会接管。 -->
+        <jacoco.version>0.8.15</jacoco.version>
+    </properties>
+
     <modules>
+        <module>repair-common</module>
+        <module>repair-domain</module>
         <module>repair-app</module>
     </modules>
+
+    <build>
+        <plugins>
+            <!-- Lombok 注解处理对**所有模块**生效：common / domain 里也有 @Data。
+                 放在聚合 POM 而不是各模块重复写。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

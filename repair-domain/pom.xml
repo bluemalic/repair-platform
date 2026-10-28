@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-domain</artifactId>
+    <name>repair-domain</name>
+    <description>entity / mapper / 读模型 VO 共享库（含 mapper XML）。阶段 2 不做数据归属拆分，各服务共用；等 ADR-024 阶段 3/4 再按服务切开</description>
+
+    <!--
+      · mybatis-plus starter —— entity 用它的注解与 JacksonTypeHandler，mapper 继承 BaseMapper；
+        用 starter 而不是拆 core/extension 单引，保证与 app 的 MyBatis-Plus 版本永远一致。
+      · swagger-annotations —— mapper 直接返回的 6 个读模型 VO（统计 / 用量 / 师傅工作量）带
+        @Schema 接口文档注解；版本钉在根 POM，与 app 里 springdoc 带入的一致。
+      读模型 VO 与 mapper 放在一起是有意的：它们是这条 SQL 的返回形状，跟着 SQL 走；
+      接口层的出参 VO（给前端的那层）仍在 repair-app。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+            <version>${swagger.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

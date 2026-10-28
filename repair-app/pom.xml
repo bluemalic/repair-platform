@@ -15,31 +15,22 @@
     <name>repair-app</name>
     <description>单体应用（identity / ticket / knowledge 模块 + REST + 调度）</description>
 
-    <properties>
-        <java.version>17</java.version>
-        <mybatis-plus.version>3.5.17</mybatis-plus.version>
-        <awssdk.version>2.29.12</awssdk.version>
-        <sa-token.version>1.46.0</sa-token.version>
-        <!-- 阶段 2 事件通道（ADR-023）。直连客户端，不用 spring-boot-starter：
-             starter 2.3.5 的 parent 仍编译在 Spring Boot 2.7.18 上，Boot 3 自动装配有已知问题。 -->
-        <rocketmq.version>5.3.2</rocketmq.version>
-        <knife4j.version>4.5.0</knife4j.version>
-        <!-- OpenAPI 描述生成器。Knife4j 的 starter 需配 2.3.0（Spring Boot 3.2 时代），
-             而 Spring Boot 3.5 必须用 2.8.x —— 所以这里走「springdoc 生成 + Knife4j 静态 UI」。 -->
-        <springdoc.version>2.8.17</springdoc.version>
-        <!-- AI 框架（ADR-005）。只引稳定核心，不引它的 Spring Boot starter（那个还是 beta） -->
-        <langchain4j.version>1.20.0</langchain4j.version>
-        <!-- Excel 导出（ADR-014）。4.0.3 是这个坐标的**最后一个版本**：
-             EasyExcel 已更名为 FastExcel（cn.idev.excel:fastexcel），详见 ADR-014 的"负面后果" -->
-        <easyexcel.version>4.0.3</easyexcel.version>
-        <!-- 覆盖率。版本其实由 spring-boot-starter-parent 管理（当前解析到 0.8.15），
-             这里**显式钉住只是为了消掉 Maven 那句 plugin.version is missing 的警告**——
-             构建输出里不该有每次都要人眼过滤一遍的噪音。想去掉这个 property 直接删，
-             Boot 会接管。 -->
-        <jacoco.version>0.8.15</jacoco.version>
-    </properties>
+    <!-- 版本属性（java / mybatis-plus / sa-token / springdoc / swagger / langchain4j / easyexcel ...）
+         统一放在聚合 POM（../pom.xml），三个模块共用一份，改版本只改一处。 -->
 
     <dependencies>
+        <!-- ===== 模块内依赖（阶段 2 · ADR-024）===== -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- ===== Web ===== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -235,18 +226,7 @@
                     </excludes>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
-            </plugin>
+            <!-- Lombok 注解处理已上收到聚合 POM，对所有模块生效 -->
 
             <!-- 覆盖率（jacoco-maven-plugin 的版本由 spring-boot-starter-parent 管理，不自己钉）。
                  report / check 都绑在 test 阶段而不是默认的 verify：
