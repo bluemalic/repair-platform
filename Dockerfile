@@ -17,18 +17,21 @@ RUN if [ -n "$MAVEN_MIRROR" ]; then \
     fi
 
 # 先只拷 pom 并预下载依赖 —— 利用 Docker 层缓存，改代码时不必重新下载依赖。
-# 多模块（ADR-024）后 reactor 里有 common / domain / app 三个模块：
-# 聚合 POM 和每个模块自己的 pom 都要拷，go-offline 与 package 才能解析。
+# 多模块（ADR-024）后 reactor 里有 common / domain / notification / app 四个模块：
+# 聚合 POM 和每个模块自己的 pom 都要拷（reactor 读图要用全量 POM），go-offline 才能解析。
 COPY pom.xml .
 COPY repair-common/pom.xml repair-common/pom.xml
 COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
+# -pl app -am：构建单体及其依赖（common / domain），跳过 notification 模块
+# （那是独立镜像，见 Dockerfile.notification），app 镜像构建更快。
 COPY repair-common/src ./repair-common/src
 COPY repair-domain/src ./repair-domain/src
 COPY repair-app/src ./repair-app/src
-RUN mvn -B clean package -DskipTests
+RUN mvn -B clean package -DskipTests -pl repair-app -am
 
 # ================= 运行阶段 =================
 FROM eclipse-temurin:17-jre-jammy
