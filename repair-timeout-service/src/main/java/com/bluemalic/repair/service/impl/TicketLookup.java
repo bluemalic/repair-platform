@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @RequiredArgsConstructor
-class TicketLookup {
+public class TicketLookup {
 
     private final TicketMapper ticketMapper;
     private final SysUserMapper sysUserMapper;

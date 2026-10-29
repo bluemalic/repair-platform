@@ -55,6 +55,7 @@
         <module>repair-common</module>
         <module>repair-domain</module>
         <module>repair-notification-service</module>
+        <module>repair-timeout-service</module>
         <module>repair-app</module>
     </modules>
 

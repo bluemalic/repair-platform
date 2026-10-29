@@ -92,7 +92,7 @@
 | `repair-common/` | 共享库：Result / 错误码 / 枚举 / 租户路由 / 限流 / 指标；**application.yml 也在这里**（所有服务共用同一份默认配置） | ✅ 已存在 |
 | `repair-domain/` | 共享库：entity / mapper / 读模型 VO（含 mapper XML）；阶段 3/4 按服务切数据归属 | ✅ 已存在 |
 | `repair-notification-service/` | 通知消费者 + 通知写路径，独立 boot jar / 独立镜像（`Dockerfile.notification`）；单体依赖它做 sync 投递 | ✅ 已存在 |
-| `repair-timeout-service/` | 延迟消息 + 超时调度，独立 boot jar | 规划中 |
+| `repair-timeout-service/` | 超时域独立进程：秒级 ZSet 消费 + 兜底扫描 + 三个超时动作（`Dockerfile.timeout`）；**工单流转内核暂居本模块**（命令路径与超时回调共用，放 common 会与 notification 成环） | ✅ 已存在 |
 
 **新代码默认放 `repair-app`**；只有被两个以上服务共用的东西才下沉到 `repair-common` / `repair-domain`——不要为了分层提前搬。
 
