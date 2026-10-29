@@ -30,7 +30,7 @@ import java.util.function.Consumer;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-class TicketTransitionSupport {
+public class TicketTransitionSupport {
 
     private final TicketMapper ticketMapper;
     private final TicketLogMapper ticketLogMapper;

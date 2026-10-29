@@ -1,0 +1,8 @@
+# timeout-service 独立进程的 profile（阶段 2 · ADR-024）
+# 启动：--spring.profiles.active=timeout
+spring:
+  main:
+    web-application-type: none
+  # 表结构由单体/部署负责，本进程不跑迁移
+  flyway:
+    enabled: false

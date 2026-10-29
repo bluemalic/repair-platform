@@ -1,0 +1,54 @@
+# ================= timeout-service 镜像（阶段 2 · ADR-024）=================
+# 与根目录 Dockerfile（单体）同源：同一个 reactor、同一份依赖，
+# 区别只在 -pl 的目标模块与最后 COPY 的 jar。
+#
+# 启动：docker compose --profile timeout up -d timeout
+# 进程是 WebApplicationType.NONE，不监听任何端口。
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+# 国内构建时换镜像源，与根 Dockerfile 同一套约定（见 .env 的 MAVEN_MIRROR）。
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+# reactor 要读全量 POM；-am 会带上 common / domain / notification 三个依赖模块
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+COPY repair-common/src ./repair-common/src
+COPY repair-domain/src ./repair-domain/src
+COPY repair-notification-service/src ./repair-notification-service/src
+COPY repair-timeout-service/src ./repair-timeout-service/src
+RUN mvn -B clean package -DskipTests -pl repair-timeout-service -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 非 root 用户，与单体镜像同一套规范
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+# repackage 加了 exec classifier：可执行包是 *-exec.jar，普通 jar 留给 reactor 内依赖方编译
+COPY --from=builder /build/repair-timeout-service/target/*-exec.jar app.jar
+
+# 无 web：不 EXPOSE 端口。堆比例沿用单体的环境变量口径。
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-55} \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/app/logs \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]

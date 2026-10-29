@@ -37,6 +37,13 @@
             <artifactId>repair-notification-service</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- 超时机制与工单流转内核在 timeout 模块：单体的命令路径（Flow/Assignment/Query）
+             也在用这套内核，兜底扫库长住在单体（ADR-024）。 -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-timeout-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- ===== Web ===== -->
         <dependency>

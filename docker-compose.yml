@@ -240,6 +240,60 @@ services:
         limits:
           memory: ${NOTIFICATION_MEM_LIMIT:-512M}
 
+  # ============================================================
+  # timeout-service（阶段 2 · ADR-024）—— 超时域独立进程
+  # 启动：docker compose --profile timeout up -d timeout
+  # zset 模式下与单体并行安全：秒级消费按 ZREM 返回值去重（ADR-001 多实例口径），
+  # 三个动作幂等（状态 CAS + ticket_log 判重）；兜底扫描会双跑一轮——浪费但不重复动作，
+  # delivery=mq（下一刀）后用开关把兜底收敛回单体。
+  # CD 目前只构建单体镜像（生产没开本 profile）；要跑 timeout 前先在 CD 加 build timeout。
+  # ============================================================
+  timeout:
+    build:
+      context: .
+      dockerfile: Dockerfile.timeout
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-timeout-service:latest
+    container_name: repair-timeout-service
+    restart: unless-stopped
+    profiles: ["timeout"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: timeout
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${TIMEOUT_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    volumes:
+      - ./logs/timeout:/app/logs
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${TIMEOUT_MEM_LIMIT:-384M}
+
   app:
     build:
       context: .

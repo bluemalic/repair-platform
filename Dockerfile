@@ -23,6 +23,7 @@ COPY pom.xml .
 COPY repair-common/pom.xml repair-common/pom.xml
 COPY repair-domain/pom.xml repair-domain/pom.xml
 COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 

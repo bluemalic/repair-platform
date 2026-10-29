@@ -17,7 +17,7 @@ import static java.util.Map.entry;
  * 调用方只负责“触发”与必要的补充参数。
  */
 @Component
-class TicketNoticePublisher {
+public class TicketNoticePublisher {
 
     private final NotificationService notificationService;
     private final OutboxService outboxService;

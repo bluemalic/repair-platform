@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-timeout-service</artifactId>
+    <name>repair-timeout-service</name>
+    <description>超时域独立进程（阶段 2 · ADR-024）：秒级 ZSet 消费 + 兜底扫描 + 三个超时动作。工单流转内核随超时回调一起在本模块（见类注释），阶段 3 拆 ticket-service 时归位</description>
+
+    <!--
+      为什么工单流转内核（TicketTransitionSupport / TicketLookup / TicketNoticePublisher / OutboxService）
+      在这里而不是 common：
+      1) 内核被「单体的命令路径」和「超时回调」共用，必须两边可见；
+      2) NoticePublisher 依赖通知写路径（notification 模块），放 common 会和
+         「common ← notification」的依赖方向成环；
+      3) 阶段 3 拆 ticket-service 时内核随之归位（ADR-024 的欠债清单里有这一条）。
+      rocketmq-client 暂不引入：延迟消息路径（delivery=mq）是下一刀，本模块先保持 zset 行为不变。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-domain</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-notification-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- ZSet 延迟队列在 Redis 上；common 已带 spring-data-redis，这里显式声明是因为
+             TimeoutServiceImpl 直接 import 它的类，依赖不该靠传递碰巧成立。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- 工单流转内核用 MetricsRecorder（@Component，构造注入 MeterRegistry）。
+             micrometer-core 本身不产生 MeterRegistry Bean（那是 actuator-autoconfigure 的事），
+             没有本依赖进程会以 "No qualifying bean of type MeterRegistry" 启动失败——
+             这是只跑编译、不真正启动独立进程时漏掉的问题。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- 运行期驱动：独立进程自己连 MySQL（数据源由 common 的 TenantDataSourceConfig 建），
+             没有它启动时报 "Cannot load driver class: com.mysql.cj.jdbc.Driver"。 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.bluemalic.repair.timeout.TimeoutServiceApplication</mainClass>
+                    <!-- 同 notification：repackage 换主构件会让 reactor 内依赖方（repair-app）
+                         编译不到类，可执行包必须挂 exec classifier。 -->
+                    <classifier>exec</classifier>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
