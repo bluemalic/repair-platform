@@ -3,16 +3,19 @@ package com.bluemalic.repair.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.TicketStatus;
+import com.bluemalic.repair.config.TimeoutProperties;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.mq.TimeoutMqScheduler;
 import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -65,6 +68,10 @@ public class TimeoutServiceImpl implements TimeoutService {
     private final TicketMapper ticketMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final TenantSchemaCatalog schemaCatalog;
+    /** zset（默认，单体自轮询）/ mq（RocketMQ 定时消息，timeout-service 执行）—— 阶段 2 · ADR-024。 */
+    private final TimeoutProperties timeoutProperties;
+    /** mq 模式才装配；用 ObjectProvider 是为了让 zset 模式不依赖 RocketMQ 的任何 Bean。 */
+    private final ObjectProvider<TimeoutMqScheduler> mqSchedulerProvider;
 
     @Override
     public void registerAccept(long ticketId, long tenantId) {
@@ -104,6 +111,12 @@ public class TimeoutServiceImpl implements TimeoutService {
 
     @Override
     public void cancel(long ticketId, long tenantId) {
+        if (timeoutProperties.isMqDelivery()) {
+            // RocketMQ 定时消息无法撤回：到期消息执行前会按状态 CAS + ticket_log 判重跳过，
+            // 所以这里只做"逻辑取消"，不再删除任何东西。
+            log.debug("MQ 模式下超时为逻辑取消 ticketId={} tenantId={}", ticketId, tenantId);
+            return;
+        }
         for (String node : List.of(NODE_ACCEPT, NODE_PROCESS, NODE_EVAL)) {
             String key = key(node);
             stringRedisTemplate.opsForZSet().remove(key, member(tenantId, ticketId));
@@ -198,6 +211,16 @@ public class TimeoutServiceImpl implements TimeoutService {
     }
 
     private void add(String node, long tenantId, long ticketId, Instant deadline) {
+        if (timeoutProperties.isMqDelivery()) {
+            TimeoutMqScheduler scheduler = mqSchedulerProvider.getIfAvailable();
+            if (scheduler == null) {
+                // delivery=mq 但 RocketMQ 未开启/调度器未装配：启动就该失败，不要等第一条超时才炸
+                throw new IllegalStateException(
+                        "repair.timeout.delivery=mq 但 MQ 调度器未装配（检查 repair.rocketmq.enabled）");
+            }
+            scheduler.schedule(node, ticketId, tenantId, deadline);
+            return;
+        }
         stringRedisTemplate.opsForZSet().add(key(node), member(tenantId, ticketId), deadline.toEpochMilli());
     }
 

@@ -140,6 +140,23 @@ repair:
   notification:
     # sync（默认）：TicketNoticePublisher 直接写站内信；mq：写 Outbox，由 MQ 或本地 handler 投递
     delivery: ${REPAIR_NOTIFICATION_DELIVERY:sync}
+  timeout:
+    # 三个节点的阈值（分钟）：未接单提醒 24h / 未处理升级 48h / 验收超时 24h。
+    # 演示时可调成 1 分钟快速看到效果（docs/01 §超时）。
+    accept-minutes: ${REPAIR_TIMEOUT_ACCEPT_MINUTES:1440}
+    process-minutes: ${REPAIR_TIMEOUT_PROCESS_MINUTES:2880}
+    eval-minutes: ${REPAIR_TIMEOUT_EVAL_MINUTES:1440}
+    # 测试里总开关关掉（@IntegrationTest 已设 false），两种投递模式都受它控制
+    scheduler-enabled: ${REPAIR_TIMEOUT_SCHEDULER_ENABLED:true}
+    # zset（默认，单体每秒轮询 Redis）| mq（RocketMQ 定时消息，由 timeout-service 执行）
+    delivery: ${REPAIR_TIMEOUT_DELIVERY:zset}
+    # mq 模式下谁消费到期消息：timeout 进程 true、单体 false（避免两个进程抢同一 consumer group 之外的消息）
+    consumer-enabled: ${REPAIR_TIMEOUT_CONSUMER_ENABLED:false}
+    # 每分钟兜底扫库：按 ADR-001/024 长住单体；timeout 进程设 false
+    backstop-enabled: ${REPAIR_TIMEOUT_BACKSTOP_ENABLED:true}
+    timeout-topic: ${ROCKETMQ_TIMEOUT_TOPIC:repair-ticket-timeouts}
+    producer-group: ${ROCKETMQ_TIMEOUT_PRODUCER_GROUP:repair-timeout-producer}
+    consumer-group: ${ROCKETMQ_TIMEOUT_CONSUMER_GROUP:repair-timeout-service}
   event-retention:
     # consumed_event 是追加型表，不清理会无限增长（唯一索引越大，消费插入越慢）。
     # 保留期只要覆盖 MQ 的最大重投窗口：RocketMQ 默认保留 72 小时，30 天有充足余量。

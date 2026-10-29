@@ -1,6 +1,7 @@
 package com.bluemalic.repair.job;
 
 import com.bluemalic.repair.common.BizException;
+import com.bluemalic.repair.config.TimeoutProperties;
 import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
@@ -21,6 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>每分钟兜底扫库，补 ZSet 丢失（Redis 重启）导致的漏处理</li>
  * </ul>
  *
+ * <p><b>delivery=mq 时（阶段 2 · ADR-024）</b>：秒级 ZSet 消费关闭（到期由 RocketMQ 定时消息触发，
+ * timeout-service 的 {@code TimeoutMqConsumer} 执行）；兜底扫库仍按 {@code backstop-enabled}
+ * 留在单体——它是消息丢失的最后一道防线。
+ *
  * <p>这里只做"编排"：到期工单该做什么（自动关闭）由 {@link TicketTimeoutHandler#autoClose} 决定，
  * 调度器不直接碰库。
  *
@@ -36,6 +41,7 @@ public class TimeoutScheduler {
 
     private final TimeoutService timeoutService;
     private final TicketTimeoutHandler timeoutHandler;
+    private final TimeoutProperties timeoutProperties;
 
     /**
      * 任务名 → 上一次已经 WARN 过的失败信息（见 {@link #runQuietly}）。
@@ -43,27 +49,39 @@ public class TimeoutScheduler {
      */
     private final Map<String, String> lastWarned = new ConcurrentHashMap<>();
 
-    /** ADR-001：秒级消费，触发精度 ≈ 阈值 + 1s。 */
+    /** ADR-001：秒级消费，触发精度 ≈ 阈值 + 1s。mq 模式下由定时消息触发，这里不轮询。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueEval() {
+        if (!timeoutProperties.isZsetDelivery()) {
+            return;
+        }
         runQuietly("消费到期任务[验收]", () -> closeDue(timeoutService.handleDueEval()));
     }
 
     /** 未接单提醒节点：到期仍无人接单 → 提醒调度方（docs/01 §超时）。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueAccept() {
+        if (!timeoutProperties.isZsetDelivery()) {
+            return;
+        }
         runQuietly("消费到期任务[接单]", () -> remindDue(timeoutService.handleDueAccept()));
     }
 
     /** 未处理升级节点：派单超阈值仍未完工 → 升级提醒调度方（docs/01 §超时）。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueProcess() {
+        if (!timeoutProperties.isZsetDelivery()) {
+            return;
+        }
         runQuietly("消费到期任务[处理]", () -> escalateDue(timeoutService.handleDueProcess()));
     }
 
-    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet 路径（三个节点都扫）。 */
+    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet/MQ 路径（三个节点都扫）。 */
     @Scheduled(cron = "0 * * * * *")
     public void backstop() {
+        if (!timeoutProperties.isBackstopEnabled()) {
+            return;
+        }
         runQuietly("兜底扫描[验收]", () -> closeDue(timeoutService.backstopScanEval()));
         runQuietly("兜底扫描[接单]", () -> remindDue(timeoutService.backstopScanAccept()));
         runQuietly("兜底扫描[处理]", () -> escalateDue(timeoutService.backstopScanProcess()));

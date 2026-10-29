@@ -263,6 +263,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      rocketmq-broker:
+        condition: service_started
     environment:
       SPRING_PROFILES_ACTIVE: timeout
       TZ: Asia/Shanghai
@@ -275,6 +277,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # delivery=mq：本进程消费到期消息、执行三个动作；
+      # 兜底扫库按 ADR-024 长住单体（单体里 backstop-enabled 保持 true）。
+      REPAIR_ROCKETMQ_ENABLED: "true"
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      REPAIR_TIMEOUT_DELIVERY: mq
+      REPAIR_TIMEOUT_CONSUMER_ENABLED: "true"
+      REPAIR_TIMEOUT_BACKSTOP_ENABLED: "false"
     entrypoint:
       - sh
       - -c
