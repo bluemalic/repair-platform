@@ -7,6 +7,7 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
  * RocketMQ 生产者装配（阶段 2 · ADR-023）。
@@ -22,7 +23,15 @@ public class RocketMqConfig {
 
     private final RocketMqProperties properties;
 
+    /**
+     * 单体的 Outbox 生产者。
+     *
+     * <p>标 {@code @Primary}：delivery=mq 时容器里还会有 timeout 模块的 {@code timeoutProducer}，
+     * 而 {@code RocketMqOutboxPublisher} 是按类型注入的——没有 primary 会在 mq 模式下歧义。
+     * timeout 侧的生产者用 {@code @Qualifier("timeoutProducer")} 精确取。
+     */
     @Bean(destroyMethod = "shutdown")
+    @Primary
     public DefaultMQProducer rocketMqProducer() throws MQClientException {
         DefaultMQProducer producer = new DefaultMQProducer(properties.getProducerGroup());
         producer.setNamesrvAddr(properties.getNameServer());

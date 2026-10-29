@@ -22,7 +22,6 @@
       2) NoticePublisher 依赖通知写路径（notification 模块），放 common 会和
          「common ← notification」的依赖方向成环；
       3) 阶段 3 拆 ticket-service 时内核随之归位（ADR-024 的欠债清单里有这一条）。
-      rocketmq-client 暂不引入：延迟消息路径（delivery=mq）是下一刀，本模块先保持 zset 行为不变。
     -->
     <dependencies>
         <dependency>
@@ -43,6 +42,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- delivery=mq 的定时消息（setDeliverTimeMs）：生产者/消费者都直连 rocketmq-client -->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq.version}</version>
         </dependency>
         <!-- ZSet 延迟队列在 Redis 上；common 已带 spring-data-redis，这里显式声明是因为
              TimeoutServiceImpl 直接 import 它的类，依赖不该靠传递碰巧成立。 -->
