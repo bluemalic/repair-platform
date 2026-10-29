@@ -41,6 +41,13 @@
             <artifactId>rocketmq-client</artifactId>
             <version>${rocketmq.version}</version>
         </dependency>
+        <!-- 运行期驱动：独立进程自己连 MySQL（数据源由 common 的 TenantDataSourceConfig 建），
+             没有它启动时报 "Cannot load driver class: com.mysql.cj.jdbc.Driver"。 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations-jakarta</artifactId>
