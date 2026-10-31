@@ -158,6 +158,25 @@ export interface BuildingVO {
   status: number
 }
 
+/** 设备台账（docs/01 §4.8）：编号租户内唯一，也是二维码内容。 */
+export interface AssetVO {
+  id: string
+  assetNo: string
+  name: string
+  categoryId: string | null
+  categoryName: string | null
+  buildingId: string | null
+  buildingName: string | null
+  room: string | null
+  /** 1在用 2维修中 3停用/报废 */
+  status: number
+  purchaseDate: string | null
+  warrantyUntil: string | null
+  supplier: string | null
+  remark: string | null
+  createTime: string
+}
+
 /** 报修类别（docs/03 §5.4 基础数据）。defaultUrgency 是学生没选紧急度时的默认值。 */
 export interface KnowledgeEntryVO {
   id: string

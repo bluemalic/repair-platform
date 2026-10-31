@@ -28,6 +28,7 @@ const LEGACY_CONSOLE_PATHS = new Set([
   '/repair-codes',
   '/buildings',
   '/categories',
+  '/assets',
   '/knowledge',
   '/audit-logs',
   '/platform/tenants',
@@ -87,6 +88,7 @@ const router = createRouter({
         { path: 'repair-codes', name: 'repairCodes', component: () => import('@/views/RepairCodesView.vue'), meta: { title: '报修码管理 · 后勤报修管理端' } },
         { path: 'buildings', name: 'buildings', component: () => import('@/views/BuildingsView.vue'), meta: { title: '楼栋管理 · 后勤报修管理端' } },
         { path: 'categories', name: 'categories', component: () => import('@/views/CategoriesView.vue'), meta: { title: '类别管理 · 后勤报修管理端' } },
+        { path: 'assets', name: 'assets', component: () => import('@/views/AssetsView.vue'), meta: { title: '设备台账 · 后勤报修管理端' } },
         { path: 'knowledge', name: 'knowledge', component: () => import('@/views/KnowledgeView.vue'), meta: { title: '维修知识库 · 后勤报修管理端' } },
         // 操作日志放在基础数据一组里：它记的主要是基础数据与账号的改动（docs/01 §4.4）
         { path: 'audit-logs', name: 'auditLogs', component: () => import('@/views/AuditLogView.vue'), meta: { title: '操作日志 · 后勤报修管理端' } },
