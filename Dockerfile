@@ -29,14 +29,16 @@ RUN mvn -B -q dependency:go-offline
 
 # -pl app -am 会构建 app 的全部依赖：common / domain / notification / timeout 四个模块。
 # 所以这四个模块的**源码**都必须在构建上下文里——少拷一个，那个模块就是空 jar，
-# app 的主代码/测试代码在编译时会找不到符号（2026-10-30 的 CD 就是这样红的：
-# 只拷了 common/domain/app，app 的测试编译找不到 timeout 模块的 TimeoutCommand 等）。
+# app 的主代码在编译时会找不到符号（2026-10-30 的 CD 就是这样红的）。
 COPY repair-common/src ./repair-common/src
 COPY repair-domain/src ./repair-domain/src
 COPY repair-notification-service/src ./repair-notification-service/src
 COPY repair-timeout-service/src ./repair-timeout-service/src
 COPY repair-app/src ./repair-app/src
-RUN mvn -B clean package -DskipTests -pl repair-app -am
+# 用 maven.test.skip 而不是 skipTests：生产镜像不需要测试，而 skipTests 仍会**编译测试**——
+# 测试类直接 new 跨模块的实现类（如 TimeoutServiceImpl），在镜像裁剪后的 classpath 上
+# 曾解析到旧的 5 参数快照导致 testCompile 失败（2026-10-31 的 CD）。测试由 CI 全量跑。
+RUN mvn -B clean package -Dmaven.test.skip=true -pl repair-app -am
 
 # ================= 运行阶段 =================
 FROM eclipse-temurin:17-jre-jammy
