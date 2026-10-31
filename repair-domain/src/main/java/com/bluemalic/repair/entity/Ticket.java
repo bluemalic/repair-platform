@@ -42,6 +42,9 @@ public class Ticket {
 
     private Long buildingId;
 
+    /** 关联设备ID（阶段 3 · docs/01 §4.8）；可空，老工单/未选设备时为 null */
+    private Long assetId;
+
     private String room;
 
     private Long categoryId;
