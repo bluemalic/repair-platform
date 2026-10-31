@@ -8,6 +8,7 @@ import com.bluemalic.repair.common.Paging;
 import com.bluemalic.repair.common.Texts;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.common.WorkerTaskScope;
+import com.bluemalic.repair.converter.AssetConverter;
 import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.entity.Asset;
 import com.bluemalic.repair.entity.Building;
@@ -26,6 +27,7 @@ import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.TicketQueryService;
+import com.bluemalic.repair.vo.AssetOptionVO;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.RepairCodeVO;
 import com.bluemalic.repair.vo.TicketDetailVO;
@@ -159,6 +161,21 @@ public class TicketQueryServiceImpl implements TicketQueryService {
                     return vo;
                 }).toList());
         return PageResult.of(voPage);
+    }
+
+    @Override
+    public List<AssetOptionVO> assetsForLocation(long buildingId, String room) {
+        long tenantId = currentTenantService.requireTenantId();
+        if (room == null || room.isBlank()) {
+            return List.of();
+        }
+        return assetMapper.selectList(Wrappers.<Asset>lambdaQuery()
+                        .eq(Asset::getTenantId, tenantId)
+                        .eq(Asset::getBuildingId, buildingId)
+                        .eq(Asset::getRoom, room.trim())
+                        .ne(Asset::getStatus, 3)
+                        .orderByAsc(Asset::getAssetNo))
+                .stream().map(AssetConverter::toOption).toList();
     }
 
     @Override

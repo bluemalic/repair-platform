@@ -1,5 +1,5 @@
 import { request } from './http'
-import type { KnowledgeAdviceVO, PageResult, RepairCodeVO, TicketDetailVO, TicketVO } from '@/types'
+import type { AssetOptionVO, KnowledgeAdviceVO, PageResult, RepairCodeVO, TicketDetailVO, TicketVO } from '@/types'
 
 /** 学生：我的报修（可见范围由后端数据权限拦截器按"本人"注入） */
 export function pageMyTickets(pageNum: number, pageSize = 10) {
@@ -31,6 +31,11 @@ export function pageMyTasks(
   })
 }
 
+/** 房间内可关联的设备（选填）：按楼栋 + 房间列，只返回本租户未停用的。 */
+export function getAssetsAtLocation(buildingId: string, room: string) {
+  return request<AssetOptionVO[]>({ url: '/student/assets', data: { buildingId, room } })
+}
+
 /** 按报修码查位置（跨端共用接口，docs/03 §7.1）；码是位置码，不指向某张工单。 */
 export function getPositionByCode(code: string) {
   return request<RepairCodeVO>({ url: `/tickets/by-code/${code}` })
@@ -53,6 +58,8 @@ export function createTicket(body: {
   description: string
   images?: string[]
   urgency?: number
+  /** 可选关联设备（房间内选一台） */
+  assetId?: string
 }) {
   return request<TicketVO>({ url: '/student/tickets', method: 'POST', data: body })
 }
