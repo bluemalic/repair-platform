@@ -10,6 +10,8 @@ export interface CategoryCreateBody {
   name: string
   defaultUrgency: number
   sort: number
+  /** 默认工种分组（可选，派单技能维度） */
+  workerGroupId?: string
 }
 
 /** 修改：PUT 是"提交最终状态"。 */

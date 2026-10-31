@@ -18,9 +18,12 @@ export function getTicketDetail(id: string) {
   return http.get<TicketDetailVO>(`/admin/tickets/${id}`)
 }
 
-/** 派单候选（阶段 3 · ADR-019）：只排序、不派单，最终仍由人点确认。 */
-export function getDispatchCandidates(ticketId: string) {
-  return http.get<DispatchCandidateVO[]>(`/admin/tickets/${ticketId}/dispatch-candidates`)
+/**
+ * 派单候选（阶段 3 · ADR-019）：只排序、不派单，最终仍由人点确认。
+ * @param includeOffDuty 是否包含今天明确请假/休息的师傅（默认 false；没排班记录的始终保留）
+ */
+export function getDispatchCandidates(ticketId: string, includeOffDuty = false) {
+  return http.get<DispatchCandidateVO[]>(`/admin/tickets/${ticketId}/dispatch-candidates`, { includeOffDuty })
 }
 
 export function dispatchTicket(id: string, workerId: string) {

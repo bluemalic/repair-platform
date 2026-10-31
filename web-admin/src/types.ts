@@ -101,7 +101,7 @@ export interface WorkerVO {
   skillCategoryNames: string[]
 }
 
-/** 派单候选（阶段 3 · ADR-019）：总分 + 四项明细 + 一句话理由。 */
+/** 派单候选（阶段 3 · ADR-019）：总分 + 五项明细 + 一句话理由。 */
 export interface DispatchCandidateVO {
   workerId: string
   username: string
@@ -112,6 +112,8 @@ export interface DispatchCandidateVO {
   responsibleForBuilding: boolean
   activeCount: number
   avgScore: number | null
+  /** 今天是否在班：true 在班 / false 明确请假或休息 / null 今天没有排班记录（按中性分） */
+  onDutyToday: boolean | null
   /** 加权总分 0~1 */
   score: number
   items: DispatchScoreItemVO[]
@@ -199,9 +201,38 @@ export interface CategoryVO {
   name: string
   /** 1普通 2紧急 3特急 */
   defaultUrgency: number
+  /** 默认工种分组（派单技能维度，阶段 3）；未设置为 null */
+  workerGroupId: string | null
+  workerGroupName: string | null
   sort: number
   /** 1启用 0停用 */
   status: number
+}
+
+/** 工种分组（阶段 3 · docs/01 §4.8）。 */
+export interface WorkerGroupVO {
+  id: string
+  name: string
+  sort: number
+  /** 1启用 0停用 */
+  status: number
+  /** 组内维修工ID（编辑成员弹窗回显用） */
+  workerIds: string[]
+  workerCount: number
+}
+
+/** 排班行：只包含"有明确记录"的人；没记录的人不在这里。 */
+export interface WorkerShiftVO {
+  id: string
+  workerId: string
+  username: string | null
+  workerName: string | null
+  shiftDate: string
+  /** 1白班 2夜班 */
+  shiftType: number
+  /** 1在班 0请假/休息 */
+  status: number
+  remark: string | null
 }
 
 /**

@@ -2,7 +2,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { createCategory, deleteCategory, listCategories, updateCategory } from '@/api/category'
-import type { CategoryVO } from '@/types'
+import { listWorkerGroups } from '@/api/schedule'
+import type { CategoryVO, WorkerGroupVO } from '@/types'
 
 /** 与后端 ticket_category.default_urgency 对应（docs/02）。 */
 const URGENCY = [
@@ -13,6 +14,7 @@ const URGENCY = [
 
 const loading = ref(false)
 const rows = ref<CategoryVO[]>([])
+const groups = ref<WorkerGroupVO[]>([])
 
 async function load() {
   loading.value = true
@@ -26,7 +28,13 @@ async function load() {
 const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const editingId = ref<string | null>(null)
-const form = reactive({ name: '', defaultUrgency: 1, sort: 0, status: 1 })
+const form = reactive({
+  name: '',
+  defaultUrgency: 1,
+  sort: 0,
+  status: 1,
+  workerGroupId: undefined as string | undefined,
+})
 
 const rules: FormRules = {
   name: [{ required: true, message: '请填写类别名称', trigger: 'blur' }],
@@ -34,7 +42,7 @@ const rules: FormRules = {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', defaultUrgency: 1, sort: 0, status: 1 })
+  Object.assign(form, { name: '', defaultUrgency: 1, sort: 0, status: 1, workerGroupId: undefined })
   formVisible.value = true
 }
 
@@ -45,6 +53,7 @@ function openEdit(row: CategoryVO) {
     defaultUrgency: row.defaultUrgency,
     sort: row.sort,
     status: row.status,
+    workerGroupId: row.workerGroupId ?? undefined,
   })
   formVisible.value = true
 }
@@ -52,7 +61,12 @@ function openEdit(row: CategoryVO) {
 async function submitForm() {
   if (!formRef.value) return
   await formRef.value.validate()
-  const body = { name: form.name, defaultUrgency: form.defaultUrgency, sort: form.sort }
+  const body = {
+    name: form.name,
+    defaultUrgency: form.defaultUrgency,
+    sort: form.sort,
+    workerGroupId: form.workerGroupId,
+  }
   if (editingId.value) {
     await updateCategory(editingId.value, { ...body, status: form.status })
     ElMessage.success('已保存')
@@ -78,7 +92,9 @@ async function doDelete(row: CategoryVO) {
   await load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), listWorkerGroups().then((data) => { groups.value = data })])
+})
 </script>
 
 <template>
@@ -94,6 +110,9 @@ onMounted(load)
         <template #default="{ row }">
           {{ URGENCY.find((u) => u.value === row.defaultUrgency)?.label ?? row.defaultUrgency }}
         </template>
+      </el-table-column>
+      <el-table-column label="默认工种" width="130">
+        <template #default="{ row }">{{ row.workerGroupName ?? '—' }}</template>
       </el-table-column>
       <el-table-column prop="sort" label="排序" width="90" />
       <el-table-column label="状态" width="100">
@@ -119,6 +138,11 @@ onMounted(load)
             <el-option v-for="u in URGENCY" :key="u.value" :label="u.label" :value="u.value" />
           </el-select>
           <div class="hint">学生没选紧急度时用这个值，减少填写负担</div>
+        </el-form-item>
+        <el-form-item label="默认工种">
+          <el-select v-model="form.workerGroupId" clearable placeholder="可选（派单技能维度）" style="width: 100%">
+            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="排序" prop="sort">
           <el-input-number v-model="form.sort" :min="0" />

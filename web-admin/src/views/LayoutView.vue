@@ -137,6 +137,7 @@ async function submitPassword() {
             <el-menu-item index="/console/buildings">楼栋管理</el-menu-item>
             <el-menu-item index="/console/categories">类别管理</el-menu-item>
             <el-menu-item index="/console/assets">设备台账</el-menu-item>
+            <el-menu-item index="/console/schedule">调度设置</el-menu-item>
             <el-menu-item index="/console/knowledge">维修知识库</el-menu-item>
             <el-menu-item index="/console/audit-logs">操作日志</el-menu-item>
           </el-sub-menu>
