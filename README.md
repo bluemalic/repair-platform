@@ -224,12 +224,14 @@ repair-platform/
 │   └── 通知写路径与单体共用本模块，delivery=sync 进程内直写 / =mq 走独立进程
 ├── repair-timeout-service/       超时域独立进程（秒级 ZSet 消费 + 兜底 + 三个超时动作）；
 │   └── 工单流转内核暂居本模块（命令路径与超时回调共用），阶段 3 拆 ticket-service 时归位
+├── repair-gateway-service/       API 网关（路由 + Sa-Token 校验 + 身份头注入，Dockerfile.gateway）；
+│   └── 不依赖 repair-common（WebFlux 不能带 spring-webmvc）；默认静态路由，Nacos 发现可开关
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/
 ├── nginx/               nginx 配置（/ 与 /h5/ 两个静态目录 + /api 反代 + SSE 关缓冲）
 ├── scripts/             loadtest/ 压测生成器 · backup/ 每日备份（逐库 + 加密 + 异地）
-├── Dockerfile · Dockerfile.notification · Dockerfile.timeout · docker-compose.yml
+├── Dockerfile · Dockerfile.notification · Dockerfile.timeout · Dockerfile.gateway · docker-compose.yml
 └── .github/workflows/   ci.yml（测试与打包）· deploy.yml（CD）· frontend-ci.yml · miniapp-ci.yml
 ```
 

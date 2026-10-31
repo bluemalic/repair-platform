@@ -24,12 +24,14 @@ COPY repair-common/pom.xml repair-common/pom.xml
 COPY repair-domain/pom.xml repair-domain/pom.xml
 COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
 COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
 # -pl app -am 会构建 app 的全部依赖：common / domain / notification / timeout 四个模块。
 # 所以这四个模块的**源码**都必须在构建上下文里——少拷一个，那个模块就是空 jar，
 # app 的主代码在编译时会找不到符号（2026-10-30 的 CD 就是这样红的）。
+# gateway 只是 reactor 里的一个 POM（不被 app 依赖、也不构建），拷 POM 即可。
 COPY repair-common/src ./repair-common/src
 COPY repair-domain/src ./repair-domain/src
 COPY repair-notification-service/src ./repair-notification-service/src

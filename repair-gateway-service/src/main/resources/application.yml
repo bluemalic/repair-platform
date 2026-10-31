@@ -1,0 +1,54 @@
+server:
+  port: ${GATEWAY_PORT:8080}
+
+spring:
+  application:
+    name: repair-gateway
+  main:
+    # 显式声明：classpath 上不允许出现 spring-webmvc（见 GatewayApplication 注释）
+    web-application-type: reactive
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3000ms
+  cloud:
+    nacos:
+      discovery:
+        # 阶段 2：服务发现按需打开。单体还没注册时保持 false，路由走静态 URI。
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+    gateway:
+      server:
+        webflux:
+          # 静态路由（默认）：单体在 compose 里的服务名；本地跑用 127.0.0.1:8080。
+          # 打开 Nacos 且后端已注册后，把 GATEWAY_APP_URI 设为 lb://repair-app 即可切动态发现。
+          routes:
+            - id: repair-app
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              predicates:
+                - Path=/api/**
+            - id: repair-app-actuator
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              predicates:
+                - Path=/actuator/**
+
+# 与单体共用同一套 token 约定（common 的 application.yml 里那份是单体的；网关不依赖 common）
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 604800        # 7 天，与单体一致
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  is-read-cookie: false
+  is-read-body: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

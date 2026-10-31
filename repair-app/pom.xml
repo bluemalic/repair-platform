@@ -45,6 +45,13 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- 阶段 2 · ADR-024：Nacos 服务注册（默认关闭，NACOS_DISCOVERY_ENABLED=true 时生效）。
+             网关用它把 lb://repair-app 解析到单体实例；没有它，网关只能走静态 URI。 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
         <!-- ===== Web ===== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
