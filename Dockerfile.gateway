@@ -1,0 +1,47 @@
+# ================= gateway-service 镜像（阶段 2 · ADR-024）=================
+# WebFlux 网关：路由 /api/** + Sa-Token 校验 + 身份头注入。
+# 启动：docker compose --profile gateway up -d gateway
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+# reactor 要读全量 POM（gateway 不依赖内部模块，但 Maven 仍会解析所有 module）
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+COPY repair-gateway-service/src ./repair-gateway-service/src
+RUN mvn -B clean package -DskipTests -pl repair-gateway-service -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=builder /build/repair-gateway-service/target/*-exec.jar app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-55} \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/app/logs \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]

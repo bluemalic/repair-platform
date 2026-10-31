@@ -49,13 +49,37 @@
              构建输出里不该有每次都要人眼过滤一遍的噪音。想去掉这个 property 直接删，
              Boot 会接管。 -->
         <jacoco.version>0.8.15</jacoco.version>
+        <!-- 阶段 2 网关/注册中心（ADR-024/025）。Spring Boot 3.5.x 对应 Spring Cloud 2025.0.x；
+             SCA 2025.0.0.0 的 parent 正是 Spring Cloud 4.3.0（= 2025.0.0），三者配套。 -->
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <spring-cloud-alibaba.version>2025.0.0.0</spring-cloud-alibaba.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <modules>
         <module>repair-common</module>
         <module>repair-domain</module>
         <module>repair-notification-service</module>
         <module>repair-timeout-service</module>
+        <module>repair-gateway-service</module>
         <module>repair-app</module>
     </modules>
 

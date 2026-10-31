@@ -8,6 +8,21 @@ spring:
   application:
     name: repair-platform
 
+  # 阶段 2 · ADR-024：Nacos 服务发现（默认关闭，NACOS_DISCOVERY_ENABLED=true 时生效）。
+  # 打开后本服务注册到 Nacos，网关可以用 lb://repair-app 路由到实例。
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        # 注册名固定为 repair-app（不是 spring.application.name 的 repair-platform），
+        # 这样网关的路由可以直接写 lb://repair-app，换进程名时不用改两处。
+        service: ${NACOS_SERVICE_NAME:repair-app}
+        # 注册 IP：compose 里留空由容器网卡自动探测；本机直跑时自动探测可能拿到
+        # 169.254.x.x（虚拟网卡链路本地地址），显式设 NACOS_DISCOVERY_IP=127.0.0.1。
+        ip: ${NACOS_DISCOVERY_IP:}
+
   # ============================================================
   # 定时调度线程池
   #

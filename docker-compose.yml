@@ -303,6 +303,80 @@ services:
         limits:
           memory: ${TIMEOUT_MEM_LIMIT:-384M}
 
+  # ============================================================
+  # Nacos（阶段 2 · ADR-024/025）—— 只做服务发现，不做配置中心
+  # 启动：docker compose --profile nacos up -d nacos
+  # 控制台 http://127.0.0.1:8848/nacos（standalone、本地/演示用，未开鉴权）
+  # ============================================================
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: repair-nacos
+    restart: unless-stopped
+    profiles: ["nacos"]
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      JVM_XMS: 256m
+      JVM_XMX: 256m
+      JVM_XMN: 128m
+    ports:
+      - "127.0.0.1:8848:8848"
+      - "127.0.0.1:9848:9848"
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${NACOS_MEM_LIMIT:-512M}
+
+  # ============================================================
+  # gateway（阶段 2 · ADR-024）—— 统一入口：路由 + Sa-Token 校验 + 身份头注入
+  # 启动：docker compose --profile gateway up -d gateway
+  # 默认静态路由到 app:8080；切 Nacos 动态发现：
+  #   GATEWAY_APP_URI=lb://repair-app NACOS_DISCOVERY_ENABLED=true \
+  #     docker compose --profile nacos --profile gateway up -d nacos gateway app
+  # 正式入口仍是 nginx；18080 只绑本机，用于调试/压测。
+  # ============================================================
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-gateway-service:latest
+    container_name: repair-gateway
+    restart: unless-stopped
+    profiles: ["gateway"]
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${GATEWAY_JAVA_MAX_RAM_PERCENTAGE:-55}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      GATEWAY_APP_URI: ${GATEWAY_APP_URI:-http://app:8080}
+      NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
+      NACOS_SERVER_ADDR: nacos:8848
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${GATEWAY_MEM_LIMIT:-384M}
+
   app:
     build:
       context: .
