@@ -454,6 +454,9 @@ onMounted(async () => {
           <el-descriptions-item label="紧急度">{{ URGENCY[detail.urgency] ?? '未知' }}</el-descriptions-item>
           <el-descriptions-item label="位置">{{ detail.buildingName }} {{ detail.room }}</el-descriptions-item>
           <el-descriptions-item label="类别">{{ detail.categoryName }}</el-descriptions-item>
+          <el-descriptions-item v-if="detail.assetNo" label="关联设备" :span="2">
+            {{ detail.assetNo }} · {{ detail.assetName }}
+          </el-descriptions-item>
           <el-descriptions-item label="师傅">{{ detail.workerName ?? '未派单' }}</el-descriptions-item>
           <!-- 协作者：主责不在这个列表里（他就是上面的「师傅」）。
                移除按钮只在 20/30 出现——与后端的状态门槛一致，不做"点了才报错"的按钮 -->

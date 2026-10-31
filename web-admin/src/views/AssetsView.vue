@@ -1,16 +1,30 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { createAsset, deleteAsset, pageAssets, updateAsset } from '@/api/asset'
+import { createAsset, deleteAsset, getAssetTickets, pageAssets, updateAsset } from '@/api/asset'
 import { listBuildings } from '@/api/building'
 import { listCategories } from '@/api/category'
-import type { AssetVO, BuildingVO, CategoryVO } from '@/types'
+import type { AssetVO, BuildingVO, CategoryVO, TicketVO } from '@/types'
 
 const loading = ref(false)
 const rows = ref<AssetVO[]>([])
 const total = ref(0)
 const buildings = ref<BuildingVO[]>([])
 const categories = ref<CategoryVO[]>([])
+
+const TICKET_STATUS: Record<number, { label: string; type: 'info' | 'warning' | 'primary' | 'success' | 'danger' }> = {
+  10: { label: '待派单', type: 'warning' },
+  20: { label: '待接单', type: 'primary' },
+  30: { label: '处理中', type: 'primary' },
+  35: { label: '待料', type: 'warning' },
+  40: { label: '待验收', type: 'info' },
+  45: { label: '无法维修', type: 'danger' },
+  50: { label: '已完成', type: 'success' },
+  60: { label: '已关闭', type: 'info' },
+  70: { label: '已撤单', type: 'info' },
+  75: { label: '已合并', type: 'info' },
+  80: { label: '已驳回', type: 'danger' },
+}
 
 const query = reactive({
   pageNum: 1,
@@ -149,6 +163,37 @@ async function doDelete(row: AssetVO) {
   await load()
 }
 
+const historyVisible = ref(false)
+const historyLoading = ref(false)
+const historyRows = ref<TicketVO[]>([])
+const historyTotal = ref(0)
+const historyPage = reactive({ pageNum: 1, pageSize: 10 })
+const historyAsset = ref<AssetVO | null>(null)
+
+async function openHistory(row: AssetVO) {
+  historyAsset.value = row
+  historyPage.pageNum = 1
+  historyVisible.value = true
+  await loadHistory()
+}
+
+async function loadHistory() {
+  if (!historyAsset.value) return
+  historyLoading.value = true
+  try {
+    const page = await getAssetTickets(historyAsset.value.id, historyPage.pageNum, historyPage.pageSize)
+    historyRows.value = page.list
+    historyTotal.value = page.total
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function onHistoryPageChange(page: number) {
+  historyPage.pageNum = page
+  void loadHistory()
+}
+
 function onPageChange(page: number) {
   query.pageNum = page
   void load()
@@ -214,8 +259,9 @@ onMounted(async () => {
       <el-table-column label="保修至" width="120">
         <template #default="{ row }">{{ row.warrantyUntil ?? '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" @click="openHistory(row)">维修历史</el-button>
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="doDelete(row)">删除</el-button>
         </template>
@@ -292,6 +338,40 @@ onMounted(async () => {
         <el-button type="primary" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="historyVisible"
+      :title="historyAsset ? `维修历史 · ${historyAsset.assetNo} ${historyAsset.name}` : '维修历史'"
+      size="620px"
+    >
+      <el-table v-loading="historyLoading" :data="historyRows" border size="small">
+        <el-table-column prop="ticketNo" label="工单号" min-width="160" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="TICKET_STATUS[row.status]?.type ?? 'info'">
+              {{ TICKET_STATUS[row.status]?.label ?? row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="位置" min-width="150">
+          <template #default="{ row }">{{ row.buildingName }} {{ row.room }}</template>
+        </el-table-column>
+        <el-table-column label="提交时间" width="170">
+          <template #default="{ row }">{{ row.submitTime?.replace('T', ' ') ?? '—' }}</template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!historyLoading && !historyRows.length" description="这台设备还没有维修记录" />
+      <el-pagination
+        v-if="historyTotal > historyPage.pageSize"
+        class="pager"
+        background
+        layout="total, prev, pager, next"
+        :total="historyTotal"
+        :current-page="historyPage.pageNum"
+        :page-size="historyPage.pageSize"
+        @current-change="onHistoryPageChange"
+      />
+    </el-drawer>
   </div>
 </template>
 
