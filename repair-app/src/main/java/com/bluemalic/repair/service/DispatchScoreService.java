@@ -20,5 +20,9 @@ public interface DispatchScoreService {
      * <p>工单本身走数据权限拦截器（`ticket` 在覆盖名单里）：**看不到这张单的人拿不到候选**，
      * 对外口径与工单详情一致（查不到就是"不存在"）。
      */
-    List<DispatchCandidateVO> candidates(long ticketId);
+    /**
+     * @param includeOffDuty 是否把「今天明确请假/休息」的师傅也放进候选；
+     *                       默认 false（隐藏），「今天没排班记录」始终保留并记中性分
+     */
+    List<DispatchCandidateVO> candidates(long ticketId, boolean includeOffDuty);
 }

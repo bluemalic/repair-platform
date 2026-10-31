@@ -21,6 +21,7 @@ public class CategoryConverter {
         vo.setName(category.getName());
         vo.setDefaultUrgency(category.getDefaultUrgency());
         vo.setSort(category.getSort());
+        vo.setWorkerGroupId(category.getWorkerGroupId());
         vo.setStatus(category.getStatus());
         return vo;
     }

@@ -31,6 +31,9 @@ public class CategoryUpdateDTO {
     @Min(value = 0, message = "排序不能为负数")
     private Integer sort;
 
+    @Schema(description = "默认工种分组ID；不传表示清空")
+    private Long workerGroupId;
+
     @Schema(description = "状态 1启用 0停用；停用的类别不能用于新报修")
     @NotNull(message = "状态不能为空")
     @Min(value = 0, message = "状态只能是 1启用 / 0停用")

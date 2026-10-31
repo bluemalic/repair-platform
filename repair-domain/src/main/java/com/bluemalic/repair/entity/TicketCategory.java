@@ -19,6 +19,9 @@ public class TicketCategory {
     /** 默认紧急度 1普通 2紧急 3特急 */
     private Integer defaultUrgency;
 
+    /** 默认工种分组ID（阶段 3）：派单评分据此判断「这类活该找哪个组」；可空 */
+    private Long workerGroupId;
+
     private Integer sort;
 
     private Integer status;

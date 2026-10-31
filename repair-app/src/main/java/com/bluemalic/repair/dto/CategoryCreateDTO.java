@@ -30,4 +30,7 @@ public class CategoryCreateDTO {
     @Schema(description = "排序，小的在前；不传按 0 处理")
     @Min(value = 0, message = "排序不能为负数")
     private Integer sort;
+
+    @Schema(description = "默认工种分组ID（可选）：派单评分用它判断这类活该找哪个组")
+    private Long workerGroupId;
 }

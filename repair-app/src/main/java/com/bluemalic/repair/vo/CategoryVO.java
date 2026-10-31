@@ -24,6 +24,12 @@ public class CategoryVO implements Serializable {
     @Schema(description = "排序")
     private Integer sort;
 
+    @Schema(description = "默认工种分组ID（未设置时为 null）")
+    private Long workerGroupId;
+
+    @Schema(description = "默认工种分组名（未设置或分组已删除时为 null）")
+    private String workerGroupName;
+
     @Schema(description = "状态 1启用 0停用")
     private Integer status;
 }
