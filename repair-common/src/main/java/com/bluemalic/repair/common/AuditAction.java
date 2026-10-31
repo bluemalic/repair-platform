@@ -33,6 +33,13 @@ public final class AuditAction {
     public static final String REPAIR_CODE_CREATE = "REPAIR_CODE_CREATE";
     public static final String REPAIR_CODE_UPDATE = "REPAIR_CODE_UPDATE";
 
+    // ---------- 工种 / 排班（阶段 3） ----------
+    public static final String WORKER_GROUP_CREATE = "WORKER_GROUP_CREATE";
+    public static final String WORKER_GROUP_UPDATE = "WORKER_GROUP_UPDATE";
+    public static final String WORKER_GROUP_DELETE = "WORKER_GROUP_DELETE";
+    public static final String WORKER_GROUP_WORKERS = "WORKER_GROUP_WORKERS";
+    public static final String WORKER_SHIFT_SET = "WORKER_SHIFT_SET";
+
     // ---------- 设备台账（阶段 3） ----------
     public static final String ASSET_CREATE = "ASSET_CREATE";
     public static final String ASSET_UPDATE = "ASSET_UPDATE";
@@ -84,6 +91,11 @@ public final class AuditAction {
             Map.entry(CATEGORY_DELETE, "删除报修类别"),
             Map.entry(REPAIR_CODE_CREATE, "新增报修码"),
             Map.entry(REPAIR_CODE_UPDATE, "修改报修码"),
+            Map.entry(WORKER_GROUP_CREATE, "新增工种分组"),
+            Map.entry(WORKER_GROUP_UPDATE, "修改工种分组"),
+            Map.entry(WORKER_GROUP_DELETE, "删除工种分组"),
+            Map.entry(WORKER_GROUP_WORKERS, "设置分组维修工"),
+            Map.entry(WORKER_SHIFT_SET, "设置排班"),
             Map.entry(ASSET_CREATE, "新增设备"),
             Map.entry(ASSET_UPDATE, "修改设备"),
             Map.entry(ASSET_DELETE, "删除设备"),

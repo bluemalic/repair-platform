@@ -80,12 +80,16 @@ public class AdminTicketController {
     }
 
     @Operation(summary = "派单候选",
-            description = "给这张单算一份师傅排名（阶段 3 · ADR-019）：技能 / 满意度 / 负载 / 距离四项加权，"
-                    + "每人带逐项得分与一句话理由。**只排序、不派单**——派单仍走 `/dispatch` 由人确认")
+            description = "给这张单算一份师傅排名（阶段 3 · ADR-019）：技能 / 满意度 / 负载 / 距离 / 值班五项加权，"
+                    + "每人带逐项得分与一句话理由。**只排序、不派单**——派单仍走 `/dispatch` 由人确认。"
+                    + "默认隐藏今天明确请假/休息的师傅；没排班记录的仍保留（缺数据记中性分）")
     @SaCheckPermission("ticket:dispatch")
     @GetMapping("/{id}/dispatch-candidates")
-    public Result<List<DispatchCandidateVO>> dispatchCandidates(@Parameter(description = "工单ID") @PathVariable long id) {
-        return Result.ok(dispatchScoreService.candidates(id));
+    public Result<List<DispatchCandidateVO>> dispatchCandidates(
+            @Parameter(description = "工单ID") @PathVariable long id,
+            @Parameter(description = "是否包含今天明确请假/休息的师傅，默认 false")
+            @RequestParam(defaultValue = "false") boolean includeOffDuty) {
+        return Result.ok(dispatchScoreService.candidates(id, includeOffDuty));
     }
 
     @Operation(summary = "派单",

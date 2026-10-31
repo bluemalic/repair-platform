@@ -10,6 +10,8 @@ import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketCategory;
 import com.bluemalic.repair.entity.WorkerBuilding;
+import com.bluemalic.repair.entity.WorkerGroupMember;
+import com.bluemalic.repair.entity.WorkerShift;
 import com.bluemalic.repair.entity.WorkerSkill;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.DispatchMapper;
@@ -17,6 +19,8 @@ import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.mapper.WorkerBuildingMapper;
+import com.bluemalic.repair.mapper.WorkerGroupMemberMapper;
+import com.bluemalic.repair.mapper.WorkerShiftMapper;
 import com.bluemalic.repair.mapper.WorkerSkillMapper;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.service.DispatchScoreService;
@@ -27,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -73,13 +78,15 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
     private final BuildingMapper buildingMapper;
     private final WorkerBuildingMapper workerBuildingMapper;
     private final WorkerSkillMapper workerSkillMapper;
+    private final WorkerGroupMemberMapper workerGroupMemberMapper;
+    private final WorkerShiftMapper workerShiftMapper;
     private final TicketCategoryMapper ticketCategoryMapper;
     private final DispatchMapper dispatchMapper;
     private final CurrentTenantService currentTenantService;
     private final DispatchProperties properties;
 
     @Override
-    public List<DispatchCandidateVO> candidates(long ticketId) {
+    public List<DispatchCandidateVO> candidates(long ticketId, boolean includeOffDuty) {
         long tenantId = currentTenantService.requireTenantId();
 
         // 工单走拦截器（租户 + 角色）：查不到就是"不存在或不在你范围内"
@@ -115,6 +122,23 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
                 .collect(Collectors.groupingBy(WorkerSkill::getWorkerId,
                         Collectors.mapping(WorkerSkill::getCategoryId, Collectors.toList())));
 
+        Map<Long, List<Long>> groupsByWorker = workerGroupMemberMapper.selectList(
+                        Wrappers.<WorkerGroupMember>lambdaQuery()
+                                .eq(WorkerGroupMember::getTenantId, tenantId)
+                                .in(WorkerGroupMember::getWorkerId, workerIds))
+                .stream()
+                .collect(Collectors.groupingBy(WorkerGroupMember::getWorkerId,
+                        Collectors.mapping(WorkerGroupMember::getGroupId, Collectors.toList())));
+
+        // 只取今天的排班：「没有记录」与「明确休息」在评分里是两种结果
+        Map<Long, List<WorkerShift>> shiftsByWorker = workerShiftMapper.selectList(
+                        Wrappers.<WorkerShift>lambdaQuery()
+                                .eq(WorkerShift::getTenantId, tenantId)
+                                .eq(WorkerShift::getShiftDate, LocalDate.now())
+                                .in(WorkerShift::getWorkerId, workerIds))
+                .stream()
+                .collect(Collectors.groupingBy(WorkerShift::getWorkerId));
+
         Map<Long, WorkerScoreStatVO> stats = dispatchMapper.loadStats(tenantId, workerIds).stream()
                 .collect(Collectors.toMap(WorkerScoreStatVO::getWorkerId, Function.identity()));
 
@@ -122,19 +146,30 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
         Map<Long, Building> buildings = buildingMapper.selectList(Wrappers.<Building>lambdaQuery()
                         .eq(Building::getTenantId, tenantId))
                 .stream().collect(Collectors.toMap(Building::getId, Function.identity()));
-        Map<Long, String> categoryNames = ticketCategoryMapper.selectList(
+        Map<Long, TicketCategory> categories = ticketCategoryMapper.selectList(
                         Wrappers.<TicketCategory>lambdaQuery().eq(TicketCategory::getTenantId, tenantId))
-                .stream().collect(Collectors.toMap(TicketCategory::getId, TicketCategory::getName));
+                .stream().collect(Collectors.toMap(TicketCategory::getId, Function.identity()));
+        Map<Long, String> categoryNames = categories.values().stream()
+                .collect(Collectors.toMap(TicketCategory::getId, TicketCategory::getName));
 
         Building ticketBuilding = buildings.get(ticket.getBuildingId());
+        TicketCategory ticketCategory = categories.get(ticket.getCategoryId());
         String ticketCategoryName = categoryNames.get(ticket.getCategoryId());
+        Long categoryGroupId = ticketCategory == null ? null : ticketCategory.getWorkerGroupId();
 
         List<DispatchCandidateVO> candidates = new ArrayList<>(workers.size());
         for (SysUser worker : workers) {
-            candidates.add(score(worker, ticket, ticketBuilding, ticketCategoryName,
+            List<WorkerShift> workerShifts = shiftsByWorker.getOrDefault(worker.getId(), List.of());
+            boolean explicitlyOff = !workerShifts.isEmpty()
+                    && workerShifts.stream().noneMatch(shift -> Integer.valueOf(1).equals(shift.getStatus()));
+            if (!includeOffDuty && explicitlyOff) {
+                continue;
+            }
+            candidates.add(score(worker, ticket, ticketBuilding, ticketCategoryName, categoryGroupId,
                     buildingsByWorker.getOrDefault(worker.getId(), List.of()),
                     skillsByWorker.getOrDefault(worker.getId(), List.of()),
-                    buildings, categoryNames,
+                    groupsByWorker.getOrDefault(worker.getId(), List.of()),
+                    workerShifts, buildings, categoryNames,
                     stats.get(worker.getId())));
         }
 
@@ -143,28 +178,30 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
                 .thenComparingInt(DispatchCandidateVO::getActiveCount)
                 .thenComparing(DispatchCandidateVO::getWorkerId));
 
-        log.info("派单候选 ticketId={} tenantId={} 候选={} 首位={} 总分={}",
-                ticketId, tenantId, candidates.size(),
+        log.info("派单候选 ticketId={} tenantId={} 含离岗={} 候选={} 首位={} 总分={}",
+                ticketId, tenantId, includeOffDuty, candidates.size(),
                 candidates.isEmpty() ? "-" : candidates.get(0).getWorkerName(),
                 candidates.isEmpty() ? "-" : candidates.get(0).getScore());
         return candidates;
     }
 
-    // ==================== 单个候选人的四项评分 ====================
+    // ==================== 单个候选人的五项评分 ====================
 
     private DispatchCandidateVO score(SysUser worker, Ticket ticket, Building ticketBuilding,
-                                      String ticketCategoryName,
+                                      String ticketCategoryName, Long categoryGroupId,
                                       List<Long> buildingIds, List<Long> skillCategoryIds,
+                                      List<Long> groupIds, List<WorkerShift> shifts,
                                       Map<Long, Building> buildings, Map<Long, String> categoryNames,
                                       WorkerScoreStatVO stat) {
         int activeCount = stat == null || stat.getActiveCount() == null ? 0 : stat.getActiveCount();
         Double avgScore = stat == null ? null : stat.getAvgScore();
 
         List<DispatchCandidateVO.ScoreItem> items = List.of(
-                skillItem(ticket.getCategoryId(), ticketCategoryName, skillCategoryIds),
+                skillItem(ticket.getCategoryId(), ticketCategoryName, skillCategoryIds, groupIds, categoryGroupId),
                 satisfactionItem(avgScore),
                 loadItem(activeCount),
-                distanceItem(ticket.getBuildingId(), ticketBuilding, buildingIds, buildings));
+                distanceItem(ticket.getBuildingId(), ticketBuilding, buildingIds, buildings),
+                shiftItem(shifts));
 
         double total = items.stream()
                 .mapToDouble(item -> item.getScore() * item.getWeight())
@@ -181,23 +218,32 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
         vo.setResponsibleForBuilding(buildingIds.contains(ticket.getBuildingId()));
         vo.setActiveCount(activeCount);
         vo.setAvgScore(avgScore);
+        vo.setOnDutyToday(shifts.isEmpty() ? null
+                : shifts.stream().anyMatch(shift -> Integer.valueOf(1).equals(shift.getStatus())));
         vo.setScore(Math.round(total * 1000) / 1000.0);
         vo.setItems(items);
-        // 理由就是四项明细拼起来：可解释性不靠"模型润色"，靠数据本身
+        // 理由就是五项明细拼起来：可解释性不靠"模型润色"，靠数据本身
         vo.setReason(items.stream().map(DispatchCandidateVO.ScoreItem::getDetail)
                 .collect(Collectors.joining("、")));
         return vo;
     }
 
-    /** 技能：擅长该类别 1.0；有技能但不含该类别 0.0；**完全没有技能记录记中性 0.5**（缺数据不等于差）。 */
+    /**
+     * 技能：擅长该类别 1.0；类别的默认工种与师傅所属工种一致 1.0；
+     * 有技能/工种数据但不匹配 0.0；**完全没有任何数据记中性 0.5**（缺数据不等于差）。
+     */
     private DispatchCandidateVO.ScoreItem skillItem(Long ticketCategoryId, String categoryName,
-                                                    List<Long> skillCategoryIds) {
+                                                    List<Long> skillCategoryIds, List<Long> groupIds,
+                                                    Long categoryGroupId) {
         String name = StringUtils.hasText(categoryName) ? categoryName : "该类别";
-        if (skillCategoryIds.isEmpty()) {
-            return item("skill", "擅长类别", NEUTRAL, properties.getWeightSkill(), "未维护擅长类别");
-        }
         if (ticketCategoryId != null && skillCategoryIds.contains(ticketCategoryId)) {
             return item("skill", "擅长类别", 1.0, properties.getWeightSkill(), "擅长" + name);
+        }
+        if (categoryGroupId != null && groupIds.contains(categoryGroupId)) {
+            return item("skill", "擅长类别", 1.0, properties.getWeightSkill(), "属于" + name + "对应工种");
+        }
+        if (skillCategoryIds.isEmpty() && groupIds.isEmpty()) {
+            return item("skill", "擅长类别", NEUTRAL, properties.getWeightSkill(), "未维护擅长类别/工种");
         }
         return item("skill", "擅长类别", 0.0, properties.getWeightSkill(), "不擅长" + name);
     }
@@ -217,6 +263,23 @@ public class DispatchScoreServiceImpl implements DispatchScoreService {
     private DispatchCandidateVO.ScoreItem loadItem(int activeCount) {
         double score = Math.max(0, 1.0 - (double) activeCount / properties.getLoadCap());
         return item("load", "当前负载", score, properties.getWeightLoad(), "当前 " + activeCount + " 单");
+    }
+
+    /** 值班：今天明确在班 1.0；今天明确请假/休息 0.0；**今天没排班记录记中性 0.5**。 */
+    private DispatchCandidateVO.ScoreItem shiftItem(List<WorkerShift> shifts) {
+        if (shifts.isEmpty()) {
+            return item("shift", "今日值班", NEUTRAL, properties.getWeightShift(),
+                    "今日未排班（按缺数据计中性）");
+        }
+        boolean onDuty = shifts.stream().anyMatch(shift -> Integer.valueOf(1).equals(shift.getStatus()));
+        if (!onDuty) {
+            return item("shift", "今日值班", 0.0, properties.getWeightShift(), "今日请假/休息");
+        }
+        String types = shifts.stream()
+                .filter(shift -> Integer.valueOf(1).equals(shift.getStatus()))
+                .map(shift -> Integer.valueOf(2).equals(shift.getShiftType()) ? "夜班" : "白班")
+                .distinct().collect(Collectors.joining("/"));
+        return item("shift", "今日值班", 1.0, properties.getWeightShift(), "今日在班（" + types + "）");
     }
 
     /**

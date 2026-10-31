@@ -14,6 +14,7 @@ public final class AuditTarget {
     public static final String CATEGORY = "CATEGORY";
     public static final String REPAIR_CODE = "REPAIR_CODE";
     public static final String ASSET = "ASSET";
+    public static final String WORKER_GROUP = "WORKER_GROUP";
     public static final String TENANT = "TENANT";
     /** 账号级别的操作（重置口令、停用），目标就是那个账号 */
     public static final String ACCOUNT = "ACCOUNT";
@@ -25,6 +26,7 @@ public final class AuditTarget {
             CATEGORY, "报修类别",
             REPAIR_CODE, "报修码",
             ASSET, "设备",
+            WORKER_GROUP, "工种分组",
             TENANT, "学校",
             ACCOUNT, "账号");
 

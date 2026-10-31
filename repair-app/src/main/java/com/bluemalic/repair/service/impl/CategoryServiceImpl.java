@@ -11,9 +11,11 @@ import com.bluemalic.repair.converter.CategoryConverter;
 import com.bluemalic.repair.dto.CategoryCreateDTO;
 import com.bluemalic.repair.dto.CategoryUpdateDTO;
 import com.bluemalic.repair.entity.Ticket;
+import com.bluemalic.repair.entity.WorkerGroup;
 import com.bluemalic.repair.entity.TicketCategory;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.mapper.WorkerGroupMapper;
 import com.bluemalic.repair.service.CategoryService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
@@ -43,6 +45,7 @@ public class CategoryServiceImpl implements CategoryService {
 
     private final TicketCategoryMapper ticketCategoryMapper;
     private final TicketMapper ticketMapper;
+    private final WorkerGroupMapper workerGroupMapper;
     private final CurrentTenantService currentTenantService;
 
     private final AuditService auditService;
@@ -50,7 +53,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public List<CategoryVO> list(Integer status) {
         long tenantId = currentTenantService.requireTenantId();
-        return ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
+        List<CategoryVO> vos = ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
                         .eq(TicketCategory::getTenantId, tenantId)
                         .eq(status != null, TicketCategory::getStatus, status)
                         .orderByAsc(TicketCategory::getSort)
@@ -58,12 +61,14 @@ public class CategoryServiceImpl implements CategoryService {
                 .stream()
                 .map(CategoryConverter::toVO)
                 .toList();
+        fillGroupNames(vos, tenantId);
+        return vos;
     }
 
     @Override
     @Cacheable(cacheNames = CacheConfig.CACHE_ENABLED_CATEGORIES, key = "#tenantId")
     public List<CategoryVO> listEnabled(long tenantId) {
-        return ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
+        List<CategoryVO> vos = ticketCategoryMapper.selectList(Wrappers.<TicketCategory>lambdaQuery()
                         .eq(TicketCategory::getTenantId, tenantId)
                         .eq(TicketCategory::getStatus, STATUS_ENABLED)
                         .orderByAsc(TicketCategory::getSort)
@@ -71,6 +76,8 @@ public class CategoryServiceImpl implements CategoryService {
                 .stream()
                 .map(CategoryConverter::toVO)
                 .toList();
+        fillGroupNames(vos, tenantId);
+        return vos;
     }
 
     @Override
@@ -79,12 +86,14 @@ public class CategoryServiceImpl implements CategoryService {
     public CategoryVO create(CategoryCreateDTO dto) {
         long tenantId = currentTenantService.requireTenantId();
         requireNameNotUsed(tenantId, dto.getName(), null);
+        requireGroupIfPresent(dto.getWorkerGroupId(), tenantId);
 
         TicketCategory category = new TicketCategory();
         category.setTenantId(tenantId);
         category.setName(dto.getName());
         category.setDefaultUrgency(dto.getDefaultUrgency() == null ? 1 : dto.getDefaultUrgency());
         category.setSort(dto.getSort() == null ? 0 : dto.getSort());
+        category.setWorkerGroupId(dto.getWorkerGroupId());
         category.setStatus(STATUS_ENABLED);
         ticketCategoryMapper.insert(category);
 
@@ -102,6 +111,7 @@ public class CategoryServiceImpl implements CategoryService {
         long tenantId = currentTenantService.requireTenantId();
         TicketCategory before = requireCategory(id, tenantId);
         requireNameNotUsed(tenantId, dto.getName(), id);
+        requireGroupIfPresent(dto.getWorkerGroupId(), tenantId);
 
         int rows = ticketCategoryMapper.update(null, Wrappers.<TicketCategory>lambdaUpdate()
                 .eq(TicketCategory::getId, id)
@@ -109,6 +119,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .set(TicketCategory::getName, dto.getName())
                 .set(TicketCategory::getDefaultUrgency, dto.getDefaultUrgency())
                 .set(TicketCategory::getSort, dto.getSort())
+                .set(TicketCategory::getWorkerGroupId, dto.getWorkerGroupId())
                 .set(TicketCategory::getStatus, dto.getStatus()));
         if (rows == 0) {
             throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, "报修类别不存在");
@@ -145,6 +156,37 @@ public class CategoryServiceImpl implements CategoryService {
                 id, category.getName(), StpUtil.getLoginIdAsLong());
         auditService.record(AuditAction.CATEGORY_DELETE, AuditTarget.CATEGORY, id, category.getName(),
                 "删除报修类别 " + category.getName() + "（逻辑删除，行仍在库里便于查证）");
+    }
+
+    /** 工种分组必须是本租户的；传 null 表示不设置（或清空）。 */
+    private void requireGroupIfPresent(Long groupId, long tenantId) {
+        if (groupId == null) {
+            return;
+        }
+        Long count = workerGroupMapper.selectCount(Wrappers.<WorkerGroup>lambdaQuery()
+                .eq(WorkerGroup::getId, groupId)
+                .eq(WorkerGroup::getTenantId, tenantId));
+        if (count == null || count == 0) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "工种分组不存在");
+        }
+    }
+
+    /** 批量补工种名：一次查询，不做 N+1；分组被删时名称为 null，id 仍保留。 */
+    private void fillGroupNames(List<CategoryVO> vos, long tenantId) {
+        List<Long> groupIds = vos.stream().map(CategoryVO::getWorkerGroupId)
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        if (groupIds.isEmpty()) {
+            return;
+        }
+        var names = workerGroupMapper.selectList(Wrappers.<WorkerGroup>lambdaQuery()
+                        .eq(WorkerGroup::getTenantId, tenantId)
+                        .in(WorkerGroup::getId, groupIds))
+                .stream().collect(java.util.stream.Collectors.toMap(WorkerGroup::getId, WorkerGroup::getName));
+        vos.forEach(vo -> {
+            if (vo.getWorkerGroupId() != null) {
+                vo.setWorkerGroupName(names.get(vo.getWorkerGroupId()));
+            }
+        });
     }
 
     /** 取本租户的类别，不存在一律说"不存在"。 */
