@@ -232,6 +232,37 @@ getJsonRaw(admin, "/api/admin/assets/" + assetId).andExpect(jsonPath("$.code").v
 getJsonRaw(admin, "/api/admin/assets/" + foreignId).andExpect(jsonPath("$.code").value(10006));
     }
 
+    @Test
+    void studentPicksAssetsInRoom() throws Exception {
+        String admin = givenToken("test-asset-pick-admin");
+        long buildingId = createBuilding(admin, "设备选择楼");
+        long categoryId = createCategory(admin, "设备选择类别");
+        long activeId = createAsset(admin, "AC-P-001", "可选空调", buildingId, categoryId);
+        long disabledId = createAsset(admin, "AC-P-002", "停用空调", buildingId, categoryId);
+        putJson(admin, "/api/admin/assets/" + disabledId, Map.of(
+                "assetNo", "AC-P-002", "name", "停用空调", "status", 3,
+                "buildingId", buildingId, "categoryId", categoryId, "room", "201"))
+                .andExpect(jsonPath("$.code").value(0));
+
+        // 别家租户的设备即使编号/位置相同也不能出现
+        long foreignId = System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO asset (id, tenant_id, asset_no, name, room, building_id, status,
+                                   deleted, create_time, update_time)
+                VALUES (?, 2, 'AC-P-003', '外校空调', '201', ?, 1, 0, NOW(), NOW())
+                """, foreignId, buildingId);
+
+        String student = givenToken("test-asset-pick-student", USER_TYPE_STUDENT, ROLE_STUDENT);
+        JsonNode list = getJson(student, "/api/student/assets",
+                "buildingId", String.valueOf(buildingId), "room", "201");
+        assertThat(list.path("data").isArray()).isTrue();
+        assertThat(assetIdsOf(list.path("data"))).containsExactly(activeId);
+
+        JsonNode otherRoom = getJson(student, "/api/student/assets",
+                "buildingId", String.valueOf(buildingId), "room", "999");
+        assertThat(otherRoom.path("data")).isEmpty();
+    }
+
     private long createAsset(String admin, String assetNo, String name) throws Exception {
         return createAsset(admin, assetNo, name, SEED_BUILDING, SEED_CATEGORY);
     }
@@ -284,6 +315,12 @@ getJsonRaw(admin, "/api/admin/assets/" + foreignId).andExpect(jsonPath("$.code")
                 "categoryId", SEED_CATEGORY,
                 "room", "201",
                 "supplier", "测试供应商");
+    }
+
+    private java.util.List<Long> assetIdsOf(JsonNode list) {
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+        list.forEach(node -> ids.add(node.path("id").asLong()));
+        return ids;
     }
 
     private java.util.List<String> assetNosOf(JsonNode pageResult) {
