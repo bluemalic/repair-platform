@@ -65,6 +65,15 @@ export interface CategoryVO {
   status: number
 }
 
+/** 房间内可关联的设备（学生提交时选填）。 */
+export interface AssetOptionVO {
+  id: string
+  /** 设备编号（贴在设备上的码就是它） */
+  assetNo: string
+  name: string
+  room: string | null
+}
+
 /** 按报修码查到的位置（学生报修预填、维修工到场比对都用它）。 */
 export interface RepairCodeVO {
   buildingId: string

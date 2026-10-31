@@ -4,9 +4,9 @@ import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { listEnabledCategories } from '@/api/category'
 import { uploadImage } from '@/api/file'
 import { getLocations } from '@/api/location'
-import { createTicket, getPositionByCode } from '@/api/ticket'
+import { createTicket, getAssetsAtLocation, getPositionByCode } from '@/api/ticket'
 import { newIdempotencyKey } from '@/utils/idempotency'
-import type { CategoryVO, LocationItem, LocationVO, RepairCodeVO } from '@/types'
+import type { AssetOptionVO, CategoryVO, LocationItem, LocationVO, RepairCodeVO } from '@/types'
 
 /**
  * 扫码/手输报修。
@@ -47,6 +47,14 @@ const locationLabels = computed(() =>
   ),
 )
 
+/** 房间内可关联的设备（选填）：定位到房间后按楼栋+房间拉，选「不关联」就传空 */
+const assets = ref<AssetOptionVO[]>([])
+const assetIndex = ref(0)
+const assetLabels = computed(() => [
+  '不关联设备',
+  ...assets.value.map((asset) => `${asset.assetNo} ${asset.name}`),
+])
+
 const categories = ref<CategoryVO[]>([])
 const categoryIndex = ref(-1)
 const categoryNames = computed(() => categories.value.map((c) => c.name))
@@ -85,6 +93,8 @@ function goScan() {
 /** 切到手动模式时才拉位置清单（多数人扫码报修，不该为它多一次请求）。 */
 async function switchMode(next: 'code' | 'manual') {
   mode.value = next
+  assets.value = []
+  assetIndex.value = 0
   if (next === 'manual' && locations.value.length === 0) {
     try {
       locations.value = await getLocations()
@@ -97,10 +107,31 @@ async function switchMode(next: 'code' | 'manual') {
 function onBuildingChange(event: { detail: { value: number | string } }) {
   buildingIndex.value = Number(event.detail.value)
   locationIndex.value = -1
+  assets.value = []
+  assetIndex.value = 0
 }
 
 function onLocationChange(event: { detail: { value: number | string } }) {
   locationIndex.value = Number(event.detail.value)
+  const building = currentBuilding.value
+  const location = currentLocation.value
+  if (building && location) {
+    void loadAssets(building.buildingId, location.room)
+  }
+}
+
+/** 房间内可关联的设备：没有设备列表就不显示这一项，不影响提交。 */
+async function loadAssets(buildingId: string, room: string) {
+  try {
+    assets.value = await getAssetsAtLocation(buildingId, room)
+  } catch {
+    assets.value = []
+  }
+  assetIndex.value = 0
+}
+
+function onAssetChange(event: { detail: { value: number | string } }) {
+  assetIndex.value = Number(event.detail.value)
 }
 
 /** 查位置：拿到楼栋+房间后前端只做展示，提交时只把码给后端（服务端再解一次，不信任前端）。 */
@@ -113,9 +144,12 @@ async function lookup() {
   looking.value = true
   try {
     position.value = await getPositionByCode(value)
+    await loadAssets(position.value.buildingId, position.value.room)
     uni.showToast({ title: '已定位到房间', icon: 'none' })
   } catch {
     position.value = null
+    assets.value = []
+    assetIndex.value = 0
   } finally {
     looking.value = false
   }
@@ -187,6 +221,7 @@ async function submit() {
       description: description.value.trim(),
       images: imageUrls.value.length ? imageUrls.value : undefined,
       urgency: urgency.value,
+      assetId: assetIndex.value > 0 ? assets.value[assetIndex.value - 1]?.id : undefined,
     })
     uni.showToast({ title: '报修已提交', icon: 'success' })
     setTimeout(() => uni.reLaunch({ url: '/pages/student/home' }), 800)
@@ -238,6 +273,14 @@ async function submit() {
           <text class="hint">公共区域（走廊 / 大厅 / 公共卫生间）也在列表里——不用去找码</text>
         </view>
       </template>
+
+      <view v-if="assets.length" class="field">
+        <text class="label">关联设备（选填）</text>
+        <picker mode="selector" :range="assetLabels" :value="assetIndex" @change="onAssetChange">
+          <view class="picker">{{ assetLabels[assetIndex] }}</view>
+        </picker>
+        <text class="hint">这间房间登记了 {{ assets.length }} 台设备；不确定就选「不关联设备」</text>
+      </view>
     </view>
 
     <view class="card">
