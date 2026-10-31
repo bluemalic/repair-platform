@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { AssetVO, PageResult } from '@/types'
+import type { AssetVO, PageResult, TicketVO } from '@/types'
 
 /** 设备分页（docs/03 §5.4）：楼栋 / 类别 / 状态筛选，keyword 同时匹配编号与名称。 */
 export interface AssetQuery {
@@ -51,4 +51,9 @@ export function updateAsset(id: string, body: AssetUpdateBody) {
  */
 export function deleteAsset(id: string) {
   return http.del<void>(`/admin/assets/${id}`)
+}
+
+/** 设备维修历史：按 ticket.asset_id 分页，按提交时间倒序。 */
+export function getAssetTickets(id: string, pageNum: number, pageSize: number) {
+  return http.get<PageResult<TicketVO>>(`/admin/assets/${id}/tickets`, { pageNum, pageSize })
 }

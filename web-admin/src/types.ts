@@ -254,6 +254,10 @@ export interface TicketDetailVO extends TicketVO {
   /** 协作者（多人同做一单）。**主责不在这个列表里**——他是 workerId / workerName */
   collaborators: TicketCollaboratorVO[]
   workerName: string | null
+  /** 关联设备（阶段 3）：提交时可选；未关联为 null */
+  assetId: string | null
+  assetNo: string | null
+  assetName: string | null
   /** 拆单来源（非拆单产生的单为 null）：详情页显示"由 XX 拆出" */
   parentTicketId: string | null
   parentTicketNo: string | null
