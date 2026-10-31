@@ -17,6 +17,7 @@ import com.bluemalic.repair.dto.TicketFinishDTO;
 import com.bluemalic.repair.dto.TicketReasonDTO;
 import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketReworkDTO;
+import com.bluemalic.repair.entity.Asset;
 import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.TicketCategory;
@@ -109,6 +110,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         referenceValidator.requireEnabledBuilding(buildingId, student.getTenantId());
 
         TicketCategory category = referenceValidator.requireEnabledCategory(dto.getCategoryId(), student.getTenantId());
+        Asset asset = referenceValidator.requireUsableAsset(dto.getAssetId(), student.getTenantId());
 
         Ticket ticket = new Ticket();
         ticket.setTenantId(student.getTenantId());
@@ -116,6 +118,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         ticket.setStudentId(studentId);
         ticket.setIdempotencyKey(idempotencyKey);
         ticket.setBuildingId(buildingId);
+        ticket.setAssetId(asset == null ? null : asset.getId());
         ticket.setRoom(room);
         ticket.setCategoryId(dto.getCategoryId());
         ticket.setDescription(dto.getDescription());
@@ -149,8 +152,8 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                         TicketAction.SUBMIT.name(), studentId));
         // 提交不走 conditionalUpdate，所以这里单独记一次：**创建量**本身就是关键指标
         metricsRecorder.ticketEvent(TicketAction.SUBMIT, ticket.getTenantId());
-        log.info("提交报修 ticketId={} studentId={} building={} room={}",
-                ticket.getId(), studentId, buildingId, room);
+        log.info("提交报修 ticketId={} studentId={} building={} room={} assetId={}",
+                ticket.getId(), studentId, buildingId, room, ticket.getAssetId());
 
         return toVO(ticket);
     }

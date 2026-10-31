@@ -45,6 +45,9 @@ class AssetManageTest {
 
     private static final String PASSWORD = "Test@123456";
     private static final long ROLE_ADMIN = 3L;
+    private static final long ROLE_STUDENT = 1L;
+    private static final int USER_TYPE_STUDENT = 1;
+    private static final int USER_TYPE_ADMIN = 3;
     private static final long SEED_BUILDING = 1L;
     private static final long SEED_CATEGORY = 1L;
     private static final long SEED_TENANT = 1L;
@@ -142,6 +145,56 @@ getJsonRaw(admin, "/api/admin/assets/" + assetId).andExpect(jsonPath("$.code").v
     }
 
     @Test
+    void ticketCanReferenceAssetAndHistoryAggregates() throws Exception {
+        String admin = givenToken("test-asset-link-admin");
+        long buildingId = createBuilding(admin, "设备工单楼");
+        long categoryId = createCategory(admin, "设备工单类别");
+        long assetId = createAsset(admin, "AC-L-001", "关联空调", buildingId, categoryId);
+        String student = givenToken("test-asset-link-student", USER_TYPE_STUDENT, ROLE_STUDENT);
+
+        MvcResult created = postJson(student, "/api/student/tickets",
+                ticketBody(assetId, buildingId, categoryId))
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        JsonNode createdData = readJson(created).path("data");
+        long ticketId = createdData.path("id").asLong();
+        String ticketNo = createdData.path("ticketNo").asText();
+
+        JsonNode detail = getJson(student, "/api/student/tickets/" + ticketId);
+        assertThat(detail.path("data").path("assetId").asLong()).isEqualTo(assetId);
+        assertThat(detail.path("data").path("assetNo").asText()).isEqualTo("AC-L-001");
+        assertThat(detail.path("data").path("assetName").asText()).isEqualTo("关联空调");
+
+        JsonNode history = getJson(admin, "/api/admin/assets/" + assetId + "/tickets");
+        assertThat(history.path("data").path("total").asLong()).isEqualTo(1);
+        assertThat(history.path("data").path("list").get(0).path("ticketNo").asText()).isEqualTo(ticketNo);
+    }
+
+    @Test
+    void submitRejectsForeignOrDisabledAsset() throws Exception {
+        String admin = givenToken("test-asset-link-reject");
+        long buildingId = createBuilding(admin, "设备校验楼");
+        long categoryId = createCategory(admin, "设备校验类别");
+        String student = givenToken("test-asset-link-reject-student", USER_TYPE_STUDENT, ROLE_STUDENT);
+
+        long foreignAsset = System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO asset (id, tenant_id, asset_no, name, status, deleted, create_time, update_time)
+                VALUES (?, 2, 'AC-X-002', '外校设备', 1, 0, NOW(), NOW())
+                """, foreignAsset);
+        postJson(student, "/api/student/tickets", ticketBody(foreignAsset, buildingId, categoryId))
+                .andExpect(jsonPath("$.code").value(10001));
+
+        long disabledId = createAsset(admin, "AC-L-002", "停用设备", buildingId, categoryId);
+        putJson(admin, "/api/admin/assets/" + disabledId, Map.of(
+                "assetNo", "AC-L-002", "name", "停用设备", "status", 3,
+                "buildingId", buildingId, "categoryId", categoryId, "room", "201"))
+                .andExpect(jsonPath("$.code").value(0));
+        postJson(student, "/api/student/tickets", ticketBody(disabledId, buildingId, categoryId))
+                .andExpect(jsonPath("$.code").value(10001));
+    }
+
+    @Test
     void foreignBuildingOrCategoryIsRejected() throws Exception {
         String admin = givenToken("test-asset-ref");
 
@@ -210,6 +263,19 @@ getJsonRaw(admin, "/api/admin/assets/" + foreignId).andExpect(jsonPath("$.code")
         return readJson(result).path("data").path("id").asLong();
     }
 
+    private Map<String, Object> ticketBody(Long assetId, long buildingId, long categoryId) {
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("idempotencyKey", "test-asset-" + System.nanoTime());
+        body.put("buildingId", buildingId);
+        body.put("room", "201");
+        body.put("categoryId", categoryId);
+        body.put("description", "设备关联测试");
+        if (assetId != null) {
+            body.put("assetId", assetId);
+        }
+        return body;
+    }
+
     private Map<String, Object> assetBody(String assetNo, String name) {
         return Map.of(
                 "assetNo", assetNo,
@@ -263,18 +329,22 @@ getJsonRaw(admin, "/api/admin/assets/" + foreignId).andExpect(jsonPath("$.code")
     }
 
     private String givenToken(String username) throws Exception {
+        return givenToken(username, USER_TYPE_ADMIN, ROLE_ADMIN);
+    }
+
+    private String givenToken(String username, int userType, long roleId) throws Exception {
         SysUser user = new SysUser();
         user.setTenantId(SEED_TENANT);
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(PASSWORD));
         user.setRealName(username);
-        user.setUserType(3);
+        user.setUserType(userType);
         user.setStatus(1);
         sysUserMapper.insert(user);
 
         SysUserRole link = new SysUserRole();
         link.setUserId(user.getId());
-        link.setRoleId(ROLE_ADMIN);
+        link.setRoleId(roleId);
         sysUserRoleMapper.insert(link);
 
         MvcResult result = mockMvc.perform(post("/api/auth/login")

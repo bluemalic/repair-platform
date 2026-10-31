@@ -3,9 +3,11 @@ package com.bluemalic.repair.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.entity.Asset;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.entity.TicketCategory;
+import com.bluemalic.repair.mapper.AssetMapper;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.RepairCodeMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Component;
 class TicketReferenceValidator {
 
     private final RepairCodeMapper repairCodeMapper;
+    private final AssetMapper assetMapper;
     private final BuildingMapper buildingMapper;
     private final TicketCategoryMapper ticketCategoryMapper;
 
@@ -47,6 +50,25 @@ class TicketReferenceValidator {
                 || !Integer.valueOf(1).equals(building.getStatus())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "楼栋不存在或已停用");
         }
+    }
+
+    /**
+     * 设备是**可选**的：没传返回 null；传了就必须是本租户的、且未停用/报废（3）。
+     *
+     * <p>不区分"不存在 / 别家租户 / 已停用"，避免向调用方泄露别家设备是否存在。
+     */
+    Asset requireUsableAsset(Long assetId, Long tenantId) {
+        if (assetId == null) {
+            return null;
+        }
+        Asset asset = assetMapper.selectList(Wrappers.<Asset>lambdaQuery()
+                        .eq(Asset::getId, assetId)
+                        .eq(Asset::getTenantId, tenantId))
+                .stream().findFirst().orElse(null);
+        if (asset == null || Integer.valueOf(3).equals(asset.getStatus())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "设备不存在或已停用");
+        }
+        return asset;
     }
 
     /** 类别必须是本租户下、启用中的；提交报修与拆单共用。 */

@@ -9,6 +9,7 @@ import com.bluemalic.repair.common.Texts;
 import com.bluemalic.repair.common.TicketStatus;
 import com.bluemalic.repair.common.WorkerTaskScope;
 import com.bluemalic.repair.converter.TicketConverter;
+import com.bluemalic.repair.entity.Asset;
 import com.bluemalic.repair.entity.Building;
 import com.bluemalic.repair.entity.RepairCode;
 import com.bluemalic.repair.entity.SysUser;
@@ -16,6 +17,7 @@ import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
 import com.bluemalic.repair.entity.WorkerBuilding;
+import com.bluemalic.repair.mapper.AssetMapper;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
@@ -54,6 +56,7 @@ public class TicketQueryServiceImpl implements TicketQueryService {
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final SysUserMapper sysUserMapper;
     private final BuildingMapper buildingMapper;
+    private final AssetMapper assetMapper;
     private final TicketLookup lookup;
     private final TicketReferenceValidator referenceValidator;
     private final TicketReadModelAssembler readModelAssembler;
@@ -202,6 +205,18 @@ public class TicketQueryServiceImpl implements TicketQueryService {
         if (ticket.getWorkerId() != null) {
             SysUser worker = sysUserMapper.selectById(ticket.getWorkerId());
             vo.setWorkerName(worker == null ? null : Texts.nullToEmpty(worker.getRealName()));
+        }
+        // 设备名称：asset 不在数据权限拦截器范围内，必须显式带租户条件。
+        // 设备可能已被删除（逻辑删除查不到），那就只留 assetId，不阻断详情
+        if (ticket.getAssetId() != null) {
+            Asset asset = assetMapper.selectList(Wrappers.<Asset>lambdaQuery()
+                            .eq(Asset::getId, ticket.getAssetId())
+                            .eq(Asset::getTenantId, ticket.getTenantId()))
+                    .stream().findFirst().orElse(null);
+            if (asset != null) {
+                vo.setAssetNo(asset.getAssetNo());
+                vo.setAssetName(asset.getName());
+            }
         }
         return vo;
     }

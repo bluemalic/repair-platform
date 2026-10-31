@@ -7,6 +7,7 @@ import com.bluemalic.repair.dto.AssetUpdateDTO;
 import com.bluemalic.repair.service.AssetService;
 import com.bluemalic.repair.vo.AssetVO;
 import com.bluemalic.repair.vo.PageResult;
+import com.bluemalic.repair.vo.TicketVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -52,6 +53,15 @@ public class AdminAssetController {
     @GetMapping("/{id}")
     public Result<AssetVO> detail(@Parameter(description = "设备ID") @PathVariable long id) {
         return Result.ok(assetService.detail(id));
+    }
+
+    @Operation(summary = "设备维修历史", description = "按 ticket.asset_id 分页，按提交时间倒序；工单可见范围仍由数据权限拦截器控制")
+    @GetMapping("/{id}/tickets")
+    public Result<PageResult<TicketVO>> tickets(
+            @Parameter(description = "设备ID") @PathVariable long id,
+            @Parameter(description = "页码，从 1 开始") @RequestParam(defaultValue = "1") long pageNum,
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "10") long pageSize) {
+        return Result.ok(assetService.tickets(id, pageNum, pageSize));
     }
 
     @Operation(summary = "新增设备", description = "设备编号租户内唯一；新建一律为在用")
