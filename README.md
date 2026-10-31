@@ -216,7 +216,7 @@ repair-platform/
 │   │   ├── config/ tenancy/ 残余配置与租户建库/搬家（运行时租户路由已下沉 repair-common）
 │   │   └── job/             超时调度、Outbox relay、事件记录清理、演示数据重置、平台账号引导
 │   ├── src/main/resources/db/   Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
-│   └── src/test/java/       359 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
+│   └── src/test/java/       376 个测试（集成测试走 HTTP 层，共用一个 Spring 上下文）
 ├── repair-common/       共享库：Result / 错误码 / 枚举 / 租户路由 / 限流 / 指标 / 全局异常处理；
 │   └── application.yml  所有服务共用一份默认配置（口令与 Key 仍只从环境变量读）
 ├── repair-domain/       共享库：entity / mapper（含 XML）/ 读模型 VO——数据访问层全体

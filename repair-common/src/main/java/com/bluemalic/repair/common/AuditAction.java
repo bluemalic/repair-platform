@@ -33,6 +33,11 @@ public final class AuditAction {
     public static final String REPAIR_CODE_CREATE = "REPAIR_CODE_CREATE";
     public static final String REPAIR_CODE_UPDATE = "REPAIR_CODE_UPDATE";
 
+    // ---------- 设备台账（阶段 3） ----------
+    public static final String ASSET_CREATE = "ASSET_CREATE";
+    public static final String ASSET_UPDATE = "ASSET_UPDATE";
+    public static final String ASSET_DELETE = "ASSET_DELETE";
+
     // ---------- 平台运营 ----------
     public static final String TENANT_PROVISION = "TENANT_PROVISION";
     public static final String TENANT_UPDATE = "TENANT_UPDATE";
@@ -79,6 +84,9 @@ public final class AuditAction {
             Map.entry(CATEGORY_DELETE, "删除报修类别"),
             Map.entry(REPAIR_CODE_CREATE, "新增报修码"),
             Map.entry(REPAIR_CODE_UPDATE, "修改报修码"),
+            Map.entry(ASSET_CREATE, "新增设备"),
+            Map.entry(ASSET_UPDATE, "修改设备"),
+            Map.entry(ASSET_DELETE, "删除设备"),
             Map.entry(TENANT_PROVISION, "开通学校"),
             Map.entry(TENANT_UPDATE, "修改学校"),
             Map.entry(TENANT_STATUS, "启停学校"),

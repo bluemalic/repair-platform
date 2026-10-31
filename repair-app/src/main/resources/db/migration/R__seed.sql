@@ -74,7 +74,8 @@ INSERT INTO `sys_permission` (`id`, `code`, `name`, `type`) VALUES
     (21, 'student:manage',      '学生账号管理', 2),
     (22, 'tenant:manage',       '租户管理',     2),
     (23, 'audit:list',          '查看操作日志', 2),
-    (24, 'knowledge:manage',    '维修知识库管理', 2)
+    (24, 'knowledge:manage',    '维修知识库管理', 2),
+    (25, 'asset:manage',        '设备台账管理', 2)
 AS new ON DUPLICATE KEY UPDATE
     `code` = new.`code`,
     `name` = new.`name`;
@@ -177,7 +178,7 @@ INSERT INTO `sys_role_permission` (`id`, `role_id`, `permission_id`) VALUES
     (12, 3, 1), (13, 3, 2), (14, 3, 3), (15, 3, 4), (16, 3, 5), (17, 3, 6),
     (18, 3, 7), (19, 3, 8), (20, 3, 9), (21, 3, 10), (22, 3, 11), (23, 3, 12),
         (24, 3, 13), (25, 3, 14), (26, 3, 15), (27, 3, 16), (28, 3, 17), (29, 3, 18),
-        (30, 3, 19), (31, 3, 20), (32, 3, 21), (34, 3, 23), (35, 3, 24),
+        (30, 3, 19), (31, 3, 20), (32, 3, 21), (34, 3, 23), (35, 3, 24), (36, 3, 25),
     -- 平台运营：**只有租户管理这一个权限**。它看不到任何学校的业务数据，
     -- 这一点靠两层保证：① 这里只授一个码；② PlatformScopeInterceptor 把平台账号关在 /api/platform/** 里
     (33, 4, 22);

@@ -65,6 +65,7 @@ public class TenantDataMigrator {
             new CopyTable("sys_user_role", "user_id IN (SELECT id FROM {s}.sys_user WHERE tenant_id = ?)"),
             new CopyTable("sys_role_permission", "role_id IN (SELECT id FROM {s}.sys_role WHERE tenant_id = ?)"),
             new CopyTable("building", "tenant_id = ?"),
+            new CopyTable("asset", "tenant_id = ?"),
             new CopyTable("worker_building", "tenant_id = ?"),
             new CopyTable("worker_skill", "tenant_id = ?"),
             new CopyTable("ticket_category", "tenant_id = ?"),
