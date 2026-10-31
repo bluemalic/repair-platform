@@ -8,6 +8,7 @@ import com.bluemalic.repair.common.AuditTarget;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.converter.AssetConverter;
+import com.bluemalic.repair.converter.TicketConverter;
 import com.bluemalic.repair.dto.AssetCreateDTO;
 import com.bluemalic.repair.dto.AssetUpdateDTO;
 import com.bluemalic.repair.entity.Asset;
@@ -23,6 +24,7 @@ import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.CurrentTenantService;
 import com.bluemalic.repair.vo.AssetVO;
 import com.bluemalic.repair.vo.PageResult;
+import com.bluemalic.repair.vo.TicketVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -53,6 +55,7 @@ public class AssetServiceImpl implements AssetService {
     private final TicketMapper ticketMapper;
     private final BuildingMapper buildingMapper;
     private final TicketCategoryMapper ticketCategoryMapper;
+    private final TicketReadModelAssembler readModelAssembler;
     private final CurrentTenantService currentTenantService;
     private final AuditService auditService;
 
@@ -157,6 +160,27 @@ public class AssetServiceImpl implements AssetService {
                 "修改设备 " + before.getAssetNo()
                         + (before.getAssetNo().equals(dto.getAssetNo()) ? "" : "（改号为 " + dto.getAssetNo() + "）")
                         + "：状态 " + statusText(before.getStatus()) + "→" + statusText(dto.getStatus()));
+    }
+
+    @Override
+    public PageResult<TicketVO> tickets(long assetId, long pageNum, long pageSize) {
+        long tenantId = currentTenantService.requireTenantId();
+        // 先确认设备属于本租户：否则拿到别家的 assetId 就能看到"这张设备在本租户下的工单"（空列表也会泄露 404/200 差异）
+        requireAsset(assetId, tenantId);
+        Page<Ticket> page = ticketMapper.selectPage(new Page<>(pageNum, pageSize),
+                Wrappers.<Ticket>lambdaQuery()
+                        .eq(Ticket::getAssetId, assetId)
+                        .orderByDesc(Ticket::getSubmitTime)
+                        .orderByDesc(Ticket::getId));
+        Map<Long, String> buildings = readModelAssembler.buildingNames(
+                page.getRecords().stream().map(Ticket::getBuildingId).toList());
+        Map<Long, String> categories = readModelAssembler.categoryNames(
+                page.getRecords().stream().map(Ticket::getCategoryId).toList());
+        List<TicketVO> vos = page.getRecords().stream()
+                .map(t -> TicketConverter.toVO(t, buildings, categories)).toList();
+        Page<TicketVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(vos);
+        return PageResult.of(voPage);
     }
 
     @Override

@@ -35,6 +35,15 @@ public class TicketDetailVO extends TicketVO {
     @Schema(description = "主责维修工姓名（未派单为 null）。详情页要回答「谁负责」，只给一个 ID 没用")
     private String workerName;
 
+    @Schema(description = "关联设备ID（未关联为 null）")
+    private Long assetId;
+
+    @Schema(description = "关联设备编号（设备被删除或未关联为 null）")
+    private String assetNo;
+
+    @Schema(description = "关联设备名称（设备被删除或未关联为 null）")
+    private String assetName;
+
     @Schema(description = "拆单来源工单ID，非拆单产生的为 null")
     private Long parentTicketId;
 

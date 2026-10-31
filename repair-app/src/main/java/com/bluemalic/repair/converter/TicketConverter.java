@@ -71,6 +71,7 @@ public class TicketConverter {
         vo.setArriveTime(ticket.getArriveTime());
         vo.setCloseTime(ticket.getCloseTime());
         vo.setCollaborators(collaborators);
+        vo.setAssetId(ticket.getAssetId());
         vo.setParentTicketId(ticket.getParentTicketId());
         vo.setParentTicketNo(parentTicketNo);
         vo.setLogs(logs);

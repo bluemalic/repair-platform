@@ -33,6 +33,9 @@ public class TicketCreateDTO {
     @NotNull(message = "报修类别不能为空")
     private Long categoryId;
 
+    @Schema(description = "关联设备ID（可选）：必须是本租户未停用的设备；老入口不传即可")
+    private Long assetId;
+
     @Schema(description = "问题描述")
     @NotBlank(message = "问题描述不能为空")
     @Size(max = 500, message = "问题描述最长 500 字")
