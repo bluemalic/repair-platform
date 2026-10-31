@@ -86,6 +86,9 @@ function statusLabel(status: number | null): string {
         <text class="dot">·</text>
         <text>{{ detail.ticketNo }}</text>
       </view>
+      <view v-if="detail.assetNo" class="meta">
+        <text>设备 {{ detail.assetNo }} · {{ detail.assetName }}</text>
+      </view>
       <view class="meta">
         <text>提交 {{ detail.submitTime }}</text>
       </view>
