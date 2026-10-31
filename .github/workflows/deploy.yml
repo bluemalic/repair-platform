@@ -233,22 +233,23 @@ jobs:
               echo "没有正在运行的 app 容器，跳过回滚点（首次部署）"
             fi
 
-            # **只清 src**：源码树里残留着仓库已删除的文件时，编译会直接失败——
-            # 2026-10-16 就是这样：残留的 TicketServiceImpl.java（四域拆分时已删除）引用旧版
-            # 转换器签名，服务器上那次构建报 `cannot be applied to given types`。
-            # `src` 是唯一会被编译的目录，清它就够。
+            # 源码树里残留仓库已删除的文件时，编译会直接失败/行为会错乱——
+            # 模块拆分（git mv）之后尤其明显：旧路径留在服务器上，会和模块里的新类重复，
+            # 甚至旧的 repair-app/src/main/resources/application.yml 会盖住 repair-common 里的配置。
+            # 2026-10-31 就是这样：新镜像默认去连不存在的 Nacos，容器反复重启、全站 502。
             #
-            # ⚠️ **不要图省事改成"按归档清单把顶层条目全删掉"**（我试过，当天就出事）：
-            # `web-admin` / `miniapp-h5` / `nginx` 里挂着 bind mount 到 nginx 容器的路径
-            # （两个 dist 目录与 nginx.conf）。删掉目录再重建，容器手里还是失效的旧 inode
-            # → **全站 403**；更糟的是容器重启时 Docker 会**以 root 身份重建**不存在的挂载源，
-            # 于是 ubuntu 再也写不进去，运维侧要多一步才能恢复。
-            # 教训与前端链那句一样：**删内容 ≠ 删目录，动被挂载的目录要格外小心。**
-            #
-            # 其余路径（docs / nginx / 顶层文件）都是覆盖写，残留旧文件不影响构建。
-            rm -rf src
-            tar -xzf build-out/source.tar.gz
-            rm -rf build-out
+            # 所以每次部署都把归档**解到临时目录，再 rsync --delete 同步**。
+            # 被 bind mount 的运行时路径必须排除：删目录会让 nginx 持有失效 inode（全站 403），
+            # 而 data/ 是 MySQL/MinIO、nginx/certs 是 TLS、.env 是唯一配置来源——
+            # 这些只能覆盖写，绝不能被 --delete 碰到。
+            STAGE=/tmp/repair-src-$$
+            rm -rf "$STAGE" && mkdir -p "$STAGE"
+            tar -xzf build-out/source.tar.gz -C "$STAGE"
+            rsync -a --delete \
+              --exclude='.env*' --exclude='data/' --exclude='logs/' \
+              --exclude='nginx/certs/' --exclude='web-admin/dist/' --exclude='miniapp-h5/dist/' \
+              "$STAGE"/ .
+            rm -rf "$STAGE" build-out
 
             docker compose build app
             docker compose up -d --no-deps app
