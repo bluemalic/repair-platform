@@ -82,6 +82,8 @@ const workerOptions = ref<WorkerVO[]>([])
 /** 派单模式的候选排名（阶段 3 · ADR-019）；转派/加协作者仍走服务端搜索 */
 const candidates = ref<DispatchCandidateVO[]>([])
 const candidatesLoading = ref(false)
+/** 是否显示今天明确请假/休息的师傅（没排班记录的始终保留，按中性分） */
+const includeOffDuty = ref(false)
 const workerSearching = ref(false)
 /** 命中总数：下拉里只放前 N 条，超过时提示"用关键字继续搜"，避免让人以为就这么多 */
 const workerTotal = ref(0)
@@ -120,6 +122,7 @@ async function openWorkerPicker(row: TicketVO) {
   dispatchTarget.value = row
   selectedWorkerId.value = undefined
   candidates.value = []
+  includeOffDuty.value = false
   dispatchVisible.value = true
   if (dispatchMode.value === 'dispatch') {
     await loadCandidates(row.id)
@@ -129,13 +132,13 @@ async function openWorkerPicker(row: TicketVO) {
 }
 
 /**
- * 派单候选：后端按「技能 / 满意度 / 负载 / 距离」加权排序，每项都带得分与理由。
+ * 派单候选：后端按「技能 / 满意度 / 负载 / 距离 / 值班」五项加权排序，每项都带得分与理由。
  * 候选就是这所学校全部启用中的师傅，排序已经把该看的排前面，所以这里不做搜索框。
  */
 async function loadCandidates(ticketId: string) {
   candidatesLoading.value = true
   try {
-    candidates.value = await getDispatchCandidates(ticketId)
+    candidates.value = await getDispatchCandidates(ticketId, includeOffDuty.value)
   } finally {
     candidatesLoading.value = false
   }
@@ -569,6 +572,13 @@ onMounted(async () => {
           />
         </el-form-item>
         <el-form-item v-if="dispatchMode === 'dispatch'" label="推荐师傅">
+          <el-checkbox
+            v-model="includeOffDuty"
+            class="off-duty-toggle"
+            @change="dispatchTarget && loadCandidates(dispatchTarget.id)"
+          >
+            显示今天请假/休息的师傅
+          </el-checkbox>
           <div v-loading="candidatesLoading" class="candidates">
             <div
               v-for="c in candidates"
@@ -581,6 +591,8 @@ onMounted(async () => {
                 <el-tag size="small" type="primary">{{ c.score.toFixed(2) }}</el-tag>
                 <el-tag v-if="c.responsibleForBuilding" size="small" type="success">负责本楼栋</el-tag>
                 <el-tag v-else-if="!c.buildingNames.length" size="small" type="warning">未配楼栋</el-tag>
+                <el-tag v-if="c.onDutyToday === true" size="small" type="success">今日在班</el-tag>
+                <el-tag v-else-if="c.onDutyToday === false" size="small" type="info">今日请假</el-tag>
               </div>
               <div class="candidate-reason">{{ c.reason }}</div>
               <div class="candidate-bars">
@@ -594,7 +606,7 @@ onMounted(async () => {
             <div v-if="!candidatesLoading && !candidates.length" class="hint">没有可用的师傅（未维护账号或全部停用）</div>
           </div>
           <div class="hint">
-            按「技能 / 满意度 / 负载 / 距离」四项加权排序，只是建议——点下面的确认才真正派单
+            按「技能 / 满意度 / 负载 / 距离 / 值班」五项加权排序，只是建议——点下面的确认才真正派单
           </div>
         </el-form-item>
         <el-form-item v-else :label="dispatchMode === 'transfer' ? '改派给' : '维修工'">
@@ -744,6 +756,10 @@ onMounted(async () => {
   color: var(--el-text-color-secondary);
   line-height: 1.5;
 }
+.off-duty-toggle {
+  margin-bottom: 8px;
+}
+
 .candidate-bars {
   display: grid;
   grid-template-columns: 1fr 1fr;
