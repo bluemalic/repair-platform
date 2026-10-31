@@ -27,10 +27,14 @@ COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
-# -pl app -am：构建单体及其依赖（common / domain），跳过 notification 模块
-# （那是独立镜像，见 Dockerfile.notification），app 镜像构建更快。
+# -pl app -am 会构建 app 的全部依赖：common / domain / notification / timeout 四个模块。
+# 所以这四个模块的**源码**都必须在构建上下文里——少拷一个，那个模块就是空 jar，
+# app 的主代码/测试代码在编译时会找不到符号（2026-10-30 的 CD 就是这样红的：
+# 只拷了 common/domain/app，app 的测试编译找不到 timeout 模块的 TimeoutCommand 等）。
 COPY repair-common/src ./repair-common/src
 COPY repair-domain/src ./repair-domain/src
+COPY repair-notification-service/src ./repair-notification-service/src
+COPY repair-timeout-service/src ./repair-timeout-service/src
 COPY repair-app/src ./repair-app/src
 RUN mvn -B clean package -DskipTests -pl repair-app -am
 
