@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import QRCode from 'qrcode'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { createAsset, deleteAsset, getAssetTickets, pageAssets, updateAsset } from '@/api/asset'
 import { listBuildings } from '@/api/building'
@@ -170,6 +171,51 @@ const historyTotal = ref(0)
 const historyPage = reactive({ pageNum: 1, pageSize: 10 })
 const historyAsset = ref<AssetVO | null>(null)
 
+// 设备二维码：内容就是 assetNo（docs/01 §4.8），打印出来贴设备上
+const qrVisible = ref(false)
+const qrAsset = ref<AssetVO | null>(null)
+const qrDataUrl = ref('')
+
+async function openQr(row: AssetVO) {
+  qrAsset.value = row
+  qrDataUrl.value = await QRCode.toDataURL(row.assetNo, {
+    width: 280,
+    margin: 2,
+    errorCorrectionLevel: 'M',
+  })
+  qrVisible.value = true
+}
+
+/**
+ * 打印：用新窗口拼一份干净版式，不把整个后台打印出来。
+ * 所有文本都用 textContent 写入——设备名是管理员填的，不能当 HTML 拼。
+ */
+function printQr() {
+  const asset = qrAsset.value
+  if (!asset || !qrDataUrl.value) return
+  const win = window.open('', '_blank', 'width=420,height=560')
+  if (!win) return
+
+  const style = win.document.createElement('style')
+  style.textContent = 'body{font-family:sans-serif;text-align:center;padding:24px}' +
+    'h2{font-size:20px;margin:12px 0 4px}p{color:#666;margin:4px 0}img{width:280px;height:280px}'
+  const title = win.document.createElement('h2')
+  title.textContent = asset.assetNo
+  const name = win.document.createElement('p')
+  name.textContent = asset.name
+  const location = win.document.createElement('p')
+  location.textContent = [asset.buildingName, asset.room].filter(Boolean).join(' ')
+  const image = win.document.createElement('img')
+  image.src = qrDataUrl.value
+  image.alt = asset.assetNo
+
+  win.document.head.appendChild(style)
+  win.document.body.append(image, title, name, location)
+  win.document.close()
+  win.focus()
+  win.print()
+}
+
 async function openHistory(row: AssetVO) {
   historyAsset.value = row
   historyPage.pageNum = 1
@@ -259,8 +305,9 @@ onMounted(async () => {
       <el-table-column label="保修至" width="120">
         <template #default="{ row }">{{ row.warrantyUntil ?? '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" @click="openQr(row)">二维码</el-button>
           <el-button link type="primary" @click="openHistory(row)">维修历史</el-button>
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="doDelete(row)">删除</el-button>
@@ -372,6 +419,18 @@ onMounted(async () => {
         @current-change="onHistoryPageChange"
       />
     </el-drawer>
+
+    <el-dialog v-model="qrVisible" :title="qrAsset ? `设备二维码 · ${qrAsset.assetNo}` : '设备二维码'" width="380px">
+      <div class="qr-box">
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="设备二维码" class="qr-image" />
+        <div class="qr-name">{{ qrAsset?.name }}</div>
+        <div class="qr-location">{{ [qrAsset?.buildingName, qrAsset?.room].filter(Boolean).join(' ') || '未设置位置' }}</div>
+      </div>
+      <template #footer>
+        <el-button @click="qrVisible = false">关闭</el-button>
+        <el-button type="primary" @click="printQr">打印</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -387,5 +446,25 @@ onMounted(async () => {
 .pager {
   margin-top: 12px;
   justify-content: flex-end;
+}
+
+.qr-box {
+  text-align: center;
+}
+
+.qr-image {
+  width: 280px;
+  height: 280px;
+}
+
+.qr-name {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.qr-location {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 </style>
