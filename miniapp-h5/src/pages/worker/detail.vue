@@ -230,7 +230,7 @@ async function loadAdvice() {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .tip {
   margin-top: 160rpx;
@@ -262,21 +262,21 @@ async function loadAdvice() {
   padding: 0 20rpx;
   font-size: 32rpx;
   letter-spacing: 4rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .scan {
   margin-top: 16rpx;
-  color: #2c6cf6;
+  color: #0f2a44;
   font-size: 28rpx;
-  background: #f0f7ff;
+  background: #eef4f8;
   border-radius: 8rpx;
 }
 .advice-btn {
   margin-top: 4rpx;
-  color: #2c6cf6;
+  color: #0f2a44;
   font-size: 28rpx;
-  background: #f0f7ff;
+  background: #eef4f8;
   border-radius: 8rpx;
 }
 .advice-suggestion {
@@ -311,8 +311,8 @@ async function loadAdvice() {
 .cite {
   padding: 2rpx 12rpx;
   font-size: 22rpx;
-  color: #2c6cf6;
-  background: #f0f7ff;
+  color: #0f2a44;
+  background: #eef4f8;
   border-radius: 6rpx;
 }
 .cite-warn {
@@ -347,7 +347,7 @@ async function loadAdvice() {
 }
 .primary {
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 .danger {
@@ -356,8 +356,8 @@ async function loadAdvice() {
   border-radius: 8rpx;
 }
 .secondary {
-  color: #2c6cf6;
-  background: #f0f7ff;
+  color: #0f2a44;
+  background: #eef4f8;
   border-radius: 8rpx;
 }
 </style>

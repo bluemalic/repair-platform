@@ -8,8 +8,8 @@ import type { TicketVO } from '@/types'
 /** 状态字典：与后端 TicketStatus 一一对应（docs/02）。 */
 const STATUS: Record<number, { label: string; color: string }> = {
   10: { label: '待派单', color: '#e6a23c' },
-  20: { label: '待接单', color: '#409eff' },
-  30: { label: '处理中', color: '#409eff' },
+  20: { label: '待接单', color: '#0f2a44' },
+  30: { label: '处理中', color: '#0f2a44' },
   35: { label: '待料', color: '#e6a23c' },
   40: { label: '待验收', color: '#909399' },
   45: { label: '无法维修', color: '#f56c6c' },
@@ -173,9 +173,9 @@ function openDetail(row: TicketVO) {
   border-bottom: 4rpx solid transparent;
 }
 .tab.active {
-  color: #2c6cf6;
+  color: #0f2a44;
   font-weight: 600;
-  border-bottom-color: #2c6cf6;
+  border-bottom-color: #0f2a44;
 }
 .position-line {
   display: flex;
@@ -193,15 +193,15 @@ function openDetail(row: TicketVO) {
   padding: 0 10rpx;
   font-size: 22rpx;
   line-height: 32rpx;
-  color: #2c6cf6;
-  border: 2rpx solid #2c6cf6;
+  color: #0f2a44;
+  border: 2rpx solid #0f2a44;
   border-radius: 6rpx;
 }
 .page {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .header {
   display: flex;
@@ -216,7 +216,7 @@ function openDetail(row: TicketVO) {
 }
 .logout {
   font-size: 26rpx;
-  color: #2c6cf6;
+  color: #0f2a44;
 }
 .header-actions {
   display: flex;
@@ -224,7 +224,7 @@ function openDetail(row: TicketVO) {
 }
 .action {
   font-size: 26rpx;
-  color: #2c6cf6;
+  color: #0f2a44;
 }
 .empty {
   margin-top: 160rpx;

@@ -8,8 +8,8 @@ import type { TicketVO } from '@/types'
 /** 状态字典：与后端 TicketStatus 一一对应（docs/02）。 */
 const STATUS: Record<number, { label: string; color: string }> = {
   10: { label: '待派单', color: '#e6a23c' },
-  20: { label: '待接单', color: '#409eff' },
-  30: { label: '处理中', color: '#409eff' },
+  20: { label: '待接单', color: '#0f2a44' },
+  30: { label: '处理中', color: '#0f2a44' },
   35: { label: '待料', color: '#e6a23c' },
   40: { label: '待验收', color: '#909399' },
   45: { label: '无法维修', color: '#f56c6c' },
@@ -156,7 +156,7 @@ function goAgent() {
 }
 .action {
   font-size: 26rpx;
-  color: #1d4ed8;
+  color: #0f2a44;
 }
 .empty {
   margin-top: 160rpx;

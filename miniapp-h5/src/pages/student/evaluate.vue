@@ -144,7 +144,7 @@ async function submitRework() {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .card {
   margin-bottom: 20rpx;
@@ -200,13 +200,13 @@ async function submitRework() {
   padding: 16rpx 20rpx;
   box-sizing: border-box;
   font-size: 28rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .submit {
   margin-top: 8rpx;
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 /* 打回重做：次要出口，视觉上不与"提交评价"抢主位 */
