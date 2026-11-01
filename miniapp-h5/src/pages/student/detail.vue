@@ -80,7 +80,7 @@ async function doCancel() {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .tip {
   margin-top: 160rpx;
@@ -91,7 +91,7 @@ async function doCancel() {
 .primary {
   margin-top: 16rpx;
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 .cancel {

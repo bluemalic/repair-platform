@@ -169,7 +169,7 @@ function forgotPassword() {
 }
 .sso {
   margin-top: 16rpx;
-  color: #1d4ed8;
+  color: #0f2a44;
   background: transparent;
   border: none;
   font-size: 28rpx;
@@ -188,7 +188,7 @@ function forgotPassword() {
   text-align: center;
 }
 .forgot-link {
-  color: #1d4ed8;
+  color: #0f2a44;
   font-size: 28rpx;
   font-weight: 500;
 }
@@ -197,7 +197,7 @@ function forgotPassword() {
   padding: 0 16rpx;
   font-size: 24rpx;
   line-height: 1.6;
-  color: #1d4ed8;
+  color: #0f2a44;
   text-align: center;
 }
 </style>

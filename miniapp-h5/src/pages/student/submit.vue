@@ -328,7 +328,7 @@ async function submit() {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .card {
   margin-bottom: 20rpx;
@@ -357,7 +357,7 @@ async function submit() {
   padding: 0 20rpx;
   font-size: 32rpx;
   letter-spacing: 4rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .lookup {
@@ -367,14 +367,14 @@ async function submit() {
   color: #fff;
   font-size: 28rpx;
   line-height: 80rpx;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 .mode {
   display: flex;
   margin-bottom: 24rpx;
   padding: 6rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 10rpx;
 }
 .mode-item {
@@ -386,15 +386,15 @@ async function submit() {
   border-radius: 8rpx;
 }
 .mode-item.active {
-  color: #2c6cf6;
+  color: #0f2a44;
   font-weight: 600;
   background: #fff;
 }
 .scan {
   margin-top: 16rpx;
-  color: #2c6cf6;
+  color: #0f2a44;
   font-size: 28rpx;
-  background: #f0f7ff;
+  background: #eef4f8;
   border-radius: 8rpx;
 }
 .hint {
@@ -406,20 +406,20 @@ async function submit() {
 }
 .position {
   padding: 20rpx;
-  background: #f0f7ff;
+  background: #eef4f8;
   border-radius: 8rpx;
 }
 .position-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #2c6cf6;
+  color: #0f2a44;
 }
 .picker {
   height: 80rpx;
   padding: 0 20rpx;
   font-size: 30rpx;
   line-height: 80rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .textarea {
@@ -428,7 +428,7 @@ async function submit() {
   padding: 16rpx 20rpx;
   box-sizing: border-box;
   font-size: 28rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .images {
@@ -464,13 +464,13 @@ async function submit() {
   line-height: 160rpx;
   text-align: center;
   color: #909399;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .submit {
   margin-top: 8rpx;
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 </style>

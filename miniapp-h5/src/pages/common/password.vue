@@ -83,7 +83,7 @@ async function submit() {
   min-height: 100vh;
   padding: 48rpx 32rpx 0;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .form {
   padding: 40rpx 32rpx;
@@ -103,13 +103,13 @@ async function submit() {
   height: 80rpx;
   padding: 0 20rpx;
   font-size: 30rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .submit {
   margin-top: 16rpx;
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 .tip {

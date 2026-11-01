@@ -177,7 +177,7 @@ async function confirm() {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 
 .chat {
@@ -205,7 +205,7 @@ async function confirm() {
 }
 
 .row.user .bubble {
-  background: #1f6feb;
+  background: #0f2a44;
   color: #fff;
 }
 
@@ -228,12 +228,12 @@ async function confirm() {
   align-items: center;
   justify-content: space-between;
   padding: 12rpx 24rpx;
-  background: #eef4ff;
+  background: #eaf4fb;
 }
 
 .context-text {
   font-size: 24rpx;
-  color: #1f6feb;
+  color: #0f2a44;
 }
 
 .context-clear {
@@ -262,7 +262,7 @@ async function confirm() {
 
 .confirm {
   margin-top: 8rpx;
-  background: #1f6feb;
+  background: #0f2a44;
   color: #fff;
   font-size: 28rpx;
 }
@@ -280,7 +280,7 @@ async function confirm() {
   height: 72rpx;
   padding: 0 20rpx;
   border-radius: 36rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   font-size: 28rpx;
 }
 
@@ -295,12 +295,12 @@ async function confirm() {
 }
 
 .ghost {
-  background: #f5f6f8;
+  background: #f5f8fa;
   color: #1f2d3d;
 }
 
 .send {
-  background: #1f6feb;
+  background: #0f2a44;
   color: #fff;
 }
 

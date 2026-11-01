@@ -20,8 +20,8 @@ const collaboratorNames = computed(() =>
 
 const STATUS: Record<number, { label: string; color: string }> = {
   10: { label: '待派单', color: '#e6a23c' },
-  20: { label: '待接单', color: '#409eff' },
-  30: { label: '处理中', color: '#409eff' },
+  20: { label: '待接单', color: '#0f2a44' },
+  30: { label: '处理中', color: '#0f2a44' },
   35: { label: '待料', color: '#e6a23c' },
   40: { label: '待验收', color: '#909399' },
   45: { label: '无法维修', color: '#f56c6c' },
@@ -223,7 +223,7 @@ function statusLabel(status: number | null): string {
   width: 12rpx;
   height: 12rpx;
   margin-top: 12rpx;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 50%;
 }
 .log-body {

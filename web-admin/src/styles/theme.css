@@ -1,0 +1,55 @@
+/**
+ * 品牌 token（AGENTS §5.13）：
+ * 墨蓝 #0F2A44（主色/按钮）、天蓝 #38BDF8（点缀）、橙 #F97316（强调）、冷白 #F5F8FA（页面底色）。
+ *
+ * <p>只覆盖 Element Plus 的主色与页面底色；成功 / 警告 / 危险等**状态色保持组件默认**——
+ * 它们表达的是业务状态（待派单琥珀、处理中绿、待验收蓝），不该被品牌色吃掉。
+ */
+:root {
+  --brand-ink: #0f2a44;
+  --brand-sky: #38bdf8;
+  --brand-orange: #f97316;
+  --brand-bg: #f5f8fa;
+
+  --el-color-primary: var(--brand-ink);
+  /* Element Plus 的 hover / disabled / 浅底都用这几档，按主色与白色混合预先算好 */
+  --el-color-primary-light-3: #577084;
+  --el-color-primary-light-5: #8795a2;
+  --el-color-primary-light-7: #b7bfc7;
+  --el-color-primary-light-8: #cfd5db;
+  --el-color-primary-light-9: #e7ebee;
+  --el-color-primary-dark-2: #0c2236;
+
+  --el-bg-color-page: var(--brand-bg);
+  --el-border-radius-base: 6px;
+  --el-table-header-bg-color: #eef4f8;
+  --el-table-row-hover-bg-color: #f3f8fc;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--brand-bg);
+  color: #1b2a3a;
+}
+
+/* 侧栏选中项：主色浅底之外再加一道天蓝竖条，当前页一眼可见 */
+.el-menu-item.is-active {
+  position: relative;
+}
+
+.el-menu-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--brand-sky);
+  border-radius: 0 2px 2px 0;
+}

@@ -165,7 +165,7 @@ onUnload(() => {
   min-height: 100vh;
   padding: 24rpx;
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: #f5f8fa;
 }
 .card {
   margin-bottom: 20rpx;
@@ -196,17 +196,17 @@ onUnload(() => {
   padding: 0 20rpx;
   font-size: 32rpx;
   letter-spacing: 4rpx;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .primary {
   color: #fff;
-  background: #2c6cf6;
+  background: #0f2a44;
   border-radius: 8rpx;
 }
 .plain {
   color: #606266;
-  background: #f5f6f8;
+  background: #f5f8fa;
   border-radius: 8rpx;
 }
 .error {
