@@ -1,0 +1,39 @@
+# 本地 full 的 compose 覆盖层：只加“完整版专用”的环境变量。
+#
+# 用法：
+#   cp .env.full.example .env.full
+#   ./scripts/dev-full.sh
+#
+# 为什么不用 --env-file 直接改 app：app 服务的 env_file 固定是 .env，
+# --env-file 只影响 compose 的 ${} 替换，不会进容器。所以这里用 environment
+# 覆盖关键开关；密码仍由 .env 提供。
+services:
+  app:
+    environment:
+      # 事件与通知
+      REPAIR_ROCKETMQ_ENABLED: "true"
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      ROCKETMQ_CONSUMER_ENABLED: "false"
+      REPAIR_NOTIFICATION_DELIVERY: mq
+
+      # 超时：独立 timeout-service 消费；单体只保留 DB 兜底。
+      # 不要动 REPAIR_TIMEOUT_SCHEDULER_ENABLED：它同时控制 ZSet 消费与兜底扫描。
+      REPAIR_TIMEOUT_DELIVERY: mq
+      REPAIR_TIMEOUT_CONSUMER_ENABLED: "false"
+      REPAIR_TIMEOUT_BACKSTOP_ENABLED: "true"
+      REPAIR_TIMEOUT_SCHEDULER_ENABLED: "true"
+
+      # 服务发现（Gateway 用 lb://repair-app）
+      NACOS_DISCOVERY_ENABLED: "true"
+      NACOS_SERVER_ADDR: nacos:8848
+
+  gateway:
+    environment:
+      GATEWAY_APP_URI: lb://repair-app
+      NACOS_DISCOVERY_ENABLED: "true"
+      NACOS_SERVER_ADDR: nacos:8848
+    # app 同时接 backend/frontend，Nacos 里注册的是 frontend 网段的 IP；
+    # gateway 必须也接 frontend，否则 lb://repair-app 会连超时。
+    networks:
+      - backend
+      - frontend

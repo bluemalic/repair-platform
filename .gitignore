@@ -35,6 +35,7 @@ log/
 ### 环境变量与密钥（**最重要，绝不能提交**）###
 .env
 .env.local
+.env.full
 .env.*.local
 *.pem
 *.key

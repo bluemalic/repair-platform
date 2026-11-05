@@ -1,0 +1,42 @@
+# ============================================================
+# 线上 lite 部署的防呆配置（SPRING_PROFILES_ACTIVE=prod,lite）
+#
+# 背景：线上 4C4G 只跑「app + mysql + redis + minio + nginx + RocketMQ
+# + notification + timeout」，不跑 Gateway / Nacos / Dashboard / 监控。
+# 这里的值必须与部署仓库 repair-platform-lite-deploy 的 docker-compose.yml 保持一致，避免 .env 漏配时
+# 应用悄悄退回 sync / zset，导致「以为走了 MQ，其实没有」。
+#
+# 注意：不要设置 repair.timeout.scheduler-enabled=false。
+# TimeoutScheduler 里同时有 ZSet 消费和每分钟 DB 兜底扫描；关掉它会把
+# 兜底一起关掉。delivery=mq 时 ZSet 消费会自己 return，兜底仍需要它。
+# ============================================================
+spring:
+  config:
+    activate:
+      on-profile: lite
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+        register-enabled: false
+
+repair:
+  rocketmq:
+    enabled: true
+    # 通知由独立 notification-service 消费；单体不能再消费一遍。
+    consumer-enabled: false
+  notification:
+    delivery: mq
+  timeout:
+    delivery: mq
+    # 到期消息由 timeout-service 消费；单体只保留 DB 兜底扫描。
+    consumer-enabled: false
+    backstop-enabled: true
+    scheduler-enabled: true
+
+# 线上 lite 不跑 Prometheus/Grafana；只保留健康检查与基本信息端点。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
