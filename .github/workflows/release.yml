@@ -1,0 +1,198 @@
+# 发布制品：给线上 lite 部署仓库下载用。
+#
+# 触发方式：
+#   1. push 一个 v* tag（推荐）
+#   2. 手动 workflow_dispatch，填一个已存在的 v* tag
+#
+# 产物（GitHub Release assets）：
+#   repair-app.jar
+#   repair-notification-service-exec.jar
+#   repair-timeout-service-exec.jar
+#   frontend-dist.tar.gz      （web-admin/dist + miniapp-h5/dist/build/h5）
+#   source.tar.gz             （回退用：服务器仍可按老方式本地构建）
+#   sha256sums.txt
+#
+# 这个 workflow 不在服务器上构建，只负责产出可校验的制品；服务器不再需要 Maven。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布/重发的 tag（必须以 v 开头）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建并发布 Release
+    runs-on: ubuntu-latest
+
+    # 与 ci.yml 保持一致：测试要连真实 MySQL / Redis；MinIO 用 compose 起。
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: repair
+          TZ: Asia/Shanghai
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: 解析并校验 tag
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            v*) ;;
+            *) echo "tag 必须以 v 开头，当前=$TAG" >&2; exit 1 ;;
+          esac
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+
+      - name: 配置 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: 启动 MinIO（测试用）
+        run: |
+          cat > .env <<'EOF'
+          MINIO_ROOT_USER=ci-minio-user
+          MINIO_ROOT_PASSWORD=ci-minio-password
+          MINIO_MEM_LIMIT=512M
+          EOF
+          docker compose up -d minio
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live; then
+              echo "MinIO 已就绪"
+              break
+            fi
+            sleep 2
+          done
+          test -d ./data/minio/.minio.sys || {
+            echo "MinIO 数据目录未落在挂载卷里" >&2
+            docker compose logs minio
+            exit 1
+          }
+
+      - name: 后端测试与打包
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: '3306'
+          MYSQL_DATABASE: repair
+          MYSQL_USERNAME: root
+          MYSQL_PASSWORD: ci-root-password
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          MINIO_ENDPOINT: http://127.0.0.1:9000
+          MINIO_PUBLIC_BASE_URL: http://127.0.0.1:9000
+          MINIO_ACCESS_KEY: ci-minio-user
+          MINIO_SECRET_KEY: ci-minio-password
+          MINIO_BUCKET: repair-ci
+        run: mvn -B clean package
+
+      - name: 构建管理端
+        working-directory: web-admin
+        env:
+          VITE_DEMO_ACCOUNTS: ${{ vars.VITE_DEMO_ACCOUNTS }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: 构建学生 / 维修工 H5
+        working-directory: miniapp-h5
+        env:
+          VITE_DEMO_ACCOUNTS: ${{ vars.VITE_DEMO_ACCOUNTS }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build:h5
+
+      - name: 整理 Release 资产
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          APP_JAR="$(find repair-app/target -maxdepth 1 -name 'repair-app-*.jar' ! -name '*.original' | head -n 1)"
+          NOTIFY_JAR="$(find repair-notification-service/target -maxdepth 1 -name '*-exec.jar' | head -n 1)"
+          TIMEOUT_JAR="$(find repair-timeout-service/target -maxdepth 1 -name '*-exec.jar' | head -n 1)"
+
+          test -n "$APP_JAR" || { echo "找不到 repair-app jar" >&2; exit 1; }
+          test -n "$NOTIFY_JAR" || { echo "找不到 notification exec jar" >&2; exit 1; }
+          test -n "$TIMEOUT_JAR" || { echo "找不到 timeout exec jar" >&2; exit 1; }
+
+          cp "$APP_JAR" release/repair-app.jar
+          cp "$NOTIFY_JAR" release/repair-notification-service-exec.jar
+          cp "$TIMEOUT_JAR" release/repair-timeout-service-exec.jar
+
+          tar -czf release/frontend-dist.tar.gz \
+            web-admin/dist \
+            miniapp-h5/dist/build/h5
+
+          git archive --format=tar.gz --prefix=repair-platform/ \
+            -o release/source.tar.gz HEAD
+
+          cd release
+          sha256sum * > sha256sums.txt
+          ls -lh
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          generate_release_notes: true
+          files: |
+            release/repair-app.jar
+            release/repair-notification-service-exec.jar
+            release/repair-timeout-service-exec.jar
+            release/frontend-dist.tar.gz
+            release/source.tar.gz
+            release/sha256sums.txt
+
+      - name: 上传测试报告（失败时排查）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-test-reports
+          path: |
+            repair-app/target/surefire-reports/
+            repair-app/target/site/jacoco/
+          if-no-files-found: ignore

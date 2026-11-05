@@ -1,6 +1,7 @@
 package com.bluemalic.repair.timeout;
 
 import com.bluemalic.repair.common.MetricsRecorder;
+import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.config.TenantDataSourceConfig;
 import com.bluemalic.repair.config.TenancyProperties;
 import com.bluemalic.repair.config.TimeoutMqConfig;
@@ -58,6 +59,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         TicketLookup.class,
         TicketNoticePublisher.class,
         NotificationServiceImpl.class,
+        RocketMqProperties.class,
         TimeoutRule.class,
         TimeoutProperties.class,
         TimeoutServiceImpl.class,
