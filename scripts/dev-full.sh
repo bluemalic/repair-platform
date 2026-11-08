@@ -33,7 +33,7 @@ source ./.env.full
 set +a
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.full.yml)
-PROFILES=(--profile rocketmq --profile notification --profile timeout --profile gateway --profile nacos --profile observability)
+PROFILES=(--profile rocketmq --profile notification --profile timeout --profile nacos --profile observability)
 
 echo "启动完整版本地栈（RocketMQ / notification / timeout / gateway / nacos / observability）..."
 "${COMPOSE[@]}" "${PROFILES[@]}" up -d --build --remove-orphans
