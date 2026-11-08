@@ -35,6 +35,12 @@ spring:
               uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
               predicates:
                 - Path=/actuator/**
+            # 接口文档：nginx 把 /doc.html、/webjars/** 等也反代到 gateway，
+            # 这里必须显式放行到 app，否则 gateway 只认 /api/** 会 404
+            - id: repair-app-docs
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              predicates:
+                - Path=/doc.html,/webjars/**,/v3/api-docs/**,/swagger-resources/**,/favicon.ico
 
 # 与单体共用同一套 token 约定（common 的 application.yml 里那份是单体的；网关不依赖 common）
 sa-token:

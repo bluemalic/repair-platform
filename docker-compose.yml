@@ -358,11 +358,9 @@ services:
 
   # ============================================================
   # gateway（阶段 2 · ADR-024）—— 统一入口：路由 + Sa-Token 校验 + 身份头注入
-  # 启动：docker compose --profile gateway up -d gateway
-  # 默认静态路由到 app:8080；切 Nacos 动态发现：
-  #   GATEWAY_APP_URI=lb://repair-app NACOS_DISCOVERY_ENABLED=true \
-  #     docker compose --profile nacos --profile gateway up -d nacos gateway app
-  # 正式入口仍是 nginx；18080 只绑本机，用于调试/压测。
+  # lite 默认启动（nginx → gateway → app）；静态路由到 app:8080。
+  # 切 Nacos 动态发现：GATEWAY_APP_URI=lb://repair-app NACOS_DISCOVERY_ENABLED=true
+  # 18080 只绑本机，用于调试/压测。
   # ============================================================
   gateway:
     build:
@@ -373,10 +371,9 @@ services:
     image: repair-gateway-service:latest
     container_name: repair-gateway
     restart: unless-stopped
-    profiles: ["gateway"]
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       JAVA_MAX_RAM_PERCENTAGE: ${GATEWAY_JAVA_MAX_RAM_PERCENTAGE:-55}
@@ -399,11 +396,22 @@ services:
         -jar app.jar
     ports:
       - "127.0.0.1:18080:8080"
-    networks: [backend]
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     deploy:
       resources:
         limits:
-          memory: ${GATEWAY_MEM_LIMIT:-384M}
+          memory: ${GATEWAY_MEM_LIMIT:-256M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   app:
     build:
@@ -483,7 +491,7 @@ services:
     container_name: repair-nginx
     restart: unless-stopped
     depends_on:
-      app:
+      gateway:
         condition: service_healthy
     ports:
       # 域名入口：80 只做 HTTPS 跳转，443 是业务入口。
