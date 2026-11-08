@@ -53,7 +53,9 @@ import java.lang.annotation.Target;
         // AI 的只读账号：给测试一个固定账号名，**账号本身由用例按需创建**（CREATE USER 是 DDL，
         // 不参与事务回滚，所以不能指望启动引导在测试里替我们建——这里只保证"配置是齐的"，
         // 让问数链路能走到真正连库那一步。模型那一侧由测试作用域的 TestAiAssistant 顶替，
-        // 所以 CI 既不调模型也不花钱。
+        // 所以 CI 既不调模型也不花钱。Key 给一个假值，是为了让 AiProperties.enabled() 为 true；
+        // 真正调用的是 TestAiAssistant，不会走到真实模型。
+        "AI_MODEL_API_KEY=test-key",
         "AI_DB_USERNAME=test_ai_ci",
         "AI_DB_PASSWORD=Test@123456",
         // 统一认证：限流放宽到 1000（一个测试类里会连着发起十几次授权/回调，默认 30/分钟会把自己挡住），
