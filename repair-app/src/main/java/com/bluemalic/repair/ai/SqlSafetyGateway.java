@@ -16,7 +16,9 @@ import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.Statements;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.PlainSelect;
+import net.sf.jsqlparser.statement.select.SelectItem;
 import net.sf.jsqlparser.util.TablesNamesFinder;
 import org.springframework.stereotype.Component;
 
@@ -95,7 +97,11 @@ public class SqlSafetyGateway {
             throw reject("不支持 WITH（公共表表达式），请直接用 JOIN 或子查询", sql);
         }
         rejectFileWrite(select, sql);
+        // 先判子查询：`SELECT * FROM (SELECT ...)` 的根因是派生表，不是星号；
+        // 先报「不支持子查询」比先报「不允许 *」更接近模型要改的地方。
         rejectSubqueries(sql);
+        rejectSelectStar(select, sql);
+        rejectLocking(select, sql);
 
         // 表白名单：TablesNamesFinder 会连子查询里的表一起找出来，所以 WHERE 里的子查询同样受约束
         // （用接收已解析语句的实例方法：不用再解析一遍，也不抛受检异常）
@@ -180,6 +186,36 @@ public class SqlSafetyGateway {
     private void rejectFileWrite(PlainSelect select, String sql) {
         if (select.getIntoTables() != null && !select.getIntoTables().isEmpty()) {
             throw reject("不支持 INTO OUTFILE / INTO DUMPFILE", sql);
+        }
+    }
+
+    /**
+     * 拒绝 {@code SELECT *} / {@code 表别名.*}。
+     *
+     * <p>为什么必须在网关里挡，而不是只靠敏感列黑名单：{@code *} 不是一个标识符，
+     * {@link #firstSensitiveToken} 的词法扫描看不到它，于是 {@code SELECT * FROM sys_user}
+     * 会把 {@code password} / {@code phone} 一起返回——这是本项目实测过的绕过。
+     * {@code COUNT(*)} 是 {@code Function}，不是 {@link AllColumns}，不会被这条误伤。
+     */
+    private void rejectSelectStar(PlainSelect select, String sql) {
+        for (SelectItem<?> item : select.getSelectItems()) {
+            if (item.getExpression() instanceof AllColumns) {
+                throw reject("不允许 SELECT *，请显式列出需要查询的列", sql);
+            }
+        }
+    }
+
+    /**
+     * 拒绝 {@code FOR UPDATE} / {@code FOR SHARE} 等锁定查询。
+     *
+     * <p>只读账号是第 1 层兜底，但锁语义不该由「账号有没有 UPDATE 权限」来保证：
+     * 一条 {@code SELECT ... FOR UPDATE} 会在只读连接上申请锁，拖住业务事务。
+     * jsqlparser 5.2 解析不了 MySQL 的 {@code LOCK IN SHARE MODE}（会在解析阶段被拒），
+     * {@code FOR UPDATE} / {@code FOR SHARE} 则能解析成 {@code forMode}，这里显式挡掉。
+     */
+    private void rejectLocking(PlainSelect select, String sql) {
+        if (select.getForMode() != null || select.getForClause() != null) {
+            throw reject("不允许 FOR UPDATE / FOR SHARE 等锁定查询", sql);
         }
     }
 

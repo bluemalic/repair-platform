@@ -1,5 +1,6 @@
 package com.bluemalic.repair.ai;
 
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -9,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -43,7 +45,12 @@ public class SchemaCatalog implements ColumnLookup {
      */
     private static final Set<String> HIDDEN_FROM_PROMPT = Set.of("deleted");
 
-    private volatile Entry cached;
+    /**
+     * 按**库**缓存：键与 AI 只读连接池同源（{@code TenantRoutingContext}），
+     * 否则平台库与某个租户库会共用一份 Schema——当前靠结构一致性测试兜着，
+     * 但一旦某校结构漂移，提示词与 {@code deleted} 判断就会用错库。
+     */
+    private final Map<String, Entry> cached = new ConcurrentHashMap<>();
 
     /**
      * 白名单表的结构描述，每行一张表：{@code ticket（工单主表）: id 工单ID, ticket_no 工单号, ...}
@@ -61,16 +68,9 @@ public class SchemaCatalog implements ColumnLookup {
     }
 
     private Entry load() {
-        Entry entry = cached;
-        if (entry == null) {
-            synchronized (this) {
-                if (cached == null) {
-                    cached = read();
-                }
-                entry = cached;
-            }
-        }
-        return entry;
+        String routingKey = TenantRoutingContext.currentKey();
+        String cacheKey = routingKey == null ? TenantRoutingContext.CONTROL : routingKey;
+        return cached.computeIfAbsent(cacheKey, ignored -> read());
     }
 
     private Entry read() {

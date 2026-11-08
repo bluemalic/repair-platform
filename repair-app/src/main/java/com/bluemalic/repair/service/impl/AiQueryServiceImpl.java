@@ -8,6 +8,7 @@ import com.bluemalic.repair.ai.SqlSafetyGateway;
 import com.bluemalic.repair.ai.SqlSafetyResult;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
+import com.bluemalic.repair.config.AiProperties;
 import com.bluemalic.repair.service.AiQueryProgress;
 import com.bluemalic.repair.service.AiQueryService;
 import com.bluemalic.repair.service.CurrentTenantService;
@@ -43,6 +44,9 @@ public class AiQueryServiceImpl implements AiQueryService {
     /** 租户从登录态取，不是从请求参数取——否则就等于"谁都能问别家学校的数据"。 */
     private final CurrentTenantService currentTenantService;
 
+    /** 模型与只读账号都配好才允许进入模型调用；否则先付一次模型费再报 40004。 */
+    private final AiProperties aiProperties;
+
     @Override
     public AiQueryVO ask(String question) {
         return run(question, currentTenantService.requireTenantId(), AiQueryProgress.NONE);
@@ -56,6 +60,11 @@ public class AiQueryServiceImpl implements AiQueryService {
     private AiQueryVO run(String question, long tenantId, AiQueryProgress progress) {
         if (!StringUtils.hasText(question)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "问题不能为空");
+        }
+        // 模型或只读账号没配好时，不要先调模型再在执行阶段报 40004：那会白付一次模型调用
+        if (!aiProperties.enabled()) {
+            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
+                    "AI 问数未启用（模型凭据或只读数据库账号未配置）");
         }
         long startedAt = System.currentTimeMillis();
 

@@ -71,7 +71,7 @@ class AiQueryServiceTest {
         // 网关的三个依赖都指向**测试自己这个执行器**（用的是测试账号），不走容器里那套
         // （容器里的执行器按应用配置构建，测试环境没配 AI_DB_*，用它会直接报"未启用"）
         SqlSafetyGateway gateway = new SqlSafetyGateway(new SchemaCatalog(executor));
-        service = new AiQueryServiceImpl(assistant, gateway, executor, fixedTenant());
+        service = new AiQueryServiceImpl(assistant, gateway, executor, fixedTenant(), properties);
     }
 
     @AfterEach
