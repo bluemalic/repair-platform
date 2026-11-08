@@ -50,6 +50,11 @@ services:
       resources:
         limits:
           memory: ${MYSQL_MEM_LIMIT:-768M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     # 官方镜像足够：Sa-Token 会话、延迟队列（ZSet）、限流计数、登录审计去重都只用到核心命令，
@@ -68,6 +73,8 @@ services:
     image: redis:7-alpine
     container_name: repair-redis
     restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     command: >
       redis-server
       --appendonly yes
@@ -79,10 +86,20 @@ services:
     networks: [backend]
     ports:
       - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     deploy:
       resources:
         limits:
           memory: ${REDIS_MEM_LIMIT:-384M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   minio:
     # ⚠️ 这个镜像源已经换过两次，**两次都是 MinIO 自己收紧了分发**，不是我们配错：
@@ -116,10 +133,21 @@ services:
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
+    healthcheck:
+      # 只探端口：Bitnami 镜像不保证带 curl/mc；端口能连上即视为进程已起
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     deploy:
       resources:
         limits:
           memory: ${MINIO_MEM_LIMIT:-256M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ============================================================
   # RocketMQ（阶段 2 · ADR-023）—— 只在 `--profile rocketmq` 时启动
@@ -390,6 +418,10 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     # ⚠️ .env 里的变量**不会自动进容器**：compose 只拿它做文件内的 `${}` 替换。
     #    要让应用读到，要么在 environment 里逐条列出，要么整个文件传进去（这里选后者）。
     #
@@ -400,7 +432,8 @@ services:
     env_file:
       - .env
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      # 允许外部用环境变量切 profile（lite 部署需要 prod,lite）；默认仍是 prod
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       TZ: Asia/Shanghai
       # 容器内存上限的百分之多少给堆（见 Dockerfile）。留 30% 给元空间/线程栈/直接内存，
       # 小内存机型上这个比例要下调，否则堆没满、容器先被 OOM killer 干掉
@@ -428,16 +461,30 @@ services:
     volumes:
       - ./logs/app:/app/logs
     networks: [backend, frontend]
+    healthcheck:
+      # 运行镜像是 JRE（没有 curl），用 bash 的 /dev/tcp 探 actuator 端口并校验 UP
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3; grep -q '\"status\":\"UP\"' <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
           memory: ${APP_MEM_LIMIT:-768M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: nginx:1.27-alpine
     container_name: repair-nginx
     restart: unless-stopped
-    depends_on: [app]
+    depends_on:
+      app:
+        condition: service_healthy
     ports:
       # 域名入口：80 只做 HTTPS 跳转，443 是业务入口。
       # 本机 8080 常被 IDEA 里跑的应用占着，所以保留一个 8080 别名；
@@ -455,6 +502,11 @@ services:
       - ./web-admin/dist:/usr/share/nginx/html/admin:ro
       - ./miniapp-h5/dist/build/h5:/usr/share/nginx/html/h5:ro
     networks: [frontend]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ============================================================
   # 可观测性（profile observability）—— **默认不启动**
