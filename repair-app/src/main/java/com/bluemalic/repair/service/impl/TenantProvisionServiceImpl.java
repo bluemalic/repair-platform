@@ -19,7 +19,6 @@ import com.bluemalic.repair.entity.TenantSsoConfig;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TenantSsoConfigMapper;
-import com.bluemalic.repair.mapper.TenantUsageMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.bluemalic.repair.service.AuditService;
 import com.bluemalic.repair.service.TenantProvisionService;
@@ -28,7 +27,6 @@ import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TenantAdminVO;
-import com.bluemalic.repair.vo.TenantUsageVO;
 import com.bluemalic.repair.vo.TenantVO;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,19 +74,8 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 .collect(Collectors.toMap(TenantSsoConfig::getTenantId, config -> config));
     }
 
-    /** 本页租户里某类账号的数量；tenantIds 为空时不查库 */
-    private Map<Long, Long> usageByType(List<Long> tenantIds, UserType type) {
-        if (tenantIds.isEmpty()) {
-            return Map.of();
-        }
-        return tenantUsageMapper.countByTenant(tenantIds).stream()
-                .filter(usage -> Integer.valueOf(type.getCode()).equals(usage.getUserType()))
-                .collect(Collectors.toMap(TenantUsageVO::getTenantId, TenantUsageVO::getAccountCount));
-    }
-
     private final TenantMapper tenantMapper;
     private final SysUserMapper sysUserMapper;
-    private final TenantUsageMapper tenantUsageMapper;
 
     private final TenantSsoConfigMapper tenantSsoConfigMapper;
     private final AccountService accountService;
@@ -118,18 +105,10 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                 new Page<>(Paging.clamp(pageNum), Paging.clamp(pageSize)),
                 query.orderByDesc(Tenant::getId));
 
-        // 配额用量：**还没搬的学校**在平台库一次分组查完；**已经搬到自己库的学校**得去它自己的库里数
-        // （账号跟着学校走，平台库里没有它们的行）——所以这里是"一批 + 零散几个"的混合口径（ADR-021）
-        List<Long> legacyIds = page.getRecords().stream()
-                .filter(tenant -> tenant.getDbSchema() == null)
-                .map(Tenant::getId)
-                .toList();
-        Map<Long, Long> students = new HashMap<>(usageByType(legacyIds, UserType.STUDENT));
-        Map<Long, Long> workers = new HashMap<>(usageByType(legacyIds, UserType.WORKER));
+        // 配额用量：账号跟着学校走，所有学校都去它自己的库里数（ADR-026 收口后没有“存量租户在平台库”）
+        Map<Long, Long> students = new HashMap<>();
+        Map<Long, Long> workers = new HashMap<>();
         for (Tenant tenant : page.getRecords()) {
-            if (tenant.getDbSchema() == null) {
-                continue;
-            }
             students.put(tenant.getId(), countAccountsInTenant(tenant, UserType.STUDENT));
             workers.put(tenant.getId(), countAccountsInTenant(tenant, UserType.WORKER));
         }
@@ -265,9 +244,12 @@ public class TenantProvisionServiceImpl implements TenantProvisionService {
                         .eq(SysUser::getUserType, type.getCode())));
     }
 
-    /** 租户行的 db_schema → 路由键（null = 还没搬，数据仍在平台库） */
+    /** 租户行的 db_schema → 路由键；ADR-026 收口后学校行必须有库名 */
     private static String routingKeyOf(Tenant tenant) {
-        return tenant.getDbSchema() == null ? TenantRoutingContext.CONTROL : tenant.getDbSchema();
+        if (tenant.getDbSchema() == null || tenant.getDbSchema().isBlank()) {
+            throw new BizException(ErrorCode.TENANT_NOT_FOUND, "租户数据不完整，请联系平台运营");
+        }
+        return tenant.getDbSchema();
     }
 
     @Override

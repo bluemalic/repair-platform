@@ -21,6 +21,7 @@ public final class TenantConverter {
         vo.setMaxStudents(tenant.getMaxStudents());
         vo.setMaxWorkers(tenant.getMaxWorkers());
         vo.setStatus(tenant.getStatus());
+        vo.setDbSchema(tenant.getDbSchema());
         vo.setCreateTime(tenant.getCreateTime());
         return vo;
     }

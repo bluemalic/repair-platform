@@ -33,9 +33,13 @@
 -- `id = 0` 那一行是**平台自身**，不是学校：平台运营账号（sys_user.tenant_id = 0）靠它登录，
 -- 因为登录接口是按 tenantCode 查这张表定位租户的。与 sys_role.tenant_id = 0 表示"平台内置角色"
 -- 是同一条约定。它不出现在平台运营端的租户列表里（列表显式排除了 id = 0）。
-INSERT INTO `tenant` (`id`, `name`, `code`, `contact`, `phone`) VALUES
-    (0, '平台运营', 'platform', NULL, NULL),
-    (1, '广东海洋大学', 'gdou', '后勤管理处', '0759-0000000')
+--
+-- 演示学校 gdou 的 db_schema 用 `<control>`：它**与控制库同库**，属于演示夹具（fresh install
+-- 不需要先建库就能登录）；真实学校开通时一律写独立库名。删除 gdou 后，控制库里的 15 张业务表
+-- 才能按 ADR-026 清掉。
+INSERT INTO `tenant` (`id`, `name`, `code`, `contact`, `phone`, `db_schema`) VALUES
+    (0, '平台运营', 'platform', NULL, NULL, NULL),
+    (1, '广东海洋大学', 'gdou', '后勤管理处', '0759-0000000', '<control>')
 AS new ON DUPLICATE KEY UPDATE `id` = new.`id`;
 
 -- ---------- 角色（tenant_id = 0 表示平台内置）----------

@@ -146,10 +146,12 @@ public class DemoResetServiceImpl implements DemoResetService {
         }
 
         // 数据库部分一个事务；对象存储的清理放到提交之后（见类注释第 3 条）。
-        // 演示数据写进**这所学校自己的库**（搬家之后它就不在平台库了）；还没搬家的存量租户仍是平台库。
-        // 路由键在这里解析：租户行刚查出来，`db_schema` 就是"现在"的答案
-        String routingKey = tenant.getDbSchema() == null
-                ? TenantRoutingContext.CONTROL : tenant.getDbSchema();
+        // 演示数据写进**这所学校自己的库**（ADR-026 收口后没有“存量租户在平台库”）
+        String routingKey = tenant.getDbSchema();
+        if (routingKey == null || routingKey.isBlank()) {
+            throw new IllegalStateException("演示租户缺少 db_schema：tenantId=" + tenantId
+                    + "（ADR-026 收口后学校行必须有独立库）");
+        }
         Result db = TenantRoutingContext.call(routingKey,
                 () -> new TransactionTemplate(transactionManager).execute(status -> resetDatabase(tenantId)));
         int purged = fileStorageService.purgeTenant(tenantId);

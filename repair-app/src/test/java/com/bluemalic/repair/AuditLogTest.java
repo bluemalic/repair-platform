@@ -9,6 +9,7 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.mapper.AuditLogMapper;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.service.AccountService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -287,6 +288,8 @@ class AuditLogTest {
         tenant.setName("审计隔离测试学校");
         tenant.setCode(code);
         tenant.setStatus(1);
+        // 这些租户的数据就插在平台库（测试隔离用），显式标成控制库路由键，不写隐式回落
+        tenant.setDbSchema(TenantRoutingContext.CONTROL + ":" + code);
         tenantMapper.insert(tenant);
         return tenant.getId();
     }

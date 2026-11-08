@@ -15,19 +15,20 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 「这个学校的数据在哪个库」——租户目录（阶段 6 · ADR-021）。
+ * 「这个学校的数据在哪个库」——租户目录（阶段 6 · ADR-021；阶段 3 收口见 ADR-026）。
  *
- * <p>答案来自平台库的 `tenant.db_schema`：为空 = 还没搬，数据仍在平台库（过渡期的正常状态）；
- * 有值 = 已经在这个学校自己的库里。
+ * <p>答案来自平台库的 `tenant.db_schema`：**学校行必须有库名**（ADR-026 收口后不再允许
+ * “数据还在平台库”的过渡态）；只有平台自身（id = 0）走控制库。
  *
  * <p><b>这是全链路唯一一处"把 tenantId 翻译成库名"的地方</b>，也是 fail-closed 的落点：
- * 租户解析不出来（行不存在）就**直接抛错**，绝不回落到平台库。宁可让这一个请求失败并留下日志，
- * 也不能让某所学校的数据被写进另一个库里——后者不会报错，只会等到有人发现数字不对。
+ * 租户解析不出来（行不存在 / 学校行 db_schema 为空）就**直接抛错**，绝不回落到平台库。
+ * 宁可让这一个请求失败并留下日志，也不能让某所学校的数据被写进另一个库里——后者不会报错，
+ * 只会等到有人发现数字不对。
  *
  * <p><b>为什么缓存，以及缓存为什么可以没有 TTL</b>：每次请求都要用它（拦截器里），
  * 而它一天也不会变一次。变化只有两个来源：开通学校（本进程自己做的，做完就
- * {@link #refresh}）、搬迁切换（阶段 6 第 3 步，走停写窗口并重启应用）。单实例部署下，
- * 这条缓存的失效是明确的；加了 TTL 反而会让"切换后多久生效"变成一个说不清的问题。
+ * {@link #refresh}）、以及运维改库名（必须重启应用）。单实例部署下，这条缓存的失效是明确的；
+ * 加了 TTL 反而会让"切换后多久生效"变成一个说不清的问题。
  */
 @Slf4j
 @Component
@@ -63,14 +64,23 @@ public class TenantSchemaCatalog {
     }
 
     /**
-     * 已经搬到独立库的学校：tenantId → 库名。启动时给每个库里跑一次迁移要用它
+     * 所有学校：tenantId → 库名。启动时给每个库里跑一次迁移要用它
      * （`tenant` 表只在平台库，所以这个读必须钉在平台库上）。
      */
     public Map<Long, String> provisionedSchemas() {
         List<Tenant> tenants = TenantRoutingContext.callControl(() -> tenantMapper.selectList(
-                Wrappers.<Tenant>lambdaQuery().isNotNull(Tenant::getDbSchema)));
+                Wrappers.<Tenant>lambdaQuery().ne(Tenant::getId, PLATFORM_TENANT_ID)));
         Map<Long, String> result = new LinkedHashMap<>();
         for (Tenant tenant : tenants) {
+            if (tenant.getDbSchema() == null || tenant.getDbSchema().isBlank()) {
+                log.error("学校行缺少 db_schema，拒绝启动迁移 tenantId={} code={}", tenant.getId(), tenant.getCode());
+                throw new BizException(ErrorCode.TENANT_NOT_FOUND, "租户数据不完整，请联系平台运营");
+            }
+            // 演示/测试租户用 <control> 或 <control>:xxx 与控制库同库：它们不是独立租户库，
+            // 不能进逐库迁移/扫描列表
+            if (TenantRoutingContext.isControlKey(tenant.getDbSchema())) {
+                continue;
+            }
             result.put(tenant.getId(), tenant.getDbSchema());
         }
         return result;
@@ -84,9 +94,10 @@ public class TenantSchemaCatalog {
             log.error("登录态里的租户在平台库找不到 tenantId={}（账号可能已被停用/删除）", tenantId);
             throw new BizException(ErrorCode.TENANT_NOT_FOUND, "登录状态已失效，请重新登录");
         }
-        if (tenant.getDbSchema() == null) {
-            // 存量租户：还没搬，数据就在平台库。这是**明确的状态**，不是兜底
-            return TenantRoutingContext.CONTROL;
+        if (tenant.getDbSchema() == null || tenant.getDbSchema().isBlank()) {
+            // ADR-026 收口后学校行必须有库；为空是数据不完整，不是"还在平台库"的正常状态
+            log.error("学校行缺少 db_schema tenantId={} code={}", tenantId, tenant.getCode());
+            throw new BizException(ErrorCode.TENANT_NOT_FOUND, "租户数据不完整，请联系平台运营");
         }
         return tenant.getDbSchema();
     }
