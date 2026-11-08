@@ -17,6 +17,7 @@ import com.bluemalic.repair.mapper.TicketCategoryMapper;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -382,6 +383,7 @@ class StatisticsExportTest {
         tenant.setCode("test-exp-t2");
         tenant.setName("导出测试租户");
         tenant.setStatus(1);
+        tenant.setDbSchema(TenantRoutingContext.CONTROL + ":test-exp-t2");
         tenantMapper.insert(tenant);
         ticket(tenant.getId(), "2020-03-10", 10, 20, 1, 1, 1, null);
     }

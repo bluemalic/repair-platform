@@ -48,7 +48,7 @@ public class TenantRoutingDataSource extends AbstractRoutingDataSource {
     @Override
     protected DataSource determineTargetDataSource() {
         String key = TenantRoutingContext.currentKey();
-        if (key == null || TenantRoutingContext.CONTROL.equals(key)) {
+        if (key == null || TenantRoutingContext.isControlKey(key)) {
             return controlDataSource;
         }
         return registry.dataSourceFor(key);

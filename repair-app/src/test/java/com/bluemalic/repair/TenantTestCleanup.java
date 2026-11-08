@@ -116,9 +116,9 @@ public class TenantTestCleanup {
     /**
      * 带 `tenant_id` 的租户侧表（清理时要按租户删一遍）。
      *
-     * <p>与 `TenantDataMigrator` 的搬运计划是同一批表，但**不能共用那份清单**：那里的两条过滤条件
-     * 是按引用链写的（`sys_user_role` / `sys_role_permission` 没有 `tenant_id` 列），
-     * 直接拿去拼 DELETE 会报"未知列"。所以这里显式列一遍，改表结构时两处一起看。
+     * <p>只用于测试清理：显式列一遍是因为 `sys_user_role` / `sys_role_permission` 没有 `tenant_id`，
+     * 要按各自的引用链删；改表结构时这里要一起看。平台库里的业务表只服务演示学校 gdou，
+     * 真实学校的数据随 `DROP DATABASE` 一起消失。
      */
     private static final java.util.List<String> TENANT_SIDE_TABLES = java.util.List.of(
             "building", "worker_building", "worker_skill", "ticket_category", "repair_code",

@@ -44,6 +44,17 @@ public final class TenantRoutingContext {
         return KEY.get();
     }
 
+    /**
+     * 是不是控制库的路由键。
+     *
+     * <p>{@link #CONTROL} 是标准值；`<control>:xxx` 是**测试/演示夹具**用的变体——
+     * 多个测试租户都要落在平台库，但 `tenant.db_schema` 有唯一键，不能都写 `<control>`。
+     * 数据源遇到这个前缀一律回控制库；生产租户不会用这个前缀（库名白名单不允许尖括号）。
+     */
+    public static boolean isControlKey(String key) {
+        return key != null && (key.equals(CONTROL) || key.startsWith(CONTROL + ":"));
+    }
+
     public static void set(String key) {
         KEY.set(key);
     }

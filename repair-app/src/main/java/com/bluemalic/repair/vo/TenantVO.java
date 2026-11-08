@@ -50,6 +50,10 @@ public class TenantVO {
 
     private Integer status;
 
+    /** 租户库名（平台运营诊断用；ADR-026 收口后学校行必有值） */
+    @Schema(description = "租户库名")
+    private String dbSchema;
+
     @Schema(description = "开通时间")
     private LocalDateTime createTime;
 }

@@ -8,6 +8,7 @@ import com.bluemalic.repair.entity.TicketEvaluation;
 import com.bluemalic.repair.entity.TicketLog;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.mapper.BuildingMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketCategoryMapper;
@@ -286,6 +287,7 @@ class StatisticsTest {
         tenant.setCode("test-tenant-2");
         tenant.setName("统计测试租户");
         tenant.setStatus(1);
+        tenant.setDbSchema(TenantRoutingContext.CONTROL + ":test-tenant-2");
         tenantMapper.insert(tenant);
         ticket(tenant.getId(), "2020-01-10", 10, 20, 1, 1, 1, null);
     }

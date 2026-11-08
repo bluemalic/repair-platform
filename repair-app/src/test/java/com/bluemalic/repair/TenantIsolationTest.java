@@ -8,6 +8,7 @@ import com.bluemalic.repair.entity.Tenant;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.SysUserRoleMapper;
+import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -153,6 +154,8 @@ class TenantIsolationTest {
         Tenant created = new Tenant();
         created.setCode(code);
         created.setName("隔离测试租户");
+        // 这些租户的数据就插在平台库（测试隔离用），显式标成控制库路由键，不写隐式回落
+        created.setDbSchema(TenantRoutingContext.CONTROL + ":" + code);
         tenantMapper.insert(created);
         return created.getId();
     }
