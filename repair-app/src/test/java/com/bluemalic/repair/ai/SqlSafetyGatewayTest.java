@@ -333,6 +333,22 @@ class SqlSafetyGatewayTest {
     }
 
     @Test
+    void rejectsSelectStarBecauseItBypassesSensitiveColumnCheck() {
+        // 词法敏感列检查看不到 *，所以 SELECT * FROM sys_user 会绕过 phone/password 黑名单
+        assertRejected("SELECT * FROM sys_user", "不允许 SELECT *");
+        assertRejected("SELECT u.* FROM sys_user u", "不允许 SELECT *");
+    }
+
+    @Test
+    void rejectsLockingSelect() {
+        // 只读账号挡的是写权限，不是锁；锁定查询会拖住业务事务
+        assertRejected("SELECT id FROM ticket FOR UPDATE", "不允许 FOR UPDATE");
+        assertRejected("SELECT id FROM ticket FOR SHARE", "不允许 FOR UPDATE");
+        // jsqlparser 5.2 解析不了 MySQL 的 LOCK IN SHARE MODE，走的是解析失败路径
+        assertRejected("SELECT id FROM ticket LOCK IN SHARE MODE", "无法解析");
+    }
+
+    @Test
     void rejectsIntoOutfile() {
         // 这是写文件不是查询，只读账号挡不住它。
         // 实测：jsqlparser 5.2 解析不了 INTO OUTFILE，所以走的是"无法解析"这条路径；
