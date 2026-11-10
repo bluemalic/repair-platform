@@ -28,6 +28,7 @@ COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
 COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
 COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
 COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
+COPY repair-ticket-service/pom.xml repair-ticket-service/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
