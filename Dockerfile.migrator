@@ -1,0 +1,50 @@
+# ================= db-migrator 镜像（阶段 3.2 · ADR-024）=================
+# 一次性作业：控制库 + 每个租户库的 Flyway 迁移跑到最新，跑完退出。
+# 发布流程里在“重启服务”之前跑它；exit code 非 0 时中止发布。
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
+COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
+COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
+COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+# migrator 依赖 common → 迁移脚本与 tenant 工具类都在那里
+COPY repair-domain/src ./repair-domain/src
+COPY repair-common/src ./repair-common/src
+COPY repair-db-migrator/src ./repair-db-migrator/src
+RUN mvn -B clean package -DskipTests -pl repair-db-migrator -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+ENV SPRING_PROFILES_ACTIVE=migrator
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=builder /build/repair-db-migrator/target/*-exec.jar app.jar
+
+# 没有端口：一次性进程，跑完即退出
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=70 \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]

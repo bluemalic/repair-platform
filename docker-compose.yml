@@ -332,6 +332,162 @@ services:
           memory: ${TIMEOUT_MEM_LIMIT:-384M}
 
   # ============================================================
+  # 阶段 3.2 拆出的两个服务 + 迁移作业（profile: services）
+  # ============================================================
+  #
+  # **lite 形态不启这三个容器**：identity / platform 的 Bean 已经在 app 进程里装配
+  # （app 依赖它们的普通 jar），网关把对应前缀指向 app 即可。
+  # 只有本地 full 才 `--profile services` 起独立进程，用来验证"拆开也能跑"。
+  #
+  # 三者都不 publish 端口：请求只能从网关进来（docs/03 §4.1 规则 2）。
+  identity:
+    build:
+      context: .
+      dockerfile: Dockerfile.identity
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-identity-service:latest
+    container_name: repair-identity-service
+    restart: unless-stopped
+    profiles: ["services"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: identity
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${IDENTITY_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 内部只读接口的 token：空 = 端点直接 404（默认不开）
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
+      NACOS_ADDR: nacos:8848
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    # 接 frontend 是给 Nacos 注册用的：gateway 在 frontend 网段，必须能连到它
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8081"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${IDENTITY_MEM_LIMIT:-384M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  platform:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-platform-service:latest
+    container_name: repair-platform-service
+    restart: unless-stopped
+    profiles: ["services"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: platform
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${PLATFORM_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
+      NACOS_ADDR: nacos:8848
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${PLATFORM_MEM_LIMIT:-384M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 一次性作业：restart: "no"，跑完就退出。发布时先跑它，再重启服务。
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrator
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-db-migrator:latest
+    container_name: repair-db-migrator
+    restart: "no"
+    profiles: ["services"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: migrator
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          memory: ${MIGRATOR_MEM_LIMIT:-256M}
+
+  # ============================================================
   # Nacos（阶段 2 · ADR-024/025）—— 只做服务发现，不做配置中心
   # 启动：docker compose --profile nacos up -d nacos
   # 控制台 http://127.0.0.1:8848/nacos（standalone、本地/演示用，未开鉴权）
@@ -381,6 +537,11 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       GATEWAY_APP_URI: ${GATEWAY_APP_URI:-http://app:8080}
+      # 阶段 3.2：lite 形态把身份域与平台运营域都指向 app（合并进程）。
+      # full 形态由 docker-compose.full.yml 覆盖成 lb://repair-identity / lb://repair-platform。
+      GATEWAY_IDENTITY_URI: ${GATEWAY_IDENTITY_URI:-http://app:8080}
+      GATEWAY_PLATFORM_URI: ${GATEWAY_PLATFORM_URI:-http://app:8080}
+      GATEWAY_HMAC_SECRET: ${GATEWAY_HMAC_SECRET:-}
       NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
       NACOS_SERVER_ADDR: nacos:8848
     entrypoint:
