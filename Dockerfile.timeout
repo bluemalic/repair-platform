@@ -26,12 +26,16 @@ COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
 COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
 COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
 COPY repair-ticket-service/pom.xml repair-ticket-service/pom.xml
+COPY repair-timeout-api/pom.xml repair-timeout-api/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
 
 COPY repair-common/src ./repair-common/src
 COPY repair-domain/src ./repair-domain/src
 COPY repair-notification-service/src ./repair-notification-service/src
+COPY repair-timeout-api/src ./repair-timeout-api/src
+COPY repair-identity-service/src ./repair-identity-service/src
+COPY repair-ticket-service/src ./repair-ticket-service/src
 COPY repair-timeout-service/src ./repair-timeout-service/src
 RUN mvn -B clean package -DskipTests -pl repair-timeout-service -am
 

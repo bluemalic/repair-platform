@@ -459,6 +459,66 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 工单域（阶段 3.4 · ADR-035）：只依赖 timeout-api，不依赖 timeout-service
+  ticket:
+    build:
+      context: .
+      dockerfile: Dockerfile.ticket
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-ticket-service:latest
+    container_name: repair-ticket-service
+    restart: unless-stopped
+    profiles: ["services"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ticket
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${TICKET_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
+      NACOS_ADDR: nacos:8848
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8083"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${TICKET_MEM_LIMIT:-384M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # 一次性作业：restart: "no"，跑完就退出。发布时先跑它，再重启服务。
   migrator:
     build:
@@ -541,6 +601,8 @@ services:
       # full 形态由 docker-compose.full.yml 覆盖成 lb://repair-identity / lb://repair-platform。
       GATEWAY_IDENTITY_URI: ${GATEWAY_IDENTITY_URI:-http://app:8080}
       GATEWAY_PLATFORM_URI: ${GATEWAY_PLATFORM_URI:-http://app:8080}
+      # 工单域（阶段 3.4）：lite 同样指 app；full 覆盖成 lb://repair-ticket
+      GATEWAY_TICKET_URI: ${GATEWAY_TICKET_URI:-http://app:8080}
       GATEWAY_HMAC_SECRET: ${GATEWAY_HMAC_SECRET:-}
       NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
       NACOS_SERVER_ADDR: nacos:8848
