@@ -27,6 +27,14 @@ public class OutboxEvent {
     /** 事件类型，如 TICKET_STATUS_CHANGED */
     private String eventType;
 
+    /**
+     * 事件生产者（阶段 3.3）：ticket / identity / notification / ai。
+     *
+     * <p>多服务写同一个库的 outbox 之后，"这条事件是谁写的"不能再靠聚合类型推。
+     * 老数据与旧调用点默认 {@code ticket}（与迁移脚本的 DEFAULT 一致）。
+     */
+    private String producer;
+
     /** 事件唯一 ID；消费者按它做幂等 */
     private String eventId;
 

@@ -21,8 +21,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * mapper 不碰 service/controller。等边界继续变多再评估 ArchUnit。
  *
  * <p>阶段 2 起后端是多模块工程（ADR-024）：entity / mapper / 读模型 VO 在 {@code repair-domain}，
- * 统一返回体 / 错误码 / 枚举 / 租户路由在 {@code repair-common}，超时域与工单流转内核在
- * {@code repair-timeout-service}，所以扫描范围覆盖这些模块的源码根；
+ * 统一返回体 / 错误码 / 枚举 / 租户路由在 {@code repair-common}，超时执行在
+ * {@code repair-timeout-service}，工单流转内核在 {@code repair-ticket-service}，
+ * 身份与平台运营域各自独立。扫描范围覆盖这些模块的源码根；
  * surefire 的工作目录是 repair-app，兄弟模块用 {@code ../} 访问。
  */
 class ArchitectureBoundaryTest {
@@ -31,7 +32,11 @@ class ArchitectureBoundaryTest {
             Paths.get("src/main/java/com/bluemalic/repair"),
             Paths.get("../repair-common/src/main/java/com/bluemalic/repair"),
             Paths.get("../repair-domain/src/main/java/com/bluemalic/repair"),
-            Paths.get("../repair-timeout-service/src/main/java/com/bluemalic/repair"));
+            Paths.get("../repair-timeout-service/src/main/java/com/bluemalic/repair"),
+            // 阶段 3.2/3.3 抽出的服务同样受这三条边界约束
+            Paths.get("../repair-identity-service/src/main/java/com/bluemalic/repair"),
+            Paths.get("../repair-platform-service/src/main/java/com/bluemalic/repair"),
+            Paths.get("../repair-ticket-service/src/main/java/com/bluemalic/repair"));
 
     @Test
     void controllerDoesNotDependOnServiceImpl() {

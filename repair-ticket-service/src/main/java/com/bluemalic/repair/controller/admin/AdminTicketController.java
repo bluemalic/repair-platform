@@ -9,7 +9,6 @@ import com.bluemalic.repair.dto.TicketRejectDTO;
 import com.bluemalic.repair.dto.TicketSplitDTO;
 import com.bluemalic.repair.dto.TicketTransferDTO;
 import com.bluemalic.repair.interceptor.RateLimit;
-import com.bluemalic.repair.service.TicketAgentService;
 import com.bluemalic.repair.service.DispatchScoreService;
 import com.bluemalic.repair.service.TicketQueryService;
 import com.bluemalic.repair.service.TicketAssignmentService;
@@ -18,7 +17,6 @@ import com.bluemalic.repair.vo.DispatchCandidateVO;
 import com.bluemalic.repair.vo.PageResult;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
-import com.bluemalic.repair.vo.TriageSuggestionVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -48,7 +46,6 @@ public class AdminTicketController {
     private final TicketQueryService ticketQueryService;
     private final DispatchScoreService dispatchScoreService;
     private final TicketFlowService flowService;
-    private final TicketAgentService ticketAgentService;
 
     @Operation(summary = "全部工单", description = "支持状态 / 楼栋 / 类别筛选")
     @SaCheckPermission("ticket:list:all")
@@ -67,16 +64,6 @@ public class AdminTicketController {
     @GetMapping("/{id}")
     public Result<TicketDetailVO> detail(@Parameter(description = "工单ID") @PathVariable long id) {
         return Result.ok(ticketQueryService.detail(id));
-    }
-
-    @Operation(summary = "智能分诊建议",
-            description = "对一张工单给出建议类别 / 紧急度与一句理由。**只给建议，不写库**——"
-                    + "采纳与否由后勤决定（ADR-017）")
-    @SaCheckPermission("ticket:dispatch")
-    @RateLimit(key = "ai")
-    @PostMapping("/{id}/triage")
-    public Result<TriageSuggestionVO> triage(@Parameter(description = "工单ID") @PathVariable long id) {
-        return Result.ok(ticketAgentService.triage(id));
     }
 
     @Operation(summary = "派单候选",

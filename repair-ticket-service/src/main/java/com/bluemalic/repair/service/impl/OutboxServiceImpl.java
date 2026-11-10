@@ -24,8 +24,17 @@ public class OutboxServiceImpl implements OutboxService {
     private final OutboxEventMapper outboxEventMapper;
     private final ObjectMapper objectMapper;
 
+    /** 默认生产者：工单命令路径的既有调用点都走这里。 */
+    static final String DEFAULT_PRODUCER = "ticket";
+
     @Override
     public void append(Long tenantId, String aggregateType, long aggregateId, String eventType, Object payload) {
+        append(tenantId, aggregateType, aggregateId, eventType, payload, DEFAULT_PRODUCER);
+    }
+
+    @Override
+    public void append(Long tenantId, String aggregateType, long aggregateId, String eventType, Object payload,
+                       String producer) {
         // outbox_event.next_attempt_at 是 DATETIME（秒精度）：带纳秒写入会被 MySQL 四舍五入
         // 到下一秒，relay 紧接着跑时会把“刚写入的事件”判成未到期。截到秒，保证立即可投递。
         LocalDateTime now = LocalDateTime.now().withNano(0);
@@ -34,6 +43,7 @@ public class OutboxServiceImpl implements OutboxService {
         event.setAggregateType(aggregateType);
         event.setAggregateId(aggregateId);
         event.setEventType(eventType);
+        event.setProducer(producer == null || producer.isBlank() ? DEFAULT_PRODUCER : producer);
         event.setEventId(UUID.randomUUID().toString());
         event.setPayload(serialize(payload));
         event.setStatus(OutboxStatus.NEW.name());
@@ -41,8 +51,8 @@ public class OutboxServiceImpl implements OutboxService {
         event.setNextAttemptAt(now);
         event.setCreatedAt(now);
         outboxEventMapper.insert(event);
-        log.debug("Outbox 事件已登记 eventId={} tenantId={} type={} aggregate={}:{}",
-                event.getEventId(), event.getTenantId(), eventType, aggregateType, aggregateId);
+        log.debug("Outbox 事件已登记 eventId={} tenantId={} producer={} type={} aggregate={}:{}",
+                event.getEventId(), event.getTenantId(), event.getProducer(), eventType, aggregateType, aggregateId);
     }
 
     private String serialize(Object payload) {

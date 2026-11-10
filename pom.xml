@@ -81,6 +81,7 @@
         <module>repair-timeout-service</module>
         <module>repair-identity-service</module>
         <module>repair-platform-service</module>
+        <module>repair-ticket-service</module>
         <module>repair-db-migrator</module>
         <module>repair-gateway-service</module>
         <module>repair-app</module>

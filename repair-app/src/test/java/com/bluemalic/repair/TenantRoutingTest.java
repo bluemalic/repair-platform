@@ -178,11 +178,15 @@ class TenantRoutingTest {
                             + "' AND TABLE_NAME = '" + table + "'"))
                     .as("租户库里应当有 %s", table).isEqualTo(1);
         }
-        // 它跑的是**租户库自己那套脚本**（V1..V9 + R__seed 十条），与平台库的 V1..V21 不是同一个历史
-        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history"))
-                .as("租户库的迁移历史只有它自己那十条").isEqualTo(10);
-        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '21'"))
-                .as("平台库的版本号不该出现在租户库里").isZero();
+        // 它跑的是**租户库自己那套脚本**（db/tenant 的 V1.. + R__seed），与平台库的 V1..V24 不是同一个历史。
+        // 这里不写死条数：脚本每加一个版本就要改一次测试，等于把"易变数字"钉在断言里（AGENTS §8）。
+        long tenantMigrations = scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history");
+        long controlMigrations = scalar(TenantRoutingContext.CONTROL,
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL");
+        assertThat(tenantMigrations)
+                .as("租户库只跑自己那套脚本，条数应当少于平台库").isLessThan(controlMigrations);
+        assertThat(scalar(schema, "SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('21','23','24')"))
+                .as("平台库独有的版本号不该出现在租户库里").isZero();
 
         // ② 首个管理员只在租户库：同一句 SQL、两个库、两个答案
         assertThat(scalar(schema, "SELECT COUNT(*) FROM sys_user WHERE username = '" + adminUsername + "'"))
