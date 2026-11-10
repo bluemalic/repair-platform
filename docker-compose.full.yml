@@ -34,6 +34,7 @@ services:
       # 需要先 `--profile services` 把 identity / platform 起起来并注册到 Nacos。
       GATEWAY_IDENTITY_URI: lb://repair-identity
       GATEWAY_PLATFORM_URI: lb://repair-platform
+      GATEWAY_TICKET_URI: lb://repair-ticket
       NACOS_DISCOVERY_ENABLED: "true"
       NACOS_SERVER_ADDR: nacos:8848
     # app 同时接 backend/frontend，Nacos 里注册的是 frontend 网段的 IP；

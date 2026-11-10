@@ -1,0 +1,58 @@
+# ================= ticket-service 镜像（阶段 3.4 · ADR-035）=================
+# 工单域：状态机 / 派单 / 协作 / 评价 / 资产 / 基础数据 + 工单流转内核。
+# 只依赖 timeout-api（登记），**不依赖 timeout-service**（扫描/执行），所以能独立起进程。
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-api/pom.xml repair-timeout-api/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
+COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
+COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
+COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
+COPY repair-ticket-service/pom.xml repair-ticket-service/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+# -am 会一起构建 common / domain / notification / timeout-api / identity，源码都要在
+COPY repair-common/src ./repair-common/src
+COPY repair-domain/src ./repair-domain/src
+COPY repair-notification-service/src ./repair-notification-service/src
+COPY repair-timeout-api/src ./repair-timeout-api/src
+COPY repair-identity-service/src ./repair-identity-service/src
+COPY repair-ticket-service/src ./repair-ticket-service/src
+RUN mvn -B clean package -DskipTests -pl repair-ticket-service -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+ENV SPRING_PROFILES_ACTIVE=ticket
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=builder /build/repair-ticket-service/target/*-exec.jar app.jar
+
+EXPOSE 8083
+
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-55} \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/app/logs \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]
