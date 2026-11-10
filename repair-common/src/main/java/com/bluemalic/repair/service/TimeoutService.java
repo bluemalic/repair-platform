@@ -70,11 +70,29 @@ public interface TimeoutService {
      * <p>扫的是**所有库**（平台库 + 每个已搬家的学校库）：一个库一个租户上下文（ADR-021 第 3 步），
      * 返回的每条都带着"该去哪个租户处理"。
      */
-    List<DueTicket> backstopScanAccept();
+    List<DueTicket> backstopScanAccept(int shardIndex, int shardTotal);
 
     /** 兜底：直接扫库找"该升级却没在 ZSet 里"的处理中超期工单。 */
-    List<DueTicket> backstopScanProcess();
+    List<DueTicket> backstopScanProcess(int shardIndex, int shardTotal);
 
     /** 兜底：直接扫库找"该到期却没在 ZSet 里"的已完成工单。 */
-    List<DueTicket> backstopScanEval();
+    List<DueTicket> backstopScanEval(int shardIndex, int shardTotal);
+
+    /**
+     * 单实例版本（不分片）：scheduled 模式与测试用它。
+     *
+     * <p>分片的用意只有多实例调度时才有意义（XXL-JOB 把 shardTotal 个分片分给不同执行器）；
+     * 单实例轮询非要传 (0, n) 只会让每所学校每分钟少扫几次。
+     */
+    default List<DueTicket> backstopScanAccept() {
+        return backstopScanAccept(0, 1);
+    }
+
+    default List<DueTicket> backstopScanProcess() {
+        return backstopScanProcess(0, 1);
+    }
+
+    default List<DueTicket> backstopScanEval() {
+        return backstopScanEval(0, 1);
+    }
 }

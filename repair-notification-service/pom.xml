@@ -58,6 +58,13 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- 阶段 4 起本模块有两处值得单测的纯逻辑（投递编排的去重/退避/状态机），
+             用一个模块内的单元测试比塞进 app 的集成测试更快、也更能定位。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -13,12 +13,15 @@ public interface NotificationService {
     void send(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId);
 
     /**
-     * 与 {@link #send} 同样的写入，但失败时**抛出异常**。
+     * 与 {@link #send} 同样的写入，但失败时**抛出异常**，成功时返回站内信 ID。
      *
      * <p>给 MQ 消费者用：消费失败必须让本地事务回滚、并让 MQ 重投；
      * 业务同步路径继续用 {@link #send}（旁路，不阻塞主流程）。
+     *
+     * <p>返回 ID 是阶段 4 加的：投递记录（{@code notification_delivery.notification_id}）
+     * 要靠它把"这次外部通道投的是哪条站内信"接上。
      */
-    void sendOrThrow(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId);
+    Long sendOrThrow(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId);
 
     /**
      * 发给该租户的全部启用中后勤管理员（角色 code = ADMIN）——"提醒调度方"用的接收者解析。

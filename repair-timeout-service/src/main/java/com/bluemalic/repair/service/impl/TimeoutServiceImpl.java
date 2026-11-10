@@ -142,24 +142,25 @@ public class TimeoutServiceImpl implements TimeoutService {
     }
 
     @Override
-    public List<DueTicket> backstopScanAccept() {
+    public List<DueTicket> backstopScanAccept(int shardIndex, int shardTotal) {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.acceptDuration());
-        return scanOverdueTickets(List.of(TicketStatus.TO_ACCEPT.getCode()), cutoff);
+        return scanOverdueTickets(List.of(TicketStatus.TO_ACCEPT.getCode()), cutoff, shardIndex, shardTotal);
     }
 
     @Override
-    public List<DueTicket> backstopScanProcess() {
+    public List<DueTicket> backstopScanProcess(int shardIndex, int shardTotal) {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.processDuration());
         // 35 待料不暂停 SLA：它也属于"派出去还没完工"，Redis 丢任务后的兜底必须一起捞
         return scanOverdueTickets(
-                List.of(TicketStatus.PROCESSING.getCode(), TicketStatus.WAITING_MATERIAL.getCode()), cutoff);
+                List.of(TicketStatus.PROCESSING.getCode(), TicketStatus.WAITING_MATERIAL.getCode()), cutoff,
+                shardIndex, shardTotal);
     }
 
     @Override
-    public List<DueTicket> backstopScanEval() {
+    public List<DueTicket> backstopScanEval(int shardIndex, int shardTotal) {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.evalDuration());
         List<DueTicket> result = new ArrayList<>();
-        for (String routingKey : scanTargets()) {
+        for (String routingKey : scanTargets(shardIndex, shardTotal)) {
             List<String> members = TenantRoutingContext.call(routingKey,
                     () -> ticketEvaluationMapper.selectOverdueOpenTicketMembers(cutoff, SCAN_LIMIT));
             members.forEach(member -> result.add(parseMember(member)));
@@ -174,10 +175,20 @@ public class TimeoutServiceImpl implements TimeoutService {
      * 活数据在那儿（平台库里那份只是搬走时的旧副本——扫到也不怕：任务带着 `tenant_id`，
      * 处理时会落到那所学校**现在**的库上）。
      */
-    private List<String> scanTargets() {
+    private List<String> scanTargets(int shardIndex, int shardTotal) {
+        if (shardTotal < 1 || shardIndex < 0 || shardIndex >= shardTotal) {
+            throw new IllegalArgumentException("非法分片参数 shardIndex=" + shardIndex + " shardTotal=" + shardTotal);
+        }
         List<String> routingKeys = new ArrayList<>();
-        routingKeys.add(TenantRoutingContext.CONTROL);
+        // 平台库按 tenantId = 0 参与取模：分片数 > 1 时只有 0 号分片扫它
+        if (0 % shardTotal == shardIndex) {
+            routingKeys.add(TenantRoutingContext.CONTROL);
+        }
         for (Map.Entry<Long, String> entry : schemaCatalog.provisionedSchemas().entrySet()) {
+            long tenantId = entry.getKey() == null ? 0L : entry.getKey();
+            if (tenantId % shardTotal != shardIndex) {
+                continue;
+            }
             if (!routingKeys.contains(entry.getValue())) {
                 routingKeys.add(entry.getValue());
             }
@@ -191,9 +202,10 @@ public class TimeoutServiceImpl implements TimeoutService {
      * <p>状态过滤与单轮上限都必须带：漏了状态过滤，N 会单调增长（每分钟 N 次无效查询 + N 行日志）。
      * 查询本身不带 `tenant_id`——它要在一整个库里找，租户归属由返回的 `tenant_id` 列带回来。
      */
-    private List<DueTicket> scanOverdueTickets(List<Integer> statuses, LocalDateTime cutoff) {
+    private List<DueTicket> scanOverdueTickets(List<Integer> statuses, LocalDateTime cutoff,
+                                               int shardIndex, int shardTotal) {
         List<DueTicket> result = new ArrayList<>();
-        for (String routingKey : scanTargets()) {
+        for (String routingKey : scanTargets(shardIndex, shardTotal)) {
             List<DueTicket> found = TenantRoutingContext.call(routingKey, () -> {
                 Page<Ticket> page = ticketMapper.selectPage(new Page<>(1, SCAN_LIMIT, false),
                         Wrappers.<Ticket>lambdaQuery()

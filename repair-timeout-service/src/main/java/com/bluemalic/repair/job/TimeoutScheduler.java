@@ -1,33 +1,32 @@
 package com.bluemalic.repair.job;
 
-import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.config.TimeoutProperties;
-import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.TimeoutService;
-import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
+import com.bluemalic.repair.service.impl.TimeoutScanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 超时调度任务（M3，ADR-001 + docs/01 §超时）：
+ * 超时调度任务（M3，ADR-001 + docs/01 §超时；阶段 4 加"扫描触发方式"开关）：
  * <ul>
  *   <li>秒级消费 ZSet 到期任务（多实例去重逻辑在 TimeoutService 里，ZREM 返回值判定）</li>
- *   <li>每分钟兜底扫库，补 ZSet 丢失（Redis 重启）导致的漏处理</li>
+ *   <li>按 {@code repair.timeout.scan.trigger} 决定兜底扫描由谁触发：
+ *       {@code scheduled}（默认，每分钟一次）、{@code xxl-job}（由 {@link TimeoutScanHandler} 调）、
+ *       {@code off}（本地调试时彻底关掉）</li>
  * </ul>
  *
  * <p><b>delivery=mq 时（阶段 2 · ADR-024）</b>：秒级 ZSet 消费关闭（到期由 RocketMQ 定时消息触发，
- * timeout-service 的 {@code TimeoutMqConsumer} 执行）；兜底扫库仍按 {@code backstop-enabled}
+ * timeout-service 的 {@code TimeoutMqConsumer} 执行）；兜底扫描仍按 {@code backstop-enabled}
  * 留在单体——它是消息丢失的最后一道防线。
  *
- * <p>这里只做"编排"：到期工单该做什么（自动关闭）由 {@link TicketTimeoutHandler#autoClose} 决定，
- * 调度器不直接碰库。
+ * <p>这里只做"编排"：到期工单该做什么由 {@code TimeoutScanService} 里的三个动作决定。
  *
  * <p><b>测试里必须关掉</b>（{@code repair.timeout.scheduler-enabled=false}，见测试注解
  * {@code @IntegrationTest}）：集成测试用 @Transactional 造数据，后台线程既看不到未提交数据，
@@ -40,8 +39,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TimeoutScheduler {
 
     private final TimeoutService timeoutService;
-    private final TicketTimeoutHandler timeoutHandler;
+    private final TimeoutScanService scanService;
     private final TimeoutProperties timeoutProperties;
+
+    /**
+     * 兜底扫描的触发方式（阶段 4 · ADR-029）。
+     *
+     * <p>为什么要有这个开关：2C2G 的 ops 节点上跑 XXL-JOB Admin 时，扫描由它的分片任务触发
+     * （多实例各扫一片）；而线上 lite 只有一个 timeout 进程，用 XXL-JOB 是额外的运维负担，
+     * 保持 {@code scheduled} 即可。
+     */
+    @Value("${repair.timeout.scan.trigger:scheduled}")
+    private String scanTrigger;
 
     /**
      * 任务名 → 上一次已经 WARN 过的失败信息（见 {@link #runQuietly}）。
@@ -55,7 +64,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[验收]", () -> closeDue(timeoutService.handleDueEval()));
+        runQuietly("消费到期任务[验收]", () -> scanService.closeDue(timeoutService.handleDueEval()));
     }
 
     /** 未接单提醒节点：到期仍无人接单 → 提醒调度方（docs/01 §超时）。 */
@@ -64,7 +73,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[接单]", () -> remindDue(timeoutService.handleDueAccept()));
+        runQuietly("消费到期任务[接单]", () -> scanService.remindDue(timeoutService.handleDueAccept()));
     }
 
     /** 未处理升级节点：派单超阈值仍未完工 → 升级提醒调度方（docs/01 §超时）。 */
@@ -73,7 +82,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[处理]", () -> escalateDue(timeoutService.handleDueProcess()));
+        runQuietly("消费到期任务[处理]", () -> scanService.escalateDue(timeoutService.handleDueProcess()));
     }
 
     /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet/MQ 路径（三个节点都扫）。 */
@@ -82,9 +91,11 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isBackstopEnabled()) {
             return;
         }
-        runQuietly("兜底扫描[验收]", () -> closeDue(timeoutService.backstopScanEval()));
-        runQuietly("兜底扫描[接单]", () -> remindDue(timeoutService.backstopScanAccept()));
-        runQuietly("兜底扫描[处理]", () -> escalateDue(timeoutService.backstopScanProcess()));
+        if (!"scheduled".equalsIgnoreCase(scanTrigger)) {
+            // xxl-job 模式由 TimeoutScanHandler 按分片触发；off 模式什么都不做
+            return;
+        }
+        runQuietly("兜底扫描", () -> scanService.scan(0, 1));
     }
 
     /**
@@ -110,50 +121,6 @@ public class TimeoutScheduler {
                 log.warn("超时调度[{}]本轮失败（同类失败此后只记 DEBUG，恢复后重新提醒）：{}", task, message);
             } else {
                 log.debug("超时调度[{}]仍失败：{}", task, message);
-            }
-        }
-    }
-
-    private void closeDue(List<DueTicket> due) {
-        for (DueTicket task : due) {
-            try {
-                timeoutHandler.autoClose(task);
-                log.info("超时自动关闭 tenantId={} ticketId={}", task.tenantId(), task.ticketId());
-            } catch (BizException e) {
-                // 状态已不是 50（人工关闭/撤单/已被另一实例处理）→ 正常跳过，不算失败
-                log.info("超时任务跳过（工单已流转） tenantId={} ticketId={} reason={}",
-                        task.tenantId(), task.ticketId(), e.getMessage());
-            } catch (Exception e) {
-                // 单工单失败不影响本轮其余任务
-                log.warn("超时自动关闭失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
-            }
-        }
-    }
-
-    private void remindDue(List<DueTicket> due) {
-        for (DueTicket task : due) {
-            try {
-                // 幂等与"是否还该提醒"都在 remindAcceptTimeout 里判定（状态 + ticket_log）；
-                // 按租户钉库也在 handler 里做（任务带着租户，见 DueTicket）
-                timeoutHandler.remindAcceptTimeout(task);
-            } catch (BizException e) {
-                log.info("接单提醒跳过（工单已流转） tenantId={} ticketId={} reason={}",
-                        task.tenantId(), task.ticketId(), e.getMessage());
-            } catch (Exception e) {
-                log.warn("接单提醒失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
-            }
-        }
-    }
-
-    private void escalateDue(List<DueTicket> due) {
-        for (DueTicket task : due) {
-            try {
-                timeoutHandler.escalateProcessTimeout(task);
-            } catch (BizException e) {
-                log.info("处理超时升级跳过（工单已流转） tenantId={} ticketId={} reason={}",
-                        task.tenantId(), task.ticketId(), e.getMessage());
-            } catch (Exception e) {
-                log.warn("处理超时升级失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
             }
         }
     }

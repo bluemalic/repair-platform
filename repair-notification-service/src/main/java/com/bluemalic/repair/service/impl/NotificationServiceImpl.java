@@ -47,9 +47,9 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public void sendOrThrow(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId) {
+    public Long sendOrThrow(Long tenantId, Long receiverId, String type, String title, String content, Long ticketId) {
         if (receiverId == null) {
-            return;
+            return null;
         }
         String safeTitle = TextLimits.truncate(title, TextLimits.NOTIFICATION_TITLE);
         String safeContent = TextLimits.truncate(content, TextLimits.NOTIFICATION_CONTENT);
@@ -68,6 +68,7 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setTicketId(ticketId);
         notification.setIsRead(0);
         notificationMapper.insert(notification);
+        return notification.getId();
     }
 
     @Override
