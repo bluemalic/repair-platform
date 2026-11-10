@@ -1,9 +1,9 @@
 package com.bluemalic.repair.tenancy;
 
-import com.bluemalic.repair.ai.AiReadOnlyAccountBootstrap;
 import com.bluemalic.repair.config.TenancyProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.flywaydb.core.Flyway;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -48,7 +48,11 @@ public class TenantDatabaseProvisioner {
 
     private final TenantSchemaCatalog catalog;
 
-    private final AiReadOnlyAccountBootstrap aiAccountBootstrap;
+    /**
+     * 只读账号授权是 ai 服务的事，这里只认接口（见 {@link ReadOnlyAccountGranter}）。
+     * 用 {@link ObjectProvider} 是因为 identity / platform / migrator 进程里根本没有这个实现。
+     */
+    private final ObjectProvider<ReadOnlyAccountGranter> readOnlyAccountGranter;
 
     private final DataSource controlDataSource;
 
@@ -60,14 +64,14 @@ public class TenantDatabaseProvisioner {
 
     public TenantDatabaseProvisioner(TenancyProperties properties,
                                      TenantSchemaCatalog catalog,
-                                     AiReadOnlyAccountBootstrap aiAccountBootstrap,
+                                     ObjectProvider<ReadOnlyAccountGranter> readOnlyAccountGranter,
                                      @Qualifier("controlDataSource") DataSource controlDataSource,
                                      @Value("${spring.datasource.url}") String controlUrl,
                                      @Value("${spring.datasource.username}") String username,
                                      @Value("${spring.datasource.password}") String password) {
         this.properties = properties;
         this.catalog = catalog;
-        this.aiAccountBootstrap = aiAccountBootstrap;
+        this.readOnlyAccountGranter = readOnlyAccountGranter;
         this.controlDataSource = controlDataSource;
         this.controlUrl = controlUrl;
         this.username = username;
@@ -123,8 +127,18 @@ public class TenantDatabaseProvisioner {
         return databases;
     }
 
-    /** 把只读账号的授权刷成"全部库"（幂等；没配账号则空操作；失败只记日志）。 */
+    /**
+     * 把只读账号的授权刷成"全部库"（幂等；进程里没有 ai 服务时跳过；失败只记日志）。
+     *
+     * <p>名字里的 AI 留在调用点（{@code TenantSchemaBootstrap} / 开通流程）看得懂；
+     * 具体实现走 SPI，common 不认识 ai 的配置。
+     */
     public void ensureAiReadOnlyOnAllDatabases() {
+        ReadOnlyAccountGranter granter = readOnlyAccountGranter.getIfAvailable();
+        if (granter == null) {
+            log.debug("当前进程没有只读账号授权实现（非 ai 服务），跳过授权");
+            return;
+        }
         List<String> databases;
         try {
             databases = allDatabases();
@@ -133,7 +147,7 @@ public class TenantDatabaseProvisioner {
             log.error("取租户库清单失败，跳过只读账号授权（AI 问数可能受影响）", e);
             return;
         }
-        aiAccountBootstrap.ensureAccountOnDatabases(databases);
+        granter.grantOnDatabases(databases);
     }
 
     /** 平台库的库名（从连接上取，不让配置里重复写一遍） */

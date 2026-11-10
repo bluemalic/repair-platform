@@ -1,0 +1,27 @@
+# ============================================================
+# 平台运营域服务（full 形态独立进程）
+# ============================================================
+#
+# 启动：java -jar repair-platform-service-exec.jar --spring.profiles.active=platform
+#
+# 与 identity 一样：不跑 Flyway、不做启动期逐库同步（都归 repair-db-migrator）。
+# 但**开通学校**时它会主动建库并跑 db/tenant —— 那是这个服务唯一的 DDL 职责。
+# ============================================================
+server:
+  port: ${PLATFORM_PORT:8082}
+
+spring:
+  application:
+    name: repair-platform
+  flyway:
+    enabled: false
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+
+repair:
+  tenancy:
+    bootstrap-enabled: false

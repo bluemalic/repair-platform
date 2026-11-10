@@ -1,0 +1,31 @@
+# ============================================================
+# 身份域服务（full 形态独立进程）
+# ============================================================
+#
+# 启动：java -jar repair-identity-service-exec.jar --spring.profiles.active=identity
+#
+# 几个刻意的取舍：
+#   · flyway 关闭：表结构由 repair-db-migrator 统一升级（服务不再各自迁移），
+#     lite 形态下由单体负责（那边保持 flyway 开启）。
+#   · tenancy.bootstrap-enabled=false：启动时逐库同步结构也归 migrator，
+#     这个进程不该在别人的库上跑 DDL。
+#   · 只监听内网：compose 里不 publish 端口，请求只能从网关进来。
+# ============================================================
+server:
+  port: ${IDENTITY_PORT:8081}
+
+spring:
+  application:
+    name: repair-identity
+  flyway:
+    enabled: false
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+
+repair:
+  tenancy:
+    bootstrap-enabled: false

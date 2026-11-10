@@ -70,6 +70,33 @@
             <artifactId>sa-token-core</artifactId>
             <version>${sa-token.version}</version>
         </dependency>
+        <!-- 阶段 3.2：登录校验拦截器（SaInterceptor / SaRouter）随 SaTokenConfigure 一起下沉到 common，
+             它不在 sa-token-core 里而在 Spring 适配包中。starter 的自动装配只对 SERVLET 应用生效，
+             notification / timeout 是 WebApplicationType.NONE，不会因此起容器。 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- PasswordEncoderConfig（BCrypt）被 identity 与单体共用。
+             只是加密工具包，不含过滤器链 —— AGENTS §3 已明确允许。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- 数据权限拦截器（DataPermissionInterceptor）依赖 MP 的 JSqlParser 适配层，
+             它从 3.5.9 起是独立坐标；common 里已有 jsqlparser 本体，但还缺这一层。 -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
+            <version>${mybatis-plus.version}</version>
+        </dependency>
+        <!-- TenantDatabaseProvisioner 用 Flyway API 跑租户库迁移（阶段 3.2 起它在 common）。
+             只引 core：MySQL 方言由使用它的服务自己引 flyway-mysql（版本由 Boot 管理）。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.github.jsqlparser</groupId>
             <artifactId>jsqlparser</artifactId>
