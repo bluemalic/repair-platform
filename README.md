@@ -205,33 +205,41 @@ cd miniapp-h5 && npm run build:h5      # 产物 dist/build/h5/（uni-app 的约�
 
 ```
 repair-platform/
-├── pom.xml              聚合 POM（Spring Boot parent + 模块列表，阶段 2 · ADR-024）
-├── repair-app/          单体应用（identity / ticket / knowledge + REST + 调度）
+├── pom.xml              聚合 POM（Spring Boot parent + 模块列表，阶段 2 · ADR-024 / 阶段 3.2 · ADR-032）
+├── repair-app/          单体应用（ticket / ai / 统计 + 基础数据；lite 形态还合并 identity 与 platform 的 Bean）
 │   ├── src/main/java/com/bluemalic/repair/
-│   │   ├── controller/      按端分包：student / worker / admin / platform
+│   │   ├── controller/      按端分包：student / worker / admin
 │   │   ├── service/         业务接口
 │   │   │   └── impl/        实现（工单按动作域拆成 Query / Flow / Assignment / Timeout + 共享件）
-│   │   ├── interceptor/     数据权限、鉴权、限流、平台域收口、首登强制改密
+│   │   ├── interceptor/     本进程专属拦截器（共享的数据权限处理器在 repair-common）
 │   │   ├── ai/              Schema 注入、SQL 生成、四层安全网关、问数编排与 SSE 流式
-│   │   ├── config/ tenancy/ 残余配置与租户建库/搬家（运行时租户路由已下沉 repair-common）
+│   │   ├── config/ tenancy/ 本进程专属配置与租户装配
 │   │   └── job/             超时调度、Outbox relay、事件记录清理、演示数据重置、平台账号引导
-│   ├── src/main/resources/db/   Flyway：V*.sql 是表结构的执行真相，R__seed.sql 是可重复执行的基础数据
 │   └── src/test/java/       单测与集成测试（测试数见 docs/00 或 CI，别在这里写死）
-├── repair-common/       共享库：Result / 错误码 / 枚举 / 租户路由 / 限流 / 指标 / 全局异常处理；
+├── repair-common/       共享库：Result / 错误码 / 枚举 / 租户路由 / 限流 / 指标 / 全局异常处理
+│   │                    + 登录校验 / 平台域收口 / 数据权限这套共享底座 + 身份头校验（GatewayHeaderFilter）
+│   ├── src/main/resources/db/   Flyway：migration/（平台库）与 tenant/（租户库）两套脚本，三个进程共用
 │   └── application.yml  所有服务共用一份默认配置（口令与 Key 仍只从环境变量读）
 ├── repair-domain/       共享库：entity / mapper（含 XML）/ 读模型 VO——数据访问层全体
 ├── repair-notification-service/  通知消费者独立进程（boot jar，Dockerfile.notification）；
 │   └── 通知写路径与单体共用本模块，delivery=sync 进程内直写 / =mq 走独立进程
 ├── repair-timeout-service/       超时域独立进程（秒级 ZSet 消费 + 兜底 + 三个超时动作）；
-│   └── 工单流转内核暂居本模块（命令路径与超时回调共用），阶段 3 拆 ticket-service 时归位
-├── repair-gateway-service/       API 网关（路由 + Sa-Token 校验 + 身份头注入，Dockerfile.gateway）；
-│   └── 不依赖 repair-common（WebFlux 不能带 spring-webmvc）；默认静态路由，Nacos 发现可开关
+│   └── 工单流转内核暂居本模块（命令路径与超时回调共用），阶段 3.3 拆 ticket-service 时归位
+├── repair-identity-service/      身份域（登录 / SSO / 账号 / 角色权限 / 审计，Dockerfile.identity）；
+│   └── 既是普通 jar（单体依赖 → lite 合并进程），也是独立进程（full，:8081）
+├── repair-platform-service/      平台运营域（开通 / 停用学校、统一认证配置，Dockerfile.platform）；
+│   └── 依赖 identity（开通时建首个管理员），独立进程 :8082
+├── repair-db-migrator/           迁移作业（控制库 + 每个租户库，Dockerfile.migrator）；
+│   └── WebApplicationType.NONE，跑完退出，失败非 0——full 发布时先跑它再重启服务
+├── repair-gateway-service/       API 网关（21 条显式路由 + Sa-Token 校验 + 身份头注入/可选签名，Dockerfile.gateway）；
+│   └── 不依赖 repair-common（WebFlux 不能带 spring-webmvc）；默认静态 URI，Nacos 发现可开关
 ├── docs/                00 全景 · 01 需求 · 02 数据库 · 03 接口 · 04 ADR · 05 部署 · 06 架构图 · 07 AI 评测集 · 08 压测报告 · 09 演示脚本
 ├── web-admin/           后勤管理端（Vue 3 + Element Plus + ECharts），产物 dist/
 ├── miniapp-h5/          学生 / 维修工端（uni-app），产物 dist/build/h5/
 ├── nginx/               nginx 配置（/ 与 /h5/ 两个静态目录 + /api 反代 + SSE 关缓冲）
 ├── scripts/             loadtest/ 压测生成器 · backup/ 每日备份（逐库 + 加密 + 异地）
-├── Dockerfile · Dockerfile.notification · Dockerfile.timeout · Dockerfile.gateway · docker-compose.yml
+├── Dockerfile · Dockerfile.notification · Dockerfile.timeout · Dockerfile.gateway
+│                  · Dockerfile.identity · Dockerfile.platform · Dockerfile.migrator · docker-compose.yml
 └── .github/workflows/   ci.yml（测试与打包）· deploy.yml（CD）· frontend-ci.yml · miniapp-ci.yml
 ```
 
