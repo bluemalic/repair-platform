@@ -6,7 +6,7 @@ import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.service.DueTicket;
 import com.bluemalic.repair.service.NotificationService;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import lombok.RequiredArgsConstructor;
@@ -44,7 +44,7 @@ public class TicketTimeoutHandler {
     private final TicketLookup lookup;
     private final TicketNoticePublisher noticePublisher;
     private final NotificationService notificationService;
-    private final TimeoutService timeoutService;
+    private final TimeoutRegistrar timeoutRegistrar;
     private final TimeoutRule timeoutRule;
     private final TenantSchemaCatalog schemaCatalog;
     private final PlatformTransactionManager transactionManager;
@@ -94,7 +94,7 @@ public class TicketTimeoutHandler {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         noticePublisher.notifyTransition(ticket, TicketAction.AUTO_CLOSE, null, null);
-        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
     }
     private void remindAcceptTimeoutInCurrentDatabase(long id) {
         Ticket ticket = lookup.requireTicket(id);

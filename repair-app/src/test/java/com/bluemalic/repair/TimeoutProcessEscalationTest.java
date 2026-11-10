@@ -14,7 +14,8 @@ import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.service.DueTicket;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
+import com.bluemalic.repair.service.TimeoutScanner;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -62,7 +63,9 @@ class TimeoutProcessEscalationTest {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private TimeoutService timeoutService;
+    private TimeoutRegistrar timeoutRegistrar;
+    @Autowired
+    private TimeoutScanner timeoutScanner;
 
     @Autowired
     private TicketTimeoutHandler ticketService;
@@ -77,7 +80,7 @@ class TimeoutProcessEscalationTest {
 
     @AfterEach
     void cleanZSetMembers() {
-        createdTickets.forEach(id -> timeoutService.cancel(id, TENANT_ID));
+        createdTickets.forEach(id -> timeoutRegistrar.cancel(id, TENANT_ID));
     }
 
     @Test
@@ -85,9 +88,9 @@ class TimeoutProcessEscalationTest {
         long adminId = givenAdmin();
         Ticket overdue = ticketAt(30, LocalDateTime.now().minusHours(49));
         createdTickets.add(overdue.getId());
-        timeoutService.registerProcessDeadline(overdue.getId(), TENANT_ID, Instant.now().minusSeconds(60));
+        timeoutRegistrar.registerProcessDeadline(overdue.getId(), TENANT_ID, Instant.now().minusSeconds(60));
 
-        timeoutService.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
+        timeoutScanner.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
 
         assertLogCount(overdue.getId(), TicketAction.PROCESS_TIMEOUT, 1);
         assertThat(noticesTo(adminId)).isEqualTo(1);
@@ -105,14 +108,14 @@ class TimeoutProcessEscalationTest {
         // 未到期：到期判定在扫描/队列侧
         Ticket fresh = ticketAt(30, LocalDateTime.now().minusMinutes(5));
         createdTickets.add(fresh.getId());
-        assertThat(timeoutService.backstopScanProcess()).extracting(DueTicket::ticketId)
+        assertThat(timeoutScanner.backstopScanProcess()).extracting(DueTicket::ticketId)
                 .doesNotContain(fresh.getId());
 
         // 已完工（40 待验收）：即使派单时间很早、队列也到期了，也不该升级
         Ticket finished = ticketAt(40, LocalDateTime.now().minusHours(49));
         createdTickets.add(finished.getId());
-        timeoutService.registerProcessDeadline(finished.getId(), TENANT_ID, Instant.now().minusSeconds(60));
-        timeoutService.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
+        timeoutRegistrar.registerProcessDeadline(finished.getId(), TENANT_ID, Instant.now().minusSeconds(60));
+        timeoutScanner.handleDueProcess().forEach(ticketService::escalateProcessTimeout);
         assertLogCount(finished.getId(), TicketAction.PROCESS_TIMEOUT, 0);
         assertThat(noticesTo(adminId)).isZero();
     }
@@ -123,7 +126,7 @@ class TimeoutProcessEscalationTest {
         Ticket ticket = ticketAt(30, dispatchAt);
         createdTickets.add(ticket.getId());
 
-        timeoutService.registerProcess(ticket.getId(), ticket.getTenantId(), ticket.getDispatchTime());
+        timeoutRegistrar.registerProcess(ticket.getId(), ticket.getTenantId(), ticket.getDispatchTime());
 
         // 成员是「租户|工单」（阶段 6 第 3 步 · ADR-021）：定时任务靠它知道去哪个库处理
         Double score = stringRedisTemplate.opsForZSet().score("ticket:timeout:PROCESS",
@@ -139,7 +142,7 @@ class TimeoutProcessEscalationTest {
     void backstopFindsOverdueProcessingTickets() {
         Ticket overdue = ticketAt(30, LocalDateTime.now().minusHours(49));
         createdTickets.add(overdue.getId());
-        assertThat(timeoutService.backstopScanProcess()).extracting(DueTicket::ticketId).contains(overdue.getId());
+        assertThat(timeoutScanner.backstopScanProcess()).extracting(DueTicket::ticketId).contains(overdue.getId());
     }
 
     // ==================== 工具 ====================

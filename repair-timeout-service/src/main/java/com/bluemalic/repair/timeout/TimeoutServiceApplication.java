@@ -5,6 +5,7 @@ import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.config.TenantDataSourceConfig;
 import com.bluemalic.repair.config.TenancyProperties;
 import com.bluemalic.repair.config.TimeoutMqConfig;
+import com.bluemalic.repair.config.TimeoutMqProducerConfig;
 import com.bluemalic.repair.config.TimeoutProperties;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.job.TimeoutScanHandler;
@@ -18,7 +19,8 @@ import com.bluemalic.repair.service.impl.TicketNoticePublisher;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import com.bluemalic.repair.service.impl.TicketTransitionSupport;
 import com.bluemalic.repair.service.impl.TimeoutScanService;
-import com.bluemalic.repair.service.impl.TimeoutServiceImpl;
+import com.bluemalic.repair.service.impl.TimeoutRegistrarImpl;
+import com.bluemalic.repair.service.impl.TimeoutScannerImpl;
 import com.bluemalic.repair.tenancy.TenantDataSourceRegistry;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import org.mybatis.spring.annotation.MapperScan;
@@ -64,7 +66,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         RocketMqProperties.class,
         TimeoutRule.class,
         TimeoutProperties.class,
-        TimeoutServiceImpl.class,
+        TimeoutScannerImpl.class,
+        TimeoutRegistrarImpl.class,
+        TimeoutMqProducerConfig.class,
         TimeoutScanService.class,
         TicketTimeoutHandler.class,
         TimeoutScheduler.class,

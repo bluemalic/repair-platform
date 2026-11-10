@@ -1,0 +1,28 @@
+# ============================================================
+# 工单域服务（full 形态独立进程）
+# ============================================================
+#
+# 启动：java -jar repair-ticket-service-exec.jar --spring.profiles.active=ticket
+#
+# 与 identity / platform 一样：不跑 Flyway、不做启动期逐库同步（都归 repair-db-migrator）。
+# 超时的"登记"由 repair-timeout-api 提供；扫描/执行仍在 timeout-service，
+# 所以本进程**不需要** timeout-service 的 Bean（ADR-035）。
+# ============================================================
+server:
+  port: ${TICKET_PORT:8083}
+
+spring:
+  application:
+    name: repair-ticket
+  flyway:
+    enabled: false
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+
+repair:
+  tenancy:
+    bootstrap-enabled: false

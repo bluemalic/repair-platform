@@ -10,7 +10,8 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TenantMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.DueTicket;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
+import com.bluemalic.repair.service.TimeoutScanner;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import com.bluemalic.repair.tenancy.TenantDatabaseProvisioner;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
@@ -55,7 +56,9 @@ class TimeoutTenantRoutingTest {
     private static final long ROLE_ADMIN = 3L;
 
     @Autowired
-    private TimeoutService timeoutService;
+    private TimeoutRegistrar timeoutRegistrar;
+    @Autowired
+    private TimeoutScanner timeoutScanner;
 
     @Autowired
     private TicketTimeoutHandler timeoutHandler;
@@ -144,14 +147,14 @@ class TimeoutTenantRoutingTest {
         });
 
         // ① 兜底扫描要扫到"别的库"里的超期工单，并带着正确的租户
-        List<DueTicket> scanned = timeoutService.backstopScanProcess().stream()
+        List<DueTicket> scanned = timeoutScanner.backstopScanProcess().stream()
                 .filter(task -> task.ticketId() == ticketId)
                 .toList();
         assertThat(scanned).as("兜底扫描必须遍历到已搬家的学校").containsExactly(new DueTicket(tenantId, ticketId));
 
         // ② 队列路径：登记（带租户）→ 消费 → 处理
-        timeoutService.registerProcessDeadline(ticketId, tenantId, Instant.now().minusSeconds(60));
-        List<DueTicket> due = timeoutService.handleDueProcess().stream()
+        timeoutRegistrar.registerProcessDeadline(ticketId, tenantId, Instant.now().minusSeconds(60));
+        List<DueTicket> due = timeoutScanner.handleDueProcess().stream()
                 .filter(task -> task.ticketId() == ticketId)
                 .toList();
         assertThat(due).as("成员里要带着租户").containsExactly(new DueTicket(tenantId, ticketId));

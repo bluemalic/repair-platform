@@ -28,7 +28,7 @@ import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.NotificationService;
 import com.bluemalic.repair.service.OutboxService;
 import com.bluemalic.repair.service.TicketFlowService;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
 import com.bluemalic.repair.vo.TicketDetailVO;
 import com.bluemalic.repair.vo.TicketVO;
 import lombok.RequiredArgsConstructor;
@@ -60,7 +60,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     private final TicketMapper ticketMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final NotificationService notificationService;
-    private final TimeoutService timeoutService;
+    private final TimeoutRegistrar timeoutRegistrar;
     private final TicketTransitionSupport transitions;
     private final TicketLookup lookup;
     private final TicketReferenceValidator referenceValidator;
@@ -175,7 +175,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         // 派单后的撤单会留下未接单/处理超时节点，必须一并撤掉；10 本来就没有节点，cancel 是幂等的
-        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
         // 已派单时告诉师傅"这单学生不修了"；10/80 没有师傅，接收人为空会静默跳过
         noticePublisher.notifyTransition(ticket, TicketAction.CANCEL, null, null);
         log.info("学生撤单 ticketId={} studentId={} fromStatus={}", id, studentId, ticket.getStatus());
@@ -196,8 +196,8 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 entity -> { }, dto.getReason());
         // 回到 30 处理中：重新登记"未处理升级"（基准仍是派单时间，口径不变）。
         // 40 待验收本身不挂任何超时节点，所以这里 cancel 只是防御：万一将来给它挂了节点也不会漏撤
-        timeoutService.cancel(id, ticket.getTenantId());
-        timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
         noticePublisher.notifyTransition(ticket, TicketAction.REWORK, null, "验收不通过：" + dto.getReason());
         log.info("验收不通过，打回重做 ticketId={} studentId={} reason={}", id, studentId, dto.getReason());
     }
@@ -228,7 +228,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 entity -> { });
         noticePublisher.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
-        timeoutService.registerEval(ticket.getId(), ticket.getTenantId());
+        timeoutRegistrar.registerEval(ticket.getId(), ticket.getTenantId());
     }
     public void accept(long id) {
         long workerId = StpUtil.getLoginIdAsLong();
@@ -247,8 +247,8 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 entity -> entity.setAcceptTime(LocalDateTime.now()));
         // 接单节点完成：撤掉未接单提醒；同时登记"未处理升级"。
         // 基准传派单时间（不是现在）：需求口径是"从派到完工"整体超期，与兜底扫描同基准
-        timeoutService.cancel(id, ticket.getTenantId());
-        timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
         noticePublisher.notifyTransition(ticket, TicketAction.ACCEPT, null, null);
     }
     public void arrive(long id, TicketArriveDTO dto) {
@@ -314,7 +314,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                     entity.setHandleMinutes(handleMinutes);
                 });
         // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
-        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
         noticePublisher.notifyTransition(ticket, TicketAction.FINISH, null, null);
         // 协作者完成的：主责得知道自己的单被完成了（他不会收到学生那条通知）
         if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
@@ -383,7 +383,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 },
                 entity -> { }, dto.getReason());
         // 师傅的活到此为止：处理超时节点撤掉，接下来等后勤拍板
-        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
         noticePublisher.notifyTransition(ticket, TicketAction.UNREPAIRABLE, null, "无法维修：" + dto.getReason());
         // 45 是**等后勤处理**的状态：通知本租户所有后勤，否则这张单会安静地停在那里
         notificationService.sendToTenantAdmins(ticket.getTenantId(), "TICKET_UNREPAIRABLE_ADMIN",
@@ -435,7 +435,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 },
                 entity -> entity.setRejectReason(reason));
         // 驳回后原节点作废（可能是未接单提醒，也可能是待验收的验收超时）；重新派单会重新登记
-        timeoutService.cancel(ticket.getId(), ticket.getTenantId());
+        timeoutRegistrar.cancel(ticket.getId(), ticket.getTenantId());
         log.info("驳回工单 ticketId={} operator={} reason={}", ticket.getId(), operatorId, reason);
     }
     public void close(long id) {
@@ -448,7 +448,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> entity.setCloseTime(LocalDateTime.now()));
         // 人工关闭后取消已登记的超时任务，避免调度器重复处理
-        timeoutService.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
         noticePublisher.notifyTransition(ticket, TicketAction.CLOSE, null, null);
         log.info("关闭工单 ticketId={} operator={} fromStatus={}", id, adminId, ticket.getStatus());
     }

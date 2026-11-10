@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.bluemalic</groupId>
+        <artifactId>repair-platform</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>repair-timeout-api</artifactId>
+    <name>repair-timeout-api</name>
+    <description>超时的"登记"端口与实现（阶段 3.4 · ADR-035）：工单命令路径只需登记/取消到期任务，不需要超时进程本身</description>
+
+    <!--
+      为什么要有这个模块（而不是继续放 repair-timeout-service）：
+      工单域要"登记超时"，超时域要"复用工单流转内核"，两个模块互相需要就成环。
+      把最小的那一半（登记端口 + Redis ZSet/MQ 定时消息的写入）独立出来，
+      依赖方向变成 ticket → timeout-api、timeout-service → ticket + timeout-api，全程单向。
+
+      它只依赖 common（枚举/异常）、spring-data-redis（ZSet）与 rocketmq-client（定时消息），
+      不带任何扫描/消费/执行逻辑 —— 那部分留在 repair-timeout-service。
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -12,7 +12,8 @@ import com.bluemalic.repair.mapper.SysUserRoleMapper;
 import com.bluemalic.repair.mapper.TicketLogMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.DueTicket;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
+import com.bluemalic.repair.service.TimeoutScanner;
 import com.bluemalic.repair.service.impl.TicketTimeoutHandler;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.AfterEach;
@@ -63,7 +64,9 @@ class TimeoutAcceptReminderTest {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private TimeoutService timeoutService;
+    private TimeoutRegistrar timeoutRegistrar;
+    @Autowired
+    private TimeoutScanner timeoutScanner;
 
     @Autowired
     private TicketTimeoutHandler ticketService;
@@ -72,7 +75,7 @@ class TimeoutAcceptReminderTest {
 
     @AfterEach
     void cleanZSetMembers() {
-        createdTickets.forEach(id -> timeoutService.cancel(id, TENANT_ID));
+        createdTickets.forEach(id -> timeoutRegistrar.cancel(id, TENANT_ID));
     }
 
     @Test
@@ -80,12 +83,12 @@ class TimeoutAcceptReminderTest {
         long adminId = givenAdmin();
         Ticket overdue = ticketAt(20, LocalDateTime.now().minusHours(25));
         createdTickets.add(overdue.getId());
-        timeoutService.registerAcceptDeadline(overdue.getId(), TENANT_ID, Instant.now().minusSeconds(60));
+        timeoutRegistrar.registerAcceptDeadline(overdue.getId(), TENANT_ID, Instant.now().minusSeconds(60));
 
         // 模拟调度器：消费到期成员 → 执行提醒。
         // 只处理自己造的那条：Redis 不受测试事务回滚保护，早先失败的运行可能留下"工单已回滚、
         // ZSet 成员还在"的幽灵 id（生产里由调度器 catch 后跳过，测试要对齐这个行为）
-        List<DueTicket> due = timeoutService.handleDueAccept();
+        List<DueTicket> due = timeoutScanner.handleDueAccept();
         assertThat(due).extracting(DueTicket::ticketId).contains(overdue.getId());
         ticketService.remindAcceptTimeout(dueTicket(overdue.getId()));
 
@@ -105,14 +108,14 @@ class TimeoutAcceptReminderTest {
         // 未到期：到期判定在扫描/队列侧，兜底扫描不应选中它（服务方法本身不做时间判断）
         Ticket fresh = ticketAt(20, LocalDateTime.now().minusMinutes(5));
         createdTickets.add(fresh.getId());
-        assertThat(timeoutService.backstopScanAccept()).extracting(DueTicket::ticketId)
+        assertThat(timeoutScanner.backstopScanAccept()).extracting(DueTicket::ticketId)
                 .doesNotContain(fresh.getId());
 
         // 已接单（30 处理中）：即使派单时间很早、队列也到期了，也不该提醒（状态判定在服务侧）
         Ticket accepted = ticketAt(30, LocalDateTime.now().minusHours(25));
         createdTickets.add(accepted.getId());
-        timeoutService.registerAcceptDeadline(accepted.getId(), TENANT_ID, Instant.now().minusSeconds(60));
-        assertThat(timeoutService.handleDueAccept()).extracting(DueTicket::ticketId).contains(accepted.getId());
+        timeoutRegistrar.registerAcceptDeadline(accepted.getId(), TENANT_ID, Instant.now().minusSeconds(60));
+        assertThat(timeoutScanner.handleDueAccept()).extracting(DueTicket::ticketId).contains(accepted.getId());
         ticketService.remindAcceptTimeout(dueTicket(accepted.getId()));
         assertLogCount(accepted.getId(), TicketAction.ACCEPT_TIMEOUT, 0);
         assertThat(noticesTo(adminId)).isZero();
@@ -122,7 +125,7 @@ class TimeoutAcceptReminderTest {
     void backstopFindsOverdueUnacceptedTickets() {
         Ticket overdue = ticketAt(20, LocalDateTime.now().minusHours(25));
         createdTickets.add(overdue.getId());
-        assertThat(timeoutService.backstopScanAccept()).extracting(DueTicket::ticketId).contains(overdue.getId());
+        assertThat(timeoutScanner.backstopScanAccept()).extracting(DueTicket::ticketId).contains(overdue.getId());
     }
 
     // ==================== 工具 ====================

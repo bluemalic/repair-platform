@@ -40,10 +40,17 @@
             <version>${project.version}</version>
         </dependency>
         <!-- 阶段 3.3：工单流转内核（条件更新 + ticket_log + Outbox）已归位到 ticket 模块，
-             超时回调要复用它。方向是 timeout → ticket，ticket 只依赖 common 的超时端口，不成环。 -->
+             超时回调要复用它。方向是 timeout → ticket，ticket 只依赖 timeout-api，不成环。 -->
         <dependency>
             <groupId>com.bluemalic</groupId>
             <artifactId>repair-ticket-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- 超时的登记端口与实现（阶段 3.4 · ADR-035）：扫描侧要用同一套键/成员格式，
+             也要用 TimeoutProperties / TimeoutRule。 -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-timeout-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
