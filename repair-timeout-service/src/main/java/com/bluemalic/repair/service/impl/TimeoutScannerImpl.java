@@ -3,33 +3,31 @@ package com.bluemalic.repair.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bluemalic.repair.common.TicketStatus;
-import com.bluemalic.repair.config.TimeoutProperties;
 import com.bluemalic.repair.config.TimeoutRule;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.mapper.TicketEvaluationMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
-import com.bluemalic.repair.mq.TimeoutMqScheduler;
 import com.bluemalic.repair.service.DueTicket;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutKeys;
+import com.bluemalic.repair.service.TimeoutScanner;
 import com.bluemalic.repair.tenancy.TenantRoutingContext;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 超时调度机制（ADR-001 落地）。ZSet：key = {@code ticket:timeout:{节点}}，
- * member = {@code 租户ID|工单ID}，score = 到期毫秒时间戳。消费时先 ZREM，
- * 返回 1 的实例才处理 → 多实例天然去重。
+ * 超时的**消费与扫描**（ADR-001 落地；阶段 3.4 从 {@code TimeoutServiceImpl} 拆出）。
+ *
+ * <p>ZSet：key = {@code ticket:timeout:{节点}}，member = {@code 租户ID|工单ID}，
+ * score = 到期毫秒时间戳。消费时先 ZREM，返回 1 的实例才处理 → 多实例天然去重。
+ * 键与成员格式的唯一来源是 {@link TimeoutKeys}（登记侧也用它）。
  *
  * <p><b>成员为什么带租户 ID</b>（阶段 6 第 3 步 · ADR-021）：调度器没有登录态，
  * 消费一条任务时要知道去**哪个库**处理；而成员是登记当时写下的，学校搬家之后那个库就不对了。
@@ -47,15 +45,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class TimeoutServiceImpl implements TimeoutService {
-
-    private static final String KEY_PREFIX = "ticket:timeout:";
-    private static final String NODE_ACCEPT = "ACCEPT";
-    private static final String NODE_PROCESS = "PROCESS";
-    private static final String NODE_EVAL = "EVAL";
-
-    /** ZSet 成员里"租户 | 工单"的分隔符（成员格式的两处约定之一，另一处在 TicketEvaluationMapper.xml） */
-    private static final String MEMBER_SEPARATOR = "|";
+public class TimeoutScannerImpl implements TimeoutScanner {
 
     /**
      * 单轮**每个库**的扫描上限：防止一次把历史上所有超期工单拉进内存（下一分钟继续处理剩下的）。
@@ -68,77 +58,20 @@ public class TimeoutServiceImpl implements TimeoutService {
     private final TicketMapper ticketMapper;
     private final TicketEvaluationMapper ticketEvaluationMapper;
     private final TenantSchemaCatalog schemaCatalog;
-    /** zset（默认，单体自轮询）/ mq（RocketMQ 定时消息，timeout-service 执行）—— 阶段 2 · ADR-024。 */
-    private final TimeoutProperties timeoutProperties;
-    /** mq 模式才装配；用 ObjectProvider 是为了让 zset 模式不依赖 RocketMQ 的任何 Bean。 */
-    private final ObjectProvider<TimeoutMqScheduler> mqSchedulerProvider;
-
-    @Override
-    public void registerAccept(long ticketId, long tenantId) {
-        registerAcceptDeadline(ticketId, tenantId, Instant.now().plus(timeoutRule.acceptDuration()));
-    }
-
-    @Override
-    public void registerAcceptDeadline(long ticketId, long tenantId, Instant deadline) {
-        add(NODE_ACCEPT, tenantId, ticketId, deadline);
-    }
-
-    @Override
-    public void registerProcess(long ticketId, long tenantId, LocalDateTime dispatchTime) {
-        if (dispatchTime == null) {
-            // 没派单时间就没法按需求口径算到期——交给每分钟的兜底扫描，别在这里用"现在"凑一个基准
-            log.warn("工单缺少派单时间，跳过期升级登记（由兜底扫描接管）ticketId={}", ticketId);
-            return;
-        }
-        registerProcessDeadline(ticketId, tenantId, dispatchTime.plus(timeoutRule.processDuration())
-                .atZone(ZoneId.systemDefault()).toInstant());
-    }
-
-    @Override
-    public void registerProcessDeadline(long ticketId, long tenantId, Instant deadline) {
-        add(NODE_PROCESS, tenantId, ticketId, deadline);
-    }
-
-    @Override
-    public void registerEval(long ticketId, long tenantId) {
-        registerEvalDeadline(ticketId, tenantId, Instant.now().plus(timeoutRule.evalDuration()));
-    }
-
-    @Override
-    public void registerEvalDeadline(long ticketId, long tenantId, Instant deadline) {
-        add(NODE_EVAL, tenantId, ticketId, deadline);
-    }
-
-    @Override
-    public void cancel(long ticketId, long tenantId) {
-        if (timeoutProperties.isMqDelivery()) {
-            // RocketMQ 定时消息无法撤回：到期消息执行前会按状态 CAS + ticket_log 判重跳过，
-            // 所以这里只做"逻辑取消"，不再删除任何东西。
-            log.debug("MQ 模式下超时为逻辑取消 ticketId={} tenantId={}", ticketId, tenantId);
-            return;
-        }
-        for (String node : List.of(NODE_ACCEPT, NODE_PROCESS, NODE_EVAL)) {
-            String key = key(node);
-            stringRedisTemplate.opsForZSet().remove(key, member(tenantId, ticketId));
-            // 过渡期老格式（成员只有工单 ID）也清一下：它们消费时会被状态判定跳过，
-            // 但留着就是白跑一趟
-            stringRedisTemplate.opsForZSet().remove(key, String.valueOf(ticketId));
-        }
-    }
 
     @Override
     public List<DueTicket> handleDueAccept() {
-        return takeDue(NODE_ACCEPT);
+        return takeDue(TimeoutKeys.NODE_ACCEPT);
     }
 
     @Override
     public List<DueTicket> handleDueProcess() {
-        return takeDue(NODE_PROCESS);
+        return takeDue(TimeoutKeys.NODE_PROCESS);
     }
 
     @Override
     public List<DueTicket> handleDueEval() {
-        return takeDue(NODE_EVAL);
+        return takeDue(TimeoutKeys.NODE_EVAL);
     }
 
     @Override
@@ -169,7 +102,7 @@ public class TimeoutServiceImpl implements TimeoutService {
     }
 
     /**
-     * 兜底扫描的目标库：**平台库 + 每个已搬家的学校库**。
+     * 兜底扫描的目标库：**平台库 + 属于本分片的学校库**。
      *
      * <p>平台库那一份要扫，因为存量租户的数据还在那里；已搬家的学校库要逐个扫，因为它们的
      * 活数据在那儿（平台库里那份只是搬走时的旧副本——扫到也不怕：任务带着 `tenant_id`，
@@ -222,22 +155,8 @@ public class TimeoutServiceImpl implements TimeoutService {
         return result;
     }
 
-    private void add(String node, long tenantId, long ticketId, Instant deadline) {
-        if (timeoutProperties.isMqDelivery()) {
-            TimeoutMqScheduler scheduler = mqSchedulerProvider.getIfAvailable();
-            if (scheduler == null) {
-                // delivery=mq 但 RocketMQ 未开启/调度器未装配：启动就该失败，不要等第一条超时才炸
-                throw new IllegalStateException(
-                        "repair.timeout.delivery=mq 但 MQ 调度器未装配（检查 repair.rocketmq.enabled）");
-            }
-            scheduler.schedule(node, ticketId, tenantId, deadline);
-            return;
-        }
-        stringRedisTemplate.opsForZSet().add(key(node), member(tenantId, ticketId), deadline.toEpochMilli());
-    }
-
     private List<DueTicket> takeDue(String node) {
-        String zsetKey = key(node);
+        String zsetKey = TimeoutKeys.key(node);
         var zSet = stringRedisTemplate.opsForZSet();
         var due = zSet.rangeByScore(zsetKey, 0, System.currentTimeMillis());
         if (due == null || due.isEmpty()) {
@@ -249,12 +168,8 @@ public class TimeoutServiceImpl implements TimeoutService {
                     Long removed = zSet.remove(zsetKey, member);
                     return removed != null && removed > 0;
                 })
-                .map(TimeoutServiceImpl::parseMember)
+                .map(TimeoutScannerImpl::parseMember)
                 .toList();
-    }
-
-    private String member(long tenantId, long ticketId) {
-        return tenantId + MEMBER_SEPARATOR + ticketId;
     }
 
     /**
@@ -262,15 +177,11 @@ public class TimeoutServiceImpl implements TimeoutService {
      * 那时所有学校都还在平台库，按平台库处理是对的，这批成员消费完就没了。
      */
     private static DueTicket parseMember(String member) {
-        int separator = member.indexOf(MEMBER_SEPARATOR);
+        int separator = member.indexOf(TimeoutKeys.MEMBER_SEPARATOR);
         if (separator < 0) {
             return new DueTicket(DueTicket.LEGACY_TENANT, Long.parseLong(member));
         }
         return new DueTicket(Long.parseLong(member.substring(0, separator)),
                 Long.parseLong(member.substring(separator + 1)));
-    }
-
-    private String key(String node) {
-        return KEY_PREFIX + node;
     }
 }

@@ -2,7 +2,7 @@ package com.bluemalic.repair.service.impl;
 
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.service.DueTicket;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutScanner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,7 +29,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TimeoutScanService {
 
-    private final TimeoutService timeoutService;
+    private final TimeoutScanner timeoutScanner;
 
     private final TicketTimeoutHandler timeoutHandler;
 
@@ -41,9 +41,9 @@ public class TimeoutScanService {
      * @return 本轮实际尝试处理的条数
      */
     public int scan(int shardIndex, int shardTotal) {
-        int handled = closeDue(timeoutService.backstopScanEval(shardIndex, shardTotal));
-        handled += remindDue(timeoutService.backstopScanAccept(shardIndex, shardTotal));
-        handled += escalateDue(timeoutService.backstopScanProcess(shardIndex, shardTotal));
+        int handled = closeDue(timeoutScanner.backstopScanEval(shardIndex, shardTotal));
+        handled += remindDue(timeoutScanner.backstopScanAccept(shardIndex, shardTotal));
+        handled += escalateDue(timeoutScanner.backstopScanProcess(shardIndex, shardTotal));
         if (handled > 0) {
             log.info("超时兜底扫描完成 shard={}/{} 处理 {} 条", shardIndex, shardTotal, handled);
         }

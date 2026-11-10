@@ -21,7 +21,7 @@ import com.bluemalic.repair.mapper.TicketCollaboratorMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.service.NotificationService;
 import com.bluemalic.repair.service.TicketAssignmentService;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutRegistrar;
 import com.bluemalic.repair.vo.TicketCollaboratorVO;
 import com.bluemalic.repair.vo.TicketVO;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +50,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
     private final TicketCollaboratorMapper ticketCollaboratorMapper;
     private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
-    private final TimeoutService timeoutService;
+    private final TimeoutRegistrar timeoutRegistrar;
     private final TicketTransitionSupport transitions;
     private final TicketLookup lookup;
     private final TicketReferenceValidator referenceValidator;
@@ -113,7 +113,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                 crossBuilding);
         noticePublisher.notifyTransition(ticket, TicketAction.DISPATCH, dto.getWorkerId(), null);
         // 登记未接单提醒：到期仍无人接单就提醒调度方（M3）；重新派单会覆盖到期时间
-        timeoutService.registerAccept(id, ticket.getTenantId());
+        timeoutRegistrar.registerAccept(id, ticket.getTenantId());
         log.info("派单 ticketId={} workerId={} operator={} {}", id, dto.getWorkerId(), adminId,
                 crossBuilding == null ? "" : crossBuilding);
     }
@@ -169,8 +169,8 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
         // 通知新师傅：与派单同一条文案
         noticePublisher.notifyTransition(ticket, TicketAction.DISPATCH, worker.getId(), null);
         // 计时重来，超时节点也要重登记（先撤掉旧节点的登记，避免按旧时间触发）
-        timeoutService.cancel(id, ticket.getTenantId());
-        timeoutService.registerAccept(id, ticket.getTenantId());
+        timeoutRegistrar.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.registerAccept(id, ticket.getTenantId());
         log.info("转派 ticketId={} from={} to={} operator={} reason={}",
                 id, previousWorkerId, worker.getId(), adminId, dto.getReason());
     }
@@ -190,7 +190,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                 entity -> { });
         // 45 进来时撤过处理节点；35 没撤（待料不暂停 SLA）。两种情况都按**原派单时间**重登记：
         // 已经超期就立即升级——不能因为等后勤拍板把计时清零
-        timeoutService.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
+        timeoutRegistrar.registerProcess(id, ticket.getTenantId(), ticket.getDispatchTime());
         noticePublisher.notifyTransition(ticket, TicketAction.RESUME, null, null);
         log.info("后勤恢复处理 ticketId={} operator={} fromStatus={}", id, adminId, fromStatus);
     }
@@ -226,7 +226,7 @@ public class TicketAssignmentServiceImpl implements TicketAssignmentService {
                 },
                 remark);
         // 合并是终态：未接单/处理超时/验收超时节点全部作废
-        timeoutService.cancel(id, source.getTenantId());
+        timeoutRegistrar.cancel(id, source.getTenantId());
         // 通知被合并单的学生（正文里带目标工单号）；目标单不动
         noticePublisher.notifyTransition(source, TicketAction.MERGE, null, remark);
         log.info("合并工单 ticketId={} into={} operator={} fromStatus={}",

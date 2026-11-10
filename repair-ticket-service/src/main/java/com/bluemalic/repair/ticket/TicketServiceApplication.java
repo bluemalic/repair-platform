@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *
  * <p>负责：工单状态机 / 派单转派协作拆单合并 / 评价 / 资产 / 楼栋类别报修码排班 / 文件上传，
  * 以及**工单流转内核**（条件更新 + ticket_log + Outbox）。超时**执行**不在这里：
- * {@code TimeoutService} 的实现在 timeout 模块，本模块只依赖它的接口（在 repair-common）。
+ * {@code TimeoutRegistrar} 的实现在 repair-timeout-api，本模块只依赖它（登记），不依赖超时进程。
  *
  * <p><b>与 identity 的边界</b>：本模块仍直接读 `sys_user`（18 处，派单校验与姓名回填）。
  * 那是有意的过渡态——阶段 3.3 先把表与状态机收进来，等 identity 的 `/internal` 契约稳定后

@@ -1,7 +1,7 @@
 package com.bluemalic.repair.job;
 
 import com.bluemalic.repair.config.TimeoutProperties;
-import com.bluemalic.repair.service.TimeoutService;
+import com.bluemalic.repair.service.TimeoutScanner;
 import com.bluemalic.repair.service.impl.TimeoutScanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @ConditionalOnProperty(prefix = "repair.timeout", name = "scheduler-enabled", matchIfMissing = true)
 public class TimeoutScheduler {
 
-    private final TimeoutService timeoutService;
+    private final TimeoutScanner timeoutScanner;
     private final TimeoutScanService scanService;
     private final TimeoutProperties timeoutProperties;
 
@@ -64,7 +64,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[验收]", () -> scanService.closeDue(timeoutService.handleDueEval()));
+        runQuietly("消费到期任务[验收]", () -> scanService.closeDue(timeoutScanner.handleDueEval()));
     }
 
     /** 未接单提醒节点：到期仍无人接单 → 提醒调度方（docs/01 §超时）。 */
@@ -73,7 +73,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[接单]", () -> scanService.remindDue(timeoutService.handleDueAccept()));
+        runQuietly("消费到期任务[接单]", () -> scanService.remindDue(timeoutScanner.handleDueAccept()));
     }
 
     /** 未处理升级节点：派单超阈值仍未完工 → 升级提醒调度方（docs/01 §超时）。 */
@@ -82,7 +82,7 @@ public class TimeoutScheduler {
         if (!timeoutProperties.isZsetDelivery()) {
             return;
         }
-        runQuietly("消费到期任务[处理]", () -> scanService.escalateDue(timeoutService.handleDueProcess()));
+        runQuietly("消费到期任务[处理]", () -> scanService.escalateDue(timeoutScanner.handleDueProcess()));
     }
 
     /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet/MQ 路径（三个节点都扫）。 */

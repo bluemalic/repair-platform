@@ -78,6 +78,7 @@
         <module>repair-common</module>
         <module>repair-domain</module>
         <module>repair-notification-service</module>
+        <module>repair-timeout-api</module>
         <module>repair-timeout-service</module>
         <module>repair-identity-service</module>
         <module>repair-platform-service</module>

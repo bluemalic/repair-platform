@@ -40,6 +40,13 @@
             <artifactId>repair-notification-service</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- 超时的**登记**端口（阶段 3.4 · ADR-035）：派单后登记、完工后取消。
+             只依赖 api 不依赖 timeout-service，所以工单域可以独立进程部署。 -->
+        <dependency>
+            <groupId>com.bluemalic</groupId>
+            <artifactId>repair-timeout-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- 审计写入（AuditService）与账号/维修工范围读取仍在 identity 模块。
              阶段 3.3 是"同进程直接调"，阶段 3.4 再换成 /internal 的 Feign 调用（清单见 ADR-032）。
              方向单向：identity 不依赖 ticket。 -->
