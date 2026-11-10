@@ -3,6 +3,7 @@ package com.bluemalic.repair.gateway.filter;
 import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -10,6 +11,13 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.time.Instant;
+import java.util.HexFormat;
 
 /**
  * 把登录态注入成下游可用的身份头（阶段 2 · ADR-024）。
@@ -35,6 +43,15 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     static final String HEADER_USER_ID = "X-User-Id";
     static final String HEADER_TENANT_ID = "X-Tenant-Id";
     static final String HEADER_USER_TYPE = "X-User-Type";
+    static final String HEADER_GATEWAY_TS = "X-Gateway-Ts";
+    static final String HEADER_GATEWAY_SIGN = "X-Gateway-Sign";
+
+    /**
+     * 服务内验签的共享密钥。为空表示不签名（本地开发 / 网关与服务直连同一网络时的默认）。
+     * 设了之后每个请求多两个头，服务端（common 的 {@code GatewayHeaderFilter}）按同样算法校验。
+     */
+    @Value("${repair.gateway.hmac-secret:}")
+    private String hmacSecret;
 
     /** 与 SaTokenGatewayConfig 的白名单一致：这些路径没有登录态，不注入身份头。 */
     static boolean isWhiteListed(String path) {
@@ -67,18 +84,45 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         Object tenantId = session == null ? null : session.get("tenantId");
         Object userType = session == null ? null : session.get("userType");
 
+        String userIdHeader = String.valueOf(loginId);
+        String tenantIdHeader = tenantId == null ? "" : String.valueOf(tenantId);
+        String userTypeHeader = userType == null ? "" : String.valueOf(userType);
+
         ServerHttpRequest request = exchange.getRequest().mutate()
                 .headers(headers -> {
                     // 客户端伪造的同名头先清掉，再由网关写入可信值
                     headers.remove(HEADER_USER_ID);
                     headers.remove(HEADER_TENANT_ID);
                     headers.remove(HEADER_USER_TYPE);
+                    headers.remove(HEADER_GATEWAY_TS);
+                    headers.remove(HEADER_GATEWAY_SIGN);
                 })
-                .header(HEADER_USER_ID, String.valueOf(loginId))
-                .header(HEADER_TENANT_ID, tenantId == null ? "" : String.valueOf(tenantId))
-                .header(HEADER_USER_TYPE, userType == null ? "" : String.valueOf(userType))
+                .header(HEADER_USER_ID, userIdHeader)
+                .header(HEADER_TENANT_ID, tenantIdHeader)
+                .header(HEADER_USER_TYPE, userTypeHeader)
                 .build();
+
+        if (hmacSecret != null && !hmacSecret.isBlank()) {
+            String ts = String.valueOf(Instant.now().getEpochSecond());
+            String payload = userIdHeader + "|" + tenantIdHeader + "|" + userTypeHeader + "|" + ts;
+            request = request.mutate()
+                    .header(HEADER_GATEWAY_TS, ts)
+                    .header(HEADER_GATEWAY_SIGN, sign(payload, hmacSecret))
+                    .build();
+        }
         return chain.filter(exchange.mutate().request(request).build());
+    }
+
+    /** HMAC-SHA256 十六进制小写；算法与服务端 {@code GatewayHeaderFilter} 必须逐字节一致。 */
+    static String sign(String payload, String secret) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return HexFormat.of().formatHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException e) {
+            // 算法在本 JDK 上必然存在；走到这里说明运行环境被裁剪过，宁可 500 也不要发一个假签名
+            throw new IllegalStateException("网关签名失败", e);
+        }
     }
 
     @Override
