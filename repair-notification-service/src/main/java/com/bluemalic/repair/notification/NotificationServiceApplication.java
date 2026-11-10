@@ -1,11 +1,15 @@
 package com.bluemalic.repair.notification;
 
+import com.bluemalic.repair.channel.InAppChannel;
+import com.bluemalic.repair.channel.WeComChannel;
 import com.bluemalic.repair.config.RocketMqConsumerConfig;
 import com.bluemalic.repair.config.RocketMqProperties;
 import com.bluemalic.repair.config.TenancyProperties;
 import com.bluemalic.repair.config.TenantDataSourceConfig;
+import com.bluemalic.repair.job.NotificationDeliveryRetryJob;
 import com.bluemalic.repair.mq.RocketMqEventConsumer;
 import com.bluemalic.repair.service.impl.NotificationConsumerService;
+import com.bluemalic.repair.service.impl.NotificationDeliveryServiceImpl;
 import com.bluemalic.repair.service.impl.NotificationServiceImpl;
 import com.bluemalic.repair.tenancy.TenantDataSourceRegistry;
 import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
@@ -14,6 +18,7 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * notification-service 的独立进程入口（阶段 2 · ADR-023）。
@@ -27,6 +32,7 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootApplication
 @MapperScan("com.bluemalic.repair.mapper")
+@EnableScheduling
 @Import({
         TenantDataSourceConfig.class,
         TenancyProperties.class,
@@ -34,6 +40,10 @@ import org.springframework.context.annotation.Import;
         TenantSchemaCatalog.class,
         NotificationServiceImpl.class,
         NotificationConsumerService.class,
+        NotificationDeliveryServiceImpl.class,
+        InAppChannel.class,
+        WeComChannel.class,
+        NotificationDeliveryRetryJob.class,
         RocketMqProperties.class,
         RocketMqConsumerConfig.class,
         RocketMqEventConsumer.class
