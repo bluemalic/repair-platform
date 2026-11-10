@@ -24,21 +24,145 @@ spring:
     gateway:
       server:
         webflux:
-          # 静态路由（默认）：单体在 compose 里的服务名；本地跑用 127.0.0.1:8080。
-          # 打开 Nacos 且后端已注册后，把 GATEWAY_APP_URI 设为 lb://repair-app 即可切动态发现。
+          # ============================================================
+          # 显式路由表（阶段 3.2 · docs/03 §4.1）
+          # ============================================================
+          #
+          # 三条铁律：
+          #   1. **具体路径先于通配**：/api/worker/tickets/*/advice 必须在 /api/worker/tickets/** 之前；
+          #      PUT /api/admin/workers/*/buildings|skills 必须在 /api/admin/workers/** 之前。
+          #      这里不靠"配置顺序"碰运气，每条都写了 order。
+          #   2. **不配默认转发**：漏配的 /api/** 应该是可见的 404，而不是静默落到某个服务。
+          #   3. **URI 全部是变量**：lite 形态把 IDENTITY/PLATFORM 指向 app（合并进程），
+          #      full 形态指向各自服务名或 lb://repair-identity。
+          #
+          # order 段：10 auth / 20 platform / 30 students / 40-41 worker 范围 / 50 workers /
+          #           60 audit / 15 mock-idp / 70-200 其余仍指 app。
           routes:
-            - id: repair-app
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+            - id: identity-auth
+              uri: ${GATEWAY_IDENTITY_URI:http://127.0.0.1:8081}
+              order: 10
               predicates:
-                - Path=/api/**
+                - Path=/api/auth/**
+            # 演示用 Mock IdP（ADR-022）：默认关闭，关闭时端点 404。
+            # docs/03 的路由表漏了它，不配的话演示 SSO 会停在 404。
+            - id: identity-mock-idp
+              uri: ${GATEWAY_IDENTITY_URI:http://127.0.0.1:8081}
+              order: 15
+              predicates:
+                - Path=/api/mock-idp/**
+            - id: platform-tenants
+              uri: ${GATEWAY_PLATFORM_URI:http://127.0.0.1:8082}
+              order: 20
+              predicates:
+                - Path=/api/platform/**,/api/admin/platform/**
+            - id: identity-students
+              uri: ${GATEWAY_IDENTITY_URI:http://127.0.0.1:8081}
+              order: 30
+              predicates:
+                - Path=/api/admin/students/**
+            # worker_building / worker_skill 归 ticket（docs/02）：这两条必须在 workers/** 之前
+            - id: ticket-worker-scope-buildings
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 40
+              predicates:
+                - Path=/api/admin/workers/*/buildings
+            - id: ticket-worker-scope-skills
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 41
+              predicates:
+                - Path=/api/admin/workers/*/skills
+            - id: identity-workers
+              uri: ${GATEWAY_IDENTITY_URI:http://127.0.0.1:8081}
+              order: 50
+              predicates:
+                - Path=/api/admin/workers/**
+            - id: identity-audit-logs
+              uri: ${GATEWAY_IDENTITY_URI:http://127.0.0.1:8081}
+              order: 60
+              predicates:
+                - Path=/api/admin/audit-logs/**
+            - id: ticket-student-agent
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 70
+              predicates:
+                - Path=/api/student/agent/**
+            - id: ticket-student-tickets
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 80
+              predicates:
+                - Path=/api/student/tickets/**
+            - id: ticket-student-assets
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 90
+              predicates:
+                - Path=/api/student/assets/**
+            # 维修工端的 AI 建议：必须排在 worker/tickets/** 之前
+            - id: ticket-worker-advice
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 100
+              predicates:
+                - Path=/api/worker/tickets/*/advice
+            - id: ticket-worker-tickets
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 110
+              predicates:
+                - Path=/api/worker/tickets/**
+            - id: ticket-admin-tickets
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 120
+              predicates:
+                - Path=/api/admin/tickets/**
+            - id: ticket-admin-statistics
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 130
+              predicates:
+                - Path=/api/admin/statistics/**
+            - id: ticket-admin-knowledge
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 140
+              predicates:
+                - Path=/api/admin/knowledge/**
+            - id: ticket-admin-base-data
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 150
+              predicates:
+                - Path=/api/admin/buildings/**,/api/admin/categories/**,/api/admin/repair-codes/**,/api/admin/assets/**,/api/admin/worker-groups/**,/api/admin/worker-shifts/**
+            - id: ticket-by-code
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 160
+              predicates:
+                - Path=/api/tickets/by-code/**
+            - id: ticket-dictionaries
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 170
+              predicates:
+                - Path=/api/categories,/api/categories/**,/api/locations,/api/locations/**
+            - id: ticket-notifications
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 180
+              predicates:
+                - Path=/api/notifications/**
+            - id: ticket-files
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 190
+              predicates:
+                - Path=/api/files/**
+            - id: ticket-ai
+              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 200
+              predicates:
+                - Path=/api/ai/**
             - id: repair-app-actuator
               uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 900
               predicates:
                 - Path=/actuator/**
             # 接口文档：nginx 把 /doc.html、/webjars/** 等也反代到 gateway，
             # 这里必须显式放行到 app，否则 gateway 只认 /api/** 会 404
             - id: repair-app-docs
               uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              order: 910
               predicates:
                 - Path=/doc.html,/webjars/**,/v3/api-docs/**,/swagger-resources/**,/favicon.ico
 

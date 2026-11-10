@@ -15,10 +15,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>登录 / SSO / Mock IdP 白名单不会被网关拦成未登录。</li>
  * </ol>
  *
- * <p>测试不依赖 Nacos（默认关闭）与真实后端：路由指向一个不可达地址，
- * 白名单用例只断言"没有被网关判成 401"，不关心下游连接失败。
+ * <p>测试不依赖 Nacos（默认关闭）与真实后端：三条路由的 URI 都指向**不可达的固定端口**。
+ * 这一条是踩过的：以前用默认的 127.0.0.1:8080/8081，本机刚好有服务在监听，
+ * 测试结果就取决于那台机器上跑没跑东西（本机 8081 返回 401 时，白名单用例会假红）。
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "GATEWAY_APP_URI=http://127.0.0.1:18080",
+        "GATEWAY_IDENTITY_URI=http://127.0.0.1:18081",
+        "GATEWAY_PLATFORM_URI=http://127.0.0.1:18082"
+})
 @AutoConfigureWebTestClient
 class GatewayAuthTest {
 
