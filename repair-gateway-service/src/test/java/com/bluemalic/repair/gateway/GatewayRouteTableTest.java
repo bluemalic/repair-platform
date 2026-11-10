@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "GATEWAY_APP_URI=http://127.0.0.1:18080",
         "GATEWAY_IDENTITY_URI=http://127.0.0.1:18081",
-        "GATEWAY_PLATFORM_URI=http://127.0.0.1:18082"
+        "GATEWAY_PLATFORM_URI=http://127.0.0.1:18082",
+        "GATEWAY_TICKET_URI=http://127.0.0.1:18083"
 })
 class GatewayRouteTableTest {
 

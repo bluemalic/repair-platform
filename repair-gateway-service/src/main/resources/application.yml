@@ -63,12 +63,12 @@ spring:
                 - Path=/api/admin/students/**
             # worker_building / worker_skill 归 ticket（docs/02）：这两条必须在 workers/** 之前
             - id: ticket-worker-scope-buildings
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 40
               predicates:
                 - Path=/api/admin/workers/*/buildings
             - id: ticket-worker-scope-skills
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 41
               predicates:
                 - Path=/api/admin/workers/*/skills
@@ -88,12 +88,12 @@ spring:
               predicates:
                 - Path=/api/student/agent/**
             - id: ticket-student-tickets
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 80
               predicates:
                 - Path=/api/student/tickets/**
             - id: ticket-student-assets
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 90
               predicates:
                 - Path=/api/student/assets/**
@@ -104,12 +104,12 @@ spring:
               predicates:
                 - Path=/api/worker/tickets/*/advice
             - id: ticket-worker-tickets
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 110
               predicates:
                 - Path=/api/worker/tickets/**
             - id: ticket-admin-tickets
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 120
               predicates:
                 - Path=/api/admin/tickets/**
@@ -124,17 +124,17 @@ spring:
               predicates:
                 - Path=/api/admin/knowledge/**
             - id: ticket-admin-base-data
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 150
               predicates:
                 - Path=/api/admin/buildings/**,/api/admin/categories/**,/api/admin/repair-codes/**,/api/admin/assets/**,/api/admin/worker-groups/**,/api/admin/worker-shifts/**
             - id: ticket-by-code
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 160
               predicates:
                 - Path=/api/tickets/by-code/**
             - id: ticket-dictionaries
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 170
               predicates:
                 - Path=/api/categories,/api/categories/**,/api/locations,/api/locations/**
