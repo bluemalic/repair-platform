@@ -97,7 +97,8 @@
 | `repair-gateway-service/` | API 网关（`Dockerfile.gateway`）：19+ 条显式路由 + Sa-Token 校验 + 身份头注入（可选 HMAC 签名）；**不依赖 repair-common**（MVC 与 WebFlux 冲突） | ✅ 已存在 |
 | `repair-identity-service/` | 身份域（阶段 3.2 · ADR-031）：登录 / SSO / 学生与维修工账号 / 角色权限 / 审计；`Dockerfile.identity`。**既是普通 jar（单体依赖 → lite 合并进程），也是独立进程（full）** | ✅ 已存在 |
 | `repair-platform-service/` | 平台运营域（阶段 3.2）：开通 / 停用学校、维护统一认证配置；`Dockerfile.platform`；依赖 identity（建首个管理员） | ✅ 已存在 |
-| `repair-ticket-service/` | 工单域（阶段 3.3 · ADR-033）：状态机 / 派单转派协作拆单合并 / 评价 / 资产 / 楼栋类别报修码排班 + **工单流转内核**（条件更新 + `ticket_log` + Outbox）；app 依赖它（lite 合并），**full 暂不启独立进程**（超时登记实现还在 timeout） | ✅ 已存在 |
+| `repair-ticket-service/` | 工单域（阶段 3.3 · ADR-033 / 3.4 · ADR-035）：状态机 / 派单转派协作拆单合并 / 评价 / 资产 / 楼栋类别报修码排班 + **工单流转内核**（条件更新 + `ticket_log` + Outbox）；`Dockerfile.ticket`（:8083）。lite 合并在 app，full 可独立进程 | ✅ 已存在 |
+| `repair-timeout-api/` | 超时的**登记**端口与实现（阶段 3.4 · ADR-035）：`TimeoutRegistrar` / `TimeoutKeys` / `TimeoutRegistrarImpl`（ZSet 或 MQ 定时消息）/ producer 配置。**不装扫描**——扫描在 timeout-service | ✅ 已存在 |
 | `repair-db-migrator/` | 迁移作业（阶段 3.2）：控制库 + 每个租户库的 Flyway 跑到最新，一次性进程、可重复执行；`Dockerfile.migrator` | ✅ 已存在 |
 
 **新代码默认放 `repair-app`**；只有被两个以上服务共用的东西才下沉到 `repair-common` / `repair-domain`——不要为了分层提前搬。

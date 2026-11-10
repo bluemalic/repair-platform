@@ -231,6 +231,8 @@ repair-platform/
 │   └── 依赖 identity（开通时建首个管理员），独立进程 :8082
 ├── repair-ticket-service/        工单域（状态机 / 派单 / 协作 / 评价 / 资产 / 基础数据 + 工单流转内核）；
 │   └── ai 的两个端点（triage / advice）留在单体，避免 ticket 反向依赖 ai 的实现
+├── repair-timeout-api/           超时的登记端口与实现（TimeoutRegistrar / TimeoutKeys / ZSet 或 MQ）；
+│   └── 只装"什么时候到期"，扫描/执行在 timeout-service —— 这样 ticket 才能独立起进程
 ├── repair-db-migrator/           迁移作业（控制库 + 每个租户库，Dockerfile.migrator）；
 │   └── WebApplicationType.NONE，跑完退出，失败非 0——full 发布时先跑它再重启服务
 ├── repair-gateway-service/       API 网关（21 条显式路由 + Sa-Token 校验 + 身份头注入/可选签名，Dockerfile.gateway）；
