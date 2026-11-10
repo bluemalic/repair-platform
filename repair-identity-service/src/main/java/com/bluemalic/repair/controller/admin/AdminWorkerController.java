@@ -68,24 +68,4 @@ public class AdminWorkerController {
         workerService.update(id, dto);
         return Result.ok();
     }
-
-    @Operation(summary = "设置负责楼栋",
-            description = "全量替换：传什么就是他的全部负责楼栋，空数组表示不负责任何楼栋。"
-                    + "这块数据是维修工数据可见范围的物理依据（ADR-002），改完立即生效")
-    @PutMapping("/{id}/buildings")
-    public Result<Void> setBuildings(@Parameter(description = "维修工用户ID") @PathVariable long id,
-                                     @Valid @RequestBody WorkerBuildingsDTO dto) {
-        workerService.setBuildings(id, dto);
-        return Result.ok();
-    }
-
-    @Operation(summary = "设置擅长类别",
-            description = "派单评分的技能维度（ADR-019）：按报修类别标注，提交最终状态（空数组=清空）。"
-                    + "不影响可见范围——负责楼栋才影响数据权限")
-    @PutMapping("/{id}/skills")
-    public Result<Void> setSkills(@Parameter(description = "维修工用户ID") @PathVariable long id,
-                                  @Valid @RequestBody WorkerSkillsDTO dto) {
-        workerService.setSkills(id, dto);
-        return Result.ok();
-    }
 }
