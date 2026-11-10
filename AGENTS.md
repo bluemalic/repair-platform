@@ -94,21 +94,26 @@
 | `repair-domain/` | 共享库：entity / mapper / 读模型 VO（含 mapper XML）；阶段 3/4 按服务切数据归属 | ✅ 已存在 |
 | `repair-notification-service/` | 通知消费者 + 通知写路径，独立 boot jar / 独立镜像（`Dockerfile.notification`）；单体依赖它做 sync 投递 | ✅ 已存在 |
 | `repair-timeout-service/` | 超时域独立进程：秒级 ZSet 消费 + 兜底扫描 + 三个超时动作（`Dockerfile.timeout`）；**工单流转内核暂居本模块**（命令路径与超时回调共用，放 common 会与 notification 成环） | ✅ 已存在 |
-| `repair-gateway-service/` | API 网关（`Dockerfile.gateway`）：路由 + Sa-Token 校验 + 身份头注入；**不依赖 repair-common**（MVC 与 WebFlux 冲突） | ✅ 已存在 |
+| `repair-gateway-service/` | API 网关（`Dockerfile.gateway`）：19+ 条显式路由 + Sa-Token 校验 + 身份头注入（可选 HMAC 签名）；**不依赖 repair-common**（MVC 与 WebFlux 冲突） | ✅ 已存在 |
+| `repair-identity-service/` | 身份域（阶段 3.2 · ADR-031）：登录 / SSO / 学生与维修工账号 / 角色权限 / 审计；`Dockerfile.identity`。**既是普通 jar（单体依赖 → lite 合并进程），也是独立进程（full）** | ✅ 已存在 |
+| `repair-platform-service/` | 平台运营域（阶段 3.2）：开通 / 停用学校、维护统一认证配置；`Dockerfile.platform`；依赖 identity（建首个管理员） | ✅ 已存在 |
+| `repair-db-migrator/` | 迁移作业（阶段 3.2）：控制库 + 每个租户库的 Flyway 跑到最新，一次性进程、可重复执行；`Dockerfile.migrator` | ✅ 已存在 |
 
 **新代码默认放 `repair-app`**；只有被两个以上服务共用的东西才下沉到 `repair-common` / `repair-domain`——不要为了分层提前搬。
 
-`repair-app/src/main/java` 下：
+**搬迁方式（阶段 3.2 起）**：把类搬到新模块时**包名保持不变**（Maven 允许跨模块同包），这样 `git mv` + 调 pom 就完成搬迁，不产生 import 改动；仓库里 `com.bluemalic.repair.service.impl` 已被 app / timeout / identity 共用是先例。
+
+`repair-app/src/main/java` 下（`config/`、`interceptor/`、`tenancy/` 的共享部分已在 `repair-common`，包名相同）：
 
 ```
 com.bluemalic.repair
 ├── common/        统一返回体、业务异常、错误码、常量、工具
-├── config/        配置类（MyBatis-Plus、Sa-Token、Redis、Knife4j、线程池）
+├── config/        本进程专属配置（AI、Knife4j、线程池、存储、调度）；共享的 Sa-Token / 租户路由 / 限流 / 平台域收口在 repair-common
 ├── controller/
 │   ├── student/   学生端接口
 │   ├── worker/    维修工端接口
 │   ├── admin/     后勤管理端接口
-│   └── platform/  平台运营端接口（开学校 / 停学校，不属于任何租户，ADR-012）
+│   └── platform/  平台运营端接口（阶段 3.2 起在 repair-platform-service，包名不变）
 ├── service/       接口
 │   └── impl/      实现
 ├── mapper/        MyBatis-Plus Mapper
@@ -116,9 +121,9 @@ com.bluemalic.repair
 ├── dto/           入参
 ├── vo/            出参
 ├── converter/     DTO / VO / Entity 之间的转换
-├── interceptor/   数据权限、鉴权、租户路由拦截器
+├── interceptor/   数据权限处理器（TicketDataScopeHandler 在 repair-common）
 ├── ai/            Schema 检索、SQL 生成、SQL 安全网关（M4）
-├── tenancy/       租户路由：路由键、连接池注册表、租户目录、建库（阶段 6 · ADR-021）
+├── tenancy/       本进程的租户装配（路由键与建库工具在 repair-common）
 └── job/           定时任务与启动引导（演示数据重置、平台账号引导）
 ```
 
@@ -168,18 +173,21 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 - **不使用物理外键**，由应用层保证。
 - 状态字段用 `tinyint` + 枚举类；状态值从 10 开始按 10 递增（留插入空间）。
 - 索引命名：普通索引 `idx_字段`、唯一索引 `uk_字段`（MySQL 索引名在表内唯一，不强制加表名前缀；多字段按顺序拼接，如 `idx_tenant_status`）。
-- **改表结构 = 加一个迁移脚本**：`src/main/resources/db/migration/V{n}__xxx.sql`（Flyway 在应用启动时执行），
+- **改表结构 = 加一个迁移脚本**：`repair-common/src/main/resources/db/migration/V{n}__xxx.sql`（Flyway 执行；
+  阶段 3.2 起脚本随 `repair-common` 走，app / platform / db-migrator 共用同一份），
   并同步改 `docs/02-数据库设计.md`。迁移脚本是表结构的**执行真相**，`docs/02` 是设计说明；两者不一致时以脚本为准并回去改文档。
+- **谁跑迁移只有一个答案**：full 形态所有服务 `spring.flyway.enabled=false`，由 `repair-db-migrator` 统一跑（发布时先跑它，再滚动重启服务）；
+  lite 形态仍由单体启动时跑。**不要**让两个服务同时拥有迁移动手权。
   新增基础数据（如权限码）改 `R__seed.sql`——它是可重复执行的，改完下次启动自动重跑。
 - **阶段 6 起有「平台库 / 租户库」两套库**（ADR-021）。`db/migration` 是**平台库**（`repair`）的结构，
   `db/tenant/T{m}__xxx.sql` 是**租户库**（`repair_<学校编码>`）的结构，两套是各自独立的 Flyway 历史
-  （平台库现在 V12，租户库从 T1 起）。**租户侧的表（17 张）两边都有**，所以：
+  （平台库现在 V23，租户库 V1..V9）。**租户侧的表（23 张）两边都有**，所以：
   **改租户侧的表结构要写两份脚本**（平台库那份 + 租户库那份），漏一份是**静默**的——
   `TenantSchemaParityTest` 会把两份脚本各跑进一个临时库逐列逐索引比对，CI 直接红。
   `tenant`（学校名录）是唯一只存在于平台库的表：登录要先按编码找到学校，才知道去哪个库。
-- **新增租户侧的表要改三处**：`db/migration`、`db/tenant`、**以及搬迁计划** `TenantDataMigrator.PLAN`
-  （存量租户搬家时逐表复制，漏一张它就会永远留在平台库）。第三个位置有测试盯着
-  （`TenantDataMigrationTest.搬运计划正好覆盖平台库里那些租户侧的表`），漏了 CI 直接红。
+- **新增租户侧的表要改两处**：`db/migration`、`db/tenant`。
+  （阶段 2.1 已删除 `TenantDataMigrator` 与存量搬迁工具——旧数据按 ADR-026 直接删除重建，
+  所以不再有"搬迁计划"这第三个位置。）
 - **`tenant` 表只在平台库，读写一律钉在平台库上**：用 `TenantRoutingContext.callControl(...)`，
   别在租户上下文里直接查它（租户库里没有这张表，会报"表不存在"）。
 - **不许在事务里换租户**：`@Transactional` 把连接绑在数据源对象上，中途换路由键不会换连接，
@@ -191,6 +199,9 @@ miniapp-h5/    学生 / 维修工端（uni-app，先编译 H5），产物 dist/ 
 ## 7. 接口约定
 
 - 路径按端前缀：`/api/student/**`、`/api/worker/**`、`/api/admin/**`、`/api/platform/**`。
+- **服务间内部接口一律 `/internal/**`，不放进 `/api/**`**（阶段 3.2）：网关只路由 `/api/**` 与文档路径，
+  所以 `/internal/**` 从公网到不了；再加 `INTERNAL_TOKEN` 头校验（**空 token 时端点直接 404**，即默认不开放）。
+  内部接口不套 `Result` 之外的业务语义、不做数据权限注入——它按调用方显式传的 `tenantId` 切库。
 - **平台域与租户域互不越界**（ADR-012）：`/api/platform/**` 只给平台运营账号（`tenant_id = 0`、`user_type = 4`、权限码只有 `tenant:manage`）用，它**看不到任何租户的业务数据**；租户侧任何角色也进不了这个前缀。这条由 `PlatformScopeInterceptor` 强制——**不要把它降级成"给接口补权限码"**：项目里有三个接口本来就没有权限码（`/api/categories`、`/api/files/upload`、`/api/tickets/by-code/{code}`），只授一个码是挡不住的。
 - 资源用复数名词，动作用子路径：`POST /api/worker/tickets/{id}/accept`。
 - 每个接口都要有 Knife4j 注解（`@Tag` / `@Operation` / `@Parameter`）。
