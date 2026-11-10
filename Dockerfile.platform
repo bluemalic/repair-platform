@@ -1,0 +1,51 @@
+# ================= platform-service 镜像（阶段 3.2 · ADR-024 / ADR-012）=================
+# 平台运营域：开通 / 停用学校、维护统一认证配置。不属于任何租户。
+# full 形态独立进程；lite 形态在 app 进程里装配。
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
+COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
+COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
+COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+COPY repair-identity-service/src ./repair-identity-service/src
+COPY repair-platform-service/src ./repair-platform-service/src
+RUN mvn -B clean package -DskipTests -pl repair-platform-service -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+ENV SPRING_PROFILES_ACTIVE=platform
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=builder /build/repair-platform-service/target/*-exec.jar app.jar
+
+EXPOSE 8082
+
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-55} \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/app/logs \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]

@@ -30,6 +30,10 @@ services:
   gateway:
     environment:
       GATEWAY_APP_URI: lb://repair-app
+      # full 形态把身份域与平台运营域指向各自的进程（阶段 3.2）。
+      # 需要先 `--profile services` 把 identity / platform 起起来并注册到 Nacos。
+      GATEWAY_IDENTITY_URI: lb://repair-identity
+      GATEWAY_PLATFORM_URI: lb://repair-platform
       NACOS_DISCOVERY_ENABLED: "true"
       NACOS_SERVER_ADDR: nacos:8848
     # app 同时接 backend/frontend，Nacos 里注册的是 frontend 网段的 IP；
