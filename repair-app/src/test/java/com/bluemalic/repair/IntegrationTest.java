@@ -3,6 +3,7 @@ package com.bluemalic.repair;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestExecutionListeners;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.annotation.ElementType;
@@ -32,6 +33,9 @@ import java.lang.annotation.Target;
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
+@TestExecutionListeners(
+        listeners = TenantRoutingTestExecutionListener.class,
+        mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
 @SpringBootTest(classes = RepairPlatformApplication.class, properties = {
         "repair.timeout.scheduler-enabled=false",
         // Outbox relay 的定时触发在测试里关掉：它会在每个库上空转、并和测试事务抢数据。

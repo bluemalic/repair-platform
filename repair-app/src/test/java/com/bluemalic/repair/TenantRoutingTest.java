@@ -1,5 +1,6 @@
 package com.bluemalic.repair;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.UserType;
 import com.bluemalic.repair.entity.SysUser;
@@ -124,6 +125,24 @@ class TenantRoutingTest {
         assertThat(catalog.routingKeyFor(LEGACY_TENANT)).isEqualTo(TenantRoutingContext.CONTROL);
         // `tenant` 表只在平台库：能读到这一行，就说明这次查询确实落在平台库上
         assertThat(TenantRoutingContext.callControl(() -> tenantMapper.selectById(LEGACY_TENANT))).isNotNull();
+    }
+
+    /**
+     * 真库用例：标注 {@link TenantTestDb} 后，同一句查询落在测试租户库
+     * （{@link TestTenantBootstrap#SCHEMA}），读到的是夹具灌进去的那 6 个类别。
+     *
+     * <p>这条是"夹具本身没白搭"的自检：监听器没生效、或库里根本没灌数据时，
+     * 查询会落到平台库，读到的是 gdou 的类别（tenant_id 不同，一条也匹配不上）。
+     */
+    @Test
+    @TenantTestDb(TestTenantBootstrap.SCHEMA)
+    void 标注后查询落在真实租户库() {
+        assertThat(TenantRoutingContext.currentKey()).isEqualTo(TestTenantBootstrap.SCHEMA);
+
+        List<TicketCategory> categories = categoryMapper.selectList(
+                Wrappers.<TicketCategory>lambdaQuery().eq(TicketCategory::getTenantId, TestTenantBootstrap.TENANT_ID));
+        assertThat(categories).as("测试租户库里灌了 6 个类别").hasSize(6);
+        assertThat(categories).allMatch(c -> c.getTenantId().equals(TestTenantBootstrap.TENANT_ID));
     }
 
     // ==================== 新开通的学校：自己的库 ====================
