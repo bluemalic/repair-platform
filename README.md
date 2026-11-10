@@ -229,6 +229,8 @@ repair-platform/
 │   └── 既是普通 jar（单体依赖 → lite 合并进程），也是独立进程（full，:8081）
 ├── repair-platform-service/      平台运营域（开通 / 停用学校、统一认证配置，Dockerfile.platform）；
 │   └── 依赖 identity（开通时建首个管理员），独立进程 :8082
+├── repair-ticket-service/        工单域（状态机 / 派单 / 协作 / 评价 / 资产 / 基础数据 + 工单流转内核）；
+│   └── ai 的两个端点（triage / advice）留在单体，避免 ticket 反向依赖 ai 的实现
 ├── repair-db-migrator/           迁移作业（控制库 + 每个租户库，Dockerfile.migrator）；
 │   └── WebApplicationType.NONE，跑完退出，失败非 0——full 发布时先跑它再重启服务
 ├── repair-gateway-service/       API 网关（21 条显式路由 + Sa-Token 校验 + 身份头注入/可选签名，Dockerfile.gateway）；
