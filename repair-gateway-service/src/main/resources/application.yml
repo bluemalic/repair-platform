@@ -83,7 +83,7 @@ spring:
               predicates:
                 - Path=/api/admin/audit-logs/**
             - id: ticket-student-agent
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_AI_URI:http://127.0.0.1:8084}
               order: 70
               predicates:
                 - Path=/api/student/agent/**
@@ -99,7 +99,7 @@ spring:
                 - Path=/api/student/assets/**
             # 维修工端的 AI 建议：必须排在 worker/tickets/** 之前
             - id: ticket-worker-advice
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_AI_URI:http://127.0.0.1:8084}
               order: 100
               predicates:
                 - Path=/api/worker/tickets/*/advice
@@ -108,6 +108,12 @@ spring:
               order: 110
               predicates:
                 - Path=/api/worker/tickets/**
+            # 智能分诊在 ai 域（阶段 5）：必须排在 /api/admin/tickets/** 之前
+            - id: ai-ticket-triage
+              uri: ${GATEWAY_AI_URI:http://127.0.0.1:8084}
+              order: 118
+              predicates:
+                - Path=/api/admin/tickets/*/triage
             - id: ticket-admin-tickets
               uri: ${GATEWAY_TICKET_URI:http://127.0.0.1:8080}
               order: 120
@@ -119,7 +125,7 @@ spring:
               predicates:
                 - Path=/api/admin/statistics/**
             - id: ticket-admin-knowledge
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_AI_URI:http://127.0.0.1:8084}
               order: 140
               predicates:
                 - Path=/api/admin/knowledge/**
@@ -149,7 +155,7 @@ spring:
               predicates:
                 - Path=/api/files/**
             - id: ticket-ai
-              uri: ${GATEWAY_APP_URI:http://127.0.0.1:8080}
+              uri: ${GATEWAY_AI_URI:http://127.0.0.1:8084}
               order: 200
               predicates:
                 - Path=/api/ai/**

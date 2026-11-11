@@ -28,7 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "GATEWAY_APP_URI=http://127.0.0.1:18080",
         "GATEWAY_IDENTITY_URI=http://127.0.0.1:18081",
         "GATEWAY_PLATFORM_URI=http://127.0.0.1:18082",
-        "GATEWAY_TICKET_URI=http://127.0.0.1:18083"
+        "GATEWAY_TICKET_URI=http://127.0.0.1:18083",
+        "GATEWAY_AI_URI=http://127.0.0.1:18084"
 })
 class GatewayRouteTableTest {
 
@@ -46,12 +47,45 @@ class GatewayRouteTableTest {
     }
 
     @Test
+    void AI前缀指向ai服务() {
+        Map<String, RouteDefinition> routes = routes();
+
+        assertThat(routes).containsKeys("ticket-ai", "ticket-student-agent", "ticket-worker-advice",
+                "ticket-admin-knowledge", "ai-ticket-triage");
+        for (String id : List.of("ticket-ai", "ticket-student-agent", "ticket-worker-advice",
+                "ticket-admin-knowledge", "ai-ticket-triage")) {
+            assertThat(routes.get(id).getUri().toString())
+                    .as("%s 属于 AI 域，应当指向 GATEWAY_AI_URI", id)
+                    .contains("18084");
+        }
+    }
+
+    @Test
+    void 工单前缀指向ticket服务而统计与通知仍留在app() {
+        Map<String, RouteDefinition> routes = routes();
+
+        for (String id : List.of("ticket-admin-tickets", "ticket-worker-tickets", "ticket-by-code",
+                "ticket-dictionaries", "ticket-admin-base-data")) {
+            assertThat(routes.get(id).getUri().toString())
+                    .as("%s 属于工单域", id).contains("18083");
+        }
+        // 路由 id 前缀是 ticket-，但实现在 ai / 统计 / 通知链路里，仍指 app
+        for (String id : List.of("ticket-admin-statistics", "ticket-notifications", "ticket-files")) {
+            assertThat(routes.get(id).getUri().toString())
+                    .as("%s 不属于工单域，应留在 app", id).contains("18080");
+        }
+    }
+
+    @Test
     void 具体路径排在通配路径之前() {
         Map<String, RouteDefinition> routes = routes();
 
         assertThat(routes.get("ticket-worker-advice").getOrder())
                 .as("/api/worker/tickets/*/advice 必须先于 /api/worker/tickets/**")
                 .isLessThan(routes.get("ticket-worker-tickets").getOrder());
+        assertThat(routes.get("ai-ticket-triage").getOrder())
+                .as("/api/admin/tickets/*/triage 必须先于 /api/admin/tickets/**")
+                .isLessThan(routes.get("ticket-admin-tickets").getOrder());
         assertThat(routes.get("ticket-worker-scope-buildings").getOrder())
                 .as("PUT /api/admin/workers/*/buildings 必须先于 /api/admin/workers/**")
                 .isLessThan(routes.get("identity-workers").getOrder());
