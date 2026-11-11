@@ -1,0 +1,55 @@
+# ================= ai-service 镜像（阶段 5 · ADR-036）=================
+# AI 域：NL2SQL 问数（SSE）/ 受理与分诊 Agent / 维修知识库建议。
+# 只读工单表（domain mapper），不依赖 ticket 进程。
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+
+ARG MAVEN_MIRROR
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 && \
+      printf '%s' "<settings><mirrors><mirror><id>mirror</id><mirrorOf>*</mirrorOf><url>$MAVEN_MIRROR</url></mirror></mirrors></settings>" > /root/.m2/settings.xml && \
+      echo "已启用 Maven 镜像源: $MAVEN_MIRROR"; \
+    fi
+
+COPY pom.xml .
+COPY repair-common/pom.xml repair-common/pom.xml
+COPY repair-domain/pom.xml repair-domain/pom.xml
+COPY repair-notification-service/pom.xml repair-notification-service/pom.xml
+COPY repair-timeout-api/pom.xml repair-timeout-api/pom.xml
+COPY repair-timeout-service/pom.xml repair-timeout-service/pom.xml
+COPY repair-gateway-service/pom.xml repair-gateway-service/pom.xml
+COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
+COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
+COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
+COPY repair-ticket-service/pom.xml repair-ticket-service/pom.xml
+COPY repair-ai-service/pom.xml repair-ai-service/pom.xml
+COPY repair-app/pom.xml repair-app/pom.xml
+RUN mvn -B -q dependency:go-offline
+
+COPY repair-common/src ./repair-common/src
+COPY repair-domain/src ./repair-domain/src
+COPY repair-ai-service/src ./repair-ai-service/src
+RUN mvn -B clean package -DskipTests -pl repair-ai-service -am
+
+# ================= 运行阶段 =================
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+ENV SPRING_PROFILES_ACTIVE=ai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
+COPY --from=builder /build/repair-ai-service/target/*-exec.jar app.jar
+
+EXPOSE 8084
+
+ENTRYPOINT ["sh", "-c", "java \
+  -XX:+UseContainerSupport \
+  -XX:MaxRAMPercentage=${JAVA_MAX_RAM_PERCENTAGE:-55} \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/app/logs \
+  -Duser.timezone=Asia/Shanghai \
+  -jar app.jar"]
