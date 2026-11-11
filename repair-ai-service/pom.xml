@@ -72,6 +72,14 @@
             <artifactId>langchain4j-open-ai</artifactId>
             <version>${langchain4j.version}</version>
         </dependency>
+        <!-- AI Agent 编排（阶段 6 · ADR-031 落地）：AiServices / @Tool / ChatMemory / ChatModelListener
+             都在**主包**里，`langchain4j-open-ai` 只带 core（没有 service 层）。
+             这是本阶段唯一新增的运行时依赖，理由与替代方案见 ADR-037。 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>com.mysql</groupId>

@@ -38,6 +38,11 @@ import java.lang.annotation.Target;
         mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS)
 @SpringBootTest(classes = RepairPlatformApplication.class, properties = {
         "repair.timeout.scheduler-enabled=false",
+        // Agent 编排默认走手写循环（阶段 6 · ADR-037）：集成测试里的假模型是 AgentModel 实现，
+        // 换成 AiServices 引擎后它不会被调用（那边要真 ChatModel），会全部以 40004 失败。
+        // 新引擎的契约由 repair-ai-service 的 AiServicesAgentRunnerTest 覆盖；
+        // 真模型端到端只在 docs/07 的评测里跑（那时用默认引擎）。
+        "repair.agent.engine=loop",
         // Outbox relay 的定时触发在测试里关掉：它会在每个库上空转、并和测试事务抢数据。
         // 需要验证 relay 的用例直接调用 OutboxRelayJob#relayOnce（包级可见）。
         "repair.outbox.relay-enabled=false",

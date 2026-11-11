@@ -39,6 +39,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>本类盯的**只有一件事**：Agent 的输出是"建议"，不是状态变更。所以每个用例都顺带断言
  * "工单数没变"，以及那些"模型可以乱说、但服务端必须纠正"的地方（编造的 id、漏填的字段）。
+ *
+ * <p><b>为什么固定 {@code repair.agent.engine=loop}</b>（阶段 6 · ADR-037）：本类的假模型
+ * {@link TestAgentModel} 实现的是手写循环的 {@code AgentModel} 接口，切到 {@code AiServices}
+ * 引擎后它不会被调用（那边要的是真 {@code ChatModel}），测试会以 40004 失败。
+ * 所以这里显式钉住旧引擎——它现在承担"回退路径仍然可用"的回归；
+ * 新引擎的契约由 {@code AiServicesAgentRunnerTest} 覆盖。要恢复成默认引擎的端到端覆盖，
+ * 需要把假实现换成假 {@code ChatModel}（与真模型评测一起做）。
  */
 @IntegrationTest
 class TicketAgentTest {
