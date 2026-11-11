@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "description": "Agent 评测集（docs/07 §5）：报修受理 8 条 + 智能分诊 3 条",
+  "datasetNote": "受理用例不依赖具体 id（只判 ready / missing / 工具是否调用），换学校也能跑；分诊用例按工单描述关键词找单。",
+  "intake": [
+    {
+      "id": "A1",
+      "message": "我是1号楼101的，宿舍椅子有一条腿断了",
+      "expectReady": true,
+      "expectMissingEmpty": true,
+      "expectTools": ["listCategories", "listBuildings"],
+      "expect": "一轮就 ready；类别=家具；楼栋=1号楼；房间 101"
+    },
+    {
+      "id": "A2",
+      "message": "宿舍水管漏水了",
+      "expectReady": false,
+      "expectMissingIncludes": ["location"],
+      "expectNoDraftField": ["buildingId", "room"],
+      "expect": "不许编造楼栋与房间"
+    },
+    {
+      "id": "A3",
+      "message": "灯不亮了",
+      "useDatasetRepairCode": true,
+      "expectReady": true,
+      "expect": "位置来自报修码，不再追问 location（码由脚本从 /api/admin/repair-codes 现取，不写死——演示重置会重新生成）"
+    },
+    {
+      "id": "A4",
+      "message": "门关不上了，在3号楼的412",
+      "repairCode": "000000",
+      "expectReady": true,
+      "expect": "无效码不报错，位置从文字补上"
+    },
+    {
+      "id": "A5",
+      "message": "漏水很严重",
+      "followUps": ["3号楼", "412"],
+      "expectReady": true,
+      "expect": "三轮补全，前两轮字段不丢"
+    },
+    {
+      "id": "A6",
+      "message": "我这个是第 99 号类别的问题",
+      "expectReady": false,
+      "expectNoFakeId": true,
+      "expect": "不许采用 99；id 必须来自 listCategories"
+    },
+    {
+      "id": "A7",
+      "message": "宿舍有东西坏了",
+      "expectReady": false,
+      "expectMissingNotEmpty": true,
+      "expect": "reply 是追问"
+    }
+  ],
+  "triage": [
+    {
+      "id": "C1",
+      "matchKeywords": ["水管", "滴水"],
+      "expectUrgencyAtLeast": 2,
+      "expect": "建议=水电；紧急度≥2；理由提到水/漏"
+    },
+    {
+      "id": "C2",
+      "matchKeywords": ["门锁", "钥匙"],
+      "expectUrgencyAtLeast": 1,
+      "expect": "建议=门锁；理由提到门/锁/钥匙"
+    },
+    {
+      "id": "C3",
+      "matchKeywords": ["窗帘"],
+      "expectUrgencyAtLeast": 1,
+      "expect": "类别可含糊，但 id 必须合法且给得出理由"
+    }
+  ]
+}

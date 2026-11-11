@@ -71,3 +71,6 @@ desktop.ini
 /redis-data/
 /minio-data/
 .zcodeignore
+
+# AI 评测产物（含模型原始输出，体积大且是一次性的）
+scripts/ai-eval/results/
