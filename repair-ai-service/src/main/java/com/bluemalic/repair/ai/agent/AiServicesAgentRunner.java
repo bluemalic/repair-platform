@@ -74,7 +74,13 @@ public class AiServicesAgentRunner implements AgentRunner {
         }
 
         List<AgentTraceStep> trace = new ArrayList<>();
-        ChatMemory memory = MessageWindowChatMemory.withMaxMessages(messages.size());
+        // 窗口必须容得下**一轮工具调用产生的三条消息**（AiMessage(tool_calls) + ToolExecutionResult + AiMessage），
+        // 否则第二轮工具调用时会把带 tool_calls 的那条挤掉，留下一个没有前驱的 tool 结果。
+        // DeepSeek 会直接拒收：`Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`。
+        //
+        // 这一条是 2026-11-11 真跑评测才暴露的：单元测试里的脚本化模型不校验消息序列，
+        // 而窗口只给「历史条数」在单轮工具调用下刚好够，两轮就断——所以这里按 maxSteps 的两倍留足。
+        ChatMemory memory = MessageWindowChatMemory.withMaxMessages(memoryCapacity(messages.size(), maxSteps));
         // system 与之前轮次先灌进去；最后一条用户输入交给 chat()，避免重复
         messages.subList(0, messages.size() - 1).forEach(memory::add);
 
@@ -96,6 +102,17 @@ public class AiServicesAgentRunner implements AgentRunner {
                     maxSteps, trace.size(), e);
             return new AgentRun("", trace, true);
         }
+    }
+
+    /**
+     * 记忆窗口容量：历史 + 每条工具调用占 2 条（请求 + 结果）+ 收尾的助手消息 + 余量。
+     *
+     * <p>下限 20 是为了短会话（只有 system + 一句用户输入）时不至于贴着边界跑。
+     * 窗口**只影响成本**（发多少条给模型），不影响正确性——截断由会话层（{@code AgentSessionStore}）负责，
+     * 那里有明确的上限与淘汰策略。
+     */
+    static int memoryCapacity(int historySize, int maxSteps) {
+        return Math.max(20, historySize + maxSteps * 2 + 4);
     }
 
     /**

@@ -72,6 +72,69 @@ class AiServicesAgentRunnerTest {
         assertThat(run.stepLimitReached()).isFalse();
     }
 
+    /**
+     * 回归：**两轮工具调用之后，消息序列仍然合法**。
+     *
+     * <p>2026-11-11 真跑评测时，Agent 第一次请求就 40004，DeepSeek 报
+     * {@code Messages with role 'tool' must be a response to a preceding message with 'tool_calls'}。
+     * 根因是记忆窗口只给了「历史条数」：第二轮工具调用时把带 {@code tool_calls} 的 AiMessage 挤掉，
+     * 留下一个没有前驱的 tool 结果。单轮用例发现不了——它刚好贴着窗口边界但不越界。
+     *
+     * <p>这条断言与模型无关：直接检查框架发出去的第三次请求里，每个 {@code tool} 结果的前一条
+     * 必须是带 {@code tool_calls} 的 assistant 消息。
+     */
+    /**
+     * 窗口容量的**硬下限**：一条工具调用要在记忆里占 2 条消息（{@code AiMessage(tool_calls)} + 结果），
+     * 所以「历史 + 2 × 步数」是能跑满 {@code maxSteps} 轮的最小值。
+     *
+     * <p>这条比下面那条更直接：下面的用例只能验"序列合法"，而真实故障是"窗口太小导致序列不合法"，
+     * 脚本化模型不会像 DeepSeek 那样拒收，所以必须把窗口本身钉住。
+     */
+    @Test
+    void 记忆窗口容得下跑满步数的工具往返() {
+        assertThat(AiServicesAgentRunner.memoryCapacity(2, 6)).isGreaterThanOrEqualTo(2 + 6 * 2);
+        assertThat(AiServicesAgentRunner.memoryCapacity(0, 1)).as("短会话也有下限，不贴边界跑").isGreaterThanOrEqualTo(20);
+    }
+
+    @Test
+    void 两轮工具调用后消息序列仍然合法() {
+        when(registry.all()).thenReturn(List.of(tool("list_buildings", "3 栋楼")));
+        List<List<ChatMessage>> requests = new ArrayList<>();
+        ChatModel model = new ChatModel() {
+            private int round;
+
+            @Override
+            public ChatResponse doChat(ChatRequest request) {
+                requests.add(new ArrayList<>(request.messages()));
+                round++;
+                if (round <= 2) {
+                    return ChatResponse.builder().aiMessage(ai("", ToolExecutionRequest.builder()
+                            .id("call-" + round).name("list_buildings").arguments("{}").build())).build();
+                }
+                return ChatResponse.builder().aiMessage(ai("共有 3 栋楼")).build();
+            }
+        };
+        when(provider.get()).thenReturn(model);
+        when(provider.call(anyString(), any())).thenAnswer(invocation -> {
+            Supplier<?> action = invocation.getArgument(1);
+            return action.get();
+        });
+
+        AgentRun run = runner().run(List.of(SystemMessage.from("你是受理助手"), UserMessage.from("有哪些楼")));
+
+        assertThat(run.reply()).isEqualTo("共有 3 栋楼");
+        assertThat(run.trace()).hasSize(2);
+        List<ChatMessage> third = requests.get(2);
+        for (int i = 0; i < third.size(); i++) {
+            if (third.get(i) instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
+                assertThat(third.get(i - 1))
+                        .as("tool 结果的前一条必须是带 tool_calls 的 assistant 消息（否则模型拒收）")
+                        .isInstanceOf(AiMessage.class);
+                assertThat(((AiMessage) third.get(i - 1)).hasToolExecutionRequests()).isTrue();
+            }
+        }
+    }
+
     @Test
     void 最后一条不是用户输入时直接拒绝() {
         assertThatThrownBy(() -> runner().run(List.of(SystemMessage.from("你是受理助手"))))
