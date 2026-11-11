@@ -3,8 +3,7 @@ package com.bluemalic.repair.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.bluemalic.repair.ai.ModelReplies;
-import com.bluemalic.repair.ai.agent.AgentLoop;
-import com.bluemalic.repair.ai.agent.AgentModel;
+import com.bluemalic.repair.ai.agent.AgentRunner;
 import com.bluemalic.repair.ai.agent.AgentPrompts;
 import com.bluemalic.repair.ai.agent.AgentRun;
 import com.bluemalic.repair.ai.agent.AgentSession;
@@ -66,8 +65,7 @@ public class TicketAgentServiceImpl implements TicketAgentService {
     /** 纯数字（可带负号）。用来认出"被引号包起来的整数"，见 {@link #numericOrNull}。 */
     private static final Pattern NUMBER_PATTERN = Pattern.compile("-?[0-9]+");
 
-    private final AgentLoop agentLoop;
-    private final AgentModel agentModel;
+    private final AgentRunner agentRunner;
     private final AgentSessionStore sessions;
     private final CurrentTenantService currentTenantService;
     private final RepairCodeMapper repairCodeMapper;
@@ -86,7 +84,7 @@ public class TicketAgentServiceImpl implements TicketAgentService {
         AgentSession.Draft seeded = mergeLocation(session.draft(),
                 resolveRepairCode(tenantId, dto.getRepairCode()));
 
-        AgentRun run = agentLoop.run(agentModel, messages(session, seeded, dto.getMessage()));
+        AgentRun run = agentRunner.run(messages(session, seeded, dto.getMessage()));
         ModelAnswer answer = parseIntake(run.reply());
 
         AgentSession.Draft draft = verifyIds(tenantId, seeded.merge(answer.draft()));
@@ -116,7 +114,7 @@ public class TicketAgentServiceImpl implements TicketAgentService {
         List<ChatMessage> messages = List.of(
                 SystemMessage.from(AgentPrompts.triage()),
                 UserMessage.from(triageUserMessage(ticket)));
-        AgentRun run = agentLoop.run(agentModel, messages);
+        AgentRun run = agentRunner.run(messages);
         ModelAnswer answer = parseTriage(run.reply());
         AgentSession.Draft draft = verifyIds(tenantId,
                 new AgentSession.Draft(answer.draft().categoryId(), answer.draft().urgency(), null, null, null));

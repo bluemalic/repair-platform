@@ -3,6 +3,7 @@ package com.bluemalic.repair.ai.agent;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,11 @@ public class AgentToolRegistry {
     /** 按名字取工具；不在白名单里返回 {@code null}（调用方负责拒绝并回一句话给模型）。 */
     public AgentTool find(String name) {
         return tools.get(name);
+    }
+
+    /** 白名单里的全部工具（阶段 6：AiServices 引擎要把它们桥接成 spec → executor）。 */
+    public Collection<AgentTool> all() {
+        return tools.values();
     }
 
     /** 白名单里的工具名，供提示词与日志使用。 */
