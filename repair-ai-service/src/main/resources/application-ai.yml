@@ -1,0 +1,29 @@
+# ============================================================
+# AI 域服务（full 形态独立进程）
+# ============================================================
+#
+# 启动：java -jar repair-ai-service-exec.jar --spring.profiles.active=ai
+#
+# 与其他域一样不跑 Flyway、不做启动期逐库同步（都归 repair-db-migrator）。
+# 只读账号（AI_DB_USERNAME / AI_DB_PASSWORD）由 AiReadOnlyAccountBootstrap 在启动时创建/收敛，
+# 连接池内嵌在 AiQueryExecutor（按库懒建，maximumPoolSize=2）。
+# ============================================================
+server:
+  # SSE 问数要长连接：读超时在网关与 nginx 各配一次（docs/03 §4.1 规则 4）
+  port: ${AI_PORT:8084}
+
+spring:
+  application:
+    name: repair-ai
+  flyway:
+    enabled: false
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
+        register-enabled: ${NACOS_DISCOVERY_ENABLED:false}
+
+repair:
+  tenancy:
+    bootstrap-enabled: false
