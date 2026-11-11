@@ -519,6 +519,66 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # AI 域（阶段 5 · ADR-036）：只读工单表，不依赖 ticket 进程
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: repair-ai-service:latest
+    container_name: repair-ai-service
+    restart: unless-stopped
+    profiles: ["services"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 模型 Key 与只读账号口令都在 .env 里，整个文件传进去（与 app 同一个取舍）
+    env_file: .env
+    environment:
+      SPRING_PROFILES_ACTIVE: ai
+      TZ: Asia/Shanghai
+      JAVA_MAX_RAM_PERCENTAGE: ${AI_JAVA_MAX_RAM_PERCENTAGE:-55}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-repair}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
+      NACOS_ADDR: nacos:8848
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        java
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=$${JAVA_MAX_RAM_PERCENTAGE:-55}
+        -XX:+HeapDumpOnOutOfMemoryError
+        -XX:HeapDumpPath=/app/logs
+        -Duser.timezone=Asia/Shanghai
+        -jar app.jar
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8084"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${AI_MEM_LIMIT:-512M}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # 一次性作业：restart: "no"，跑完就退出。发布时先跑它，再重启服务。
   migrator:
     build:
@@ -603,6 +663,8 @@ services:
       GATEWAY_PLATFORM_URI: ${GATEWAY_PLATFORM_URI:-http://app:8080}
       # 工单域（阶段 3.4）：lite 同样指 app；full 覆盖成 lb://repair-ticket
       GATEWAY_TICKET_URI: ${GATEWAY_TICKET_URI:-http://app:8080}
+      # AI 域（阶段 5）：lite 同样指 app；full 覆盖成 lb://repair-ai
+      GATEWAY_AI_URI: ${GATEWAY_AI_URI:-http://app:8080}
       GATEWAY_HMAC_SECRET: ${GATEWAY_HMAC_SECRET:-}
       NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
       NACOS_SERVER_ADDR: nacos:8848

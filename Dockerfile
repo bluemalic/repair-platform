@@ -29,6 +29,7 @@ COPY repair-identity-service/pom.xml repair-identity-service/pom.xml
 COPY repair-platform-service/pom.xml repair-platform-service/pom.xml
 COPY repair-db-migrator/pom.xml repair-db-migrator/pom.xml
 COPY repair-ticket-service/pom.xml repair-ticket-service/pom.xml
+COPY repair-ai-service/pom.xml repair-ai-service/pom.xml
 COPY repair-timeout-api/pom.xml repair-timeout-api/pom.xml
 COPY repair-app/pom.xml repair-app/pom.xml
 RUN mvn -B -q dependency:go-offline
@@ -45,6 +46,7 @@ COPY repair-identity-service/src ./repair-identity-service/src
 COPY repair-platform-service/src ./repair-platform-service/src
 COPY repair-ticket-service/src ./repair-ticket-service/src
 COPY repair-timeout-api/src ./repair-timeout-api/src
+COPY repair-ai-service/src ./repair-ai-service/src
 COPY repair-app/src ./repair-app/src
 # 用 maven.test.skip 而不是 skipTests：生产镜像不需要测试，而 skipTests 仍会**编译测试**——
 # 测试类直接 new 跨模块的实现类（如 TimeoutServiceImpl），在镜像裁剪后的 classpath 上
