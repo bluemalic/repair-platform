@@ -233,6 +233,8 @@ repair-platform/
 │   └── ai 的两个端点（triage / advice）留在单体，避免 ticket 反向依赖 ai 的实现
 ├── repair-timeout-api/           超时的登记端口与实现（TimeoutRegistrar / TimeoutKeys / ZSet 或 MQ）；
 │   └── 只装"什么时候到期"，扫描/执行在 timeout-service —— 这样 ticket 才能独立起进程
+├── repair-ai-service/            AI 域（NL2SQL 问数 / 受理与分诊 Agent / 知识库建议，Dockerfile.ai）；
+│   └── 只读工单表（domain mapper），不依赖 ticket / identity 的 service
 ├── repair-db-migrator/           迁移作业（控制库 + 每个租户库，Dockerfile.migrator）；
 │   └── WebApplicationType.NONE，跑完退出，失败非 0——full 发布时先跑它再重启服务
 ├── repair-gateway-service/       API 网关（21 条显式路由 + Sa-Token 校验 + 身份头注入/可选签名，Dockerfile.gateway）；
