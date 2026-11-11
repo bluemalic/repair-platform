@@ -40,7 +40,7 @@
 | 对象存储 | MinIO（S3 协议） | 不要直接依赖 OSS SDK，只依赖 S3 API |
 | 鉴权 | Sa-Token | 不要引入 Spring Security |
 | 接口文档 | Knife4j（OpenAPI 3） | 每个接口都要有注解 |
-| AI | LangChain4j + DeepSeek API | Key 只从环境变量读 |
+| AI | LangChain4j + DeepSeek API | Key 只从环境变量读。**两个坐标**：`langchain4j-open-ai`（模型调用）与 `langchain4j` 主包（Agent 编排 `AiServices` / `ChatMemory`，阶段 6 起）；版本共用根 POM 的 `${langchain4j.version}` |
 | 测试 | JUnit 5 + Mockito | |
 | 管理端前端 | Vue 3 + Vite + TypeScript + Element Plus + ECharts | 在 `web-admin/`，自带 package.json |
 | 移动端前端 | uni-app（Vue 3 语法，先编译 H5） | 在 `miniapp-h5/`，学生端与维修工端同一工程按角色路由 |
