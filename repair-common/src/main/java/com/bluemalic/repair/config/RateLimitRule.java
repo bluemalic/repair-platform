@@ -40,14 +40,18 @@ public class RateLimitRule {
 
     private final int aiMaxRequests;
 
+    private final int aiGlobalMaxRequests;
+
     public RateLimitRule(@Value("${repair.rate-limit.max-requests:60}") int maxRequests,
                          @Value("${repair.rate-limit.login-max-requests:10}") int loginMaxRequests,
                          @Value("${repair.rate-limit.window-seconds:60}") int windowSeconds,
-                         @Value("${repair.ai.rate-limit-max-requests:10}") int aiMaxRequests) {
+                         @Value("${repair.ai.rate-limit-max-requests:10}") int aiMaxRequests,
+                         @Value("${repair.ai.global-rate-limit-max-requests:30}") int aiGlobalMaxRequests) {
         this.maxRequests = maxRequests;
         this.loginMaxRequests = loginMaxRequests;
         this.windowSeconds = windowSeconds;
         this.aiMaxRequests = aiMaxRequests;
+        this.aiGlobalMaxRequests = Math.max(1, aiGlobalMaxRequests);
     }
 
     /**

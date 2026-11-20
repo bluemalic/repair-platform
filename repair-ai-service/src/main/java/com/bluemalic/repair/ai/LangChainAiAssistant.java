@@ -78,8 +78,9 @@ public class LangChainAiAssistant implements AiAssistant {
      * 也更好修——先报它，用户才不会被一个数据库错误引到错误的方向上。
      */
     private void requireModelConfigured() {
-        if (!aiProperties.modelConfigured()) {
-            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 问数未启用（服务器上没配 AI_MODEL_API_KEY）");
+        if (!aiProperties.modelEnabled()) {
+            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
+                    "AI 问数未启用（服务器未打开 AI 或未配置 AI_MODEL_API_KEY）");
         }
     }
 

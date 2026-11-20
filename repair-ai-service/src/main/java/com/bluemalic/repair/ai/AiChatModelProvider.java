@@ -8,8 +8,10 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 
 /**
@@ -32,11 +34,20 @@ public class AiChatModelProvider {
 
     private final AiProperties aiProperties;
     private final MetricsRecorder metricsRecorder;
+
+    private final Semaphore concurrency;
     private volatile ChatModel chatModel;
 
+    @Autowired
     public AiChatModelProvider(AiProperties aiProperties, MetricsRecorder metricsRecorder) {
+        this(aiProperties, metricsRecorder, aiProperties.getMaxConcurrentRequests());
+    }
+
+    /** 测试与非 Spring 调用的显式并发上限构造函数。 */
+    public AiChatModelProvider(AiProperties aiProperties, MetricsRecorder metricsRecorder, int maxConcurrentRequests) {
         this.aiProperties = aiProperties;
         this.metricsRecorder = metricsRecorder;
+        this.concurrency = new Semaphore(Math.max(1, maxConcurrentRequests));
     }
 
     public ChatModel get() {
@@ -44,9 +55,9 @@ public class AiChatModelProvider {
         if (model == null) {
             synchronized (this) {
                 if (chatModel == null) {
-                    if (!aiProperties.modelConfigured()) {
+                    if (!aiProperties.modelEnabled()) {
                         throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
-                                "AI 未启用（服务器上没配 AI_MODEL_API_KEY）");
+                                "AI 未启用（服务器未打开 AI 或未配置 AI_MODEL_API_KEY）");
                     }
                     chatModel = OpenAiChatModel.builder()
                             .apiKey(aiProperties.getApiKey())
@@ -73,6 +84,13 @@ public class AiChatModelProvider {
      * "模型这会儿用不了"，统一成 {@code AI_MODEL_UNAVAILABLE}，并把真实原因留在 WARN 日志里。
      */
     public <T> T call(String what, Supplier<T> action) {
+        if (!aiProperties.modelEnabled()) {
+            throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE,
+                    "AI 未启用（服务器未打开 AI 或未配置 AI_MODEL_API_KEY）");
+        }
+        if (!concurrency.tryAcquire()) {
+            throw new BizException(ErrorCode.TOO_MANY_REQUESTS, "AI 当前请求较多，请稍后重试");
+        }
         try {
             T result = action.get();
             // AI 调用次数 = 成本，这是最该有数字的一项（按用途与结果分开计）
@@ -85,6 +103,8 @@ public class AiChatModelProvider {
             metricsRecorder.aiCall(what, false);
             log.warn("调用模型失败（{}）model={} err={}", what, aiProperties.getModelName(), e.getMessage());
             throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE);
+        } finally {
+            concurrency.release();
         }
     }
 }

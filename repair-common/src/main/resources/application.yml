@@ -144,6 +144,11 @@ mybatis-plus:
 # 默认关闭：本地开发与测试不依赖 MQ；生产或 smoke test 设 REPAIR_ROCKETMQ_ENABLED=true
 # ============================================================
 repair:
+  ai:
+    # AI 必须显式开启，避免仅因模型密钥进入环境就启用付费能力。
+    enabled: ${REPAIR_AI_ENABLED:false}
+    max-concurrent-requests: ${REPAIR_AI_MAX_CONCURRENT_REQUESTS:4}
+    global-rate-limit-max-requests: ${REPAIR_AI_GLOBAL_MAX_REQUESTS:30}
   rocketmq:
     enabled: ${REPAIR_ROCKETMQ_ENABLED:false}
     name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}

@@ -23,7 +23,7 @@ public @interface RateLimit {
     /**
      * 阈值档位，留空表示默认档（{@code repair.rate-limit.max-requests}）。
      *
-     * <p>目前只有 {@code "ai"} 一档：问数每次调用都要花钱，需要比默认档严得多
+     * <p>目前只有 {@code "ai"} 一档：问数与 Agent 请求可能产生模型费用，需要比默认档严格
      * （{@code repair.ai.rate-limit-max-requests}）。**档位名拼错不会报错、会静默回落到默认档**，
      * 所以认不出的档位在 {@code RateLimitRule} 里只回默认值，不猜。
      *

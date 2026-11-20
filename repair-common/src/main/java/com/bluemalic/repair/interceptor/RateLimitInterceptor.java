@@ -16,8 +16,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * 基于 Redis 固定窗口的接口限流（配合 {@link RateLimit} 注解使用）。
  *
- * <p>目前挂在"吃报修码"的两个接口上（{@code GET /api/tickets/by-code/{code}} 与
- * {@code POST /api/worker/tickets/{id}/arrive}）：报修码是 6 位数字、租户内唯一（ADR-004），
+ * <p>目前用于"吃报修码"的接口与付费 AI 接口：报修码是 6 位数字、租户内唯一（ADR-004），
  * 是全项目最典型的"猜一个短字符串就能拿到数据"的入口，不设限流等于把"扫完整个码空间"
  * 变成一条脚本就能完成的事（docs/01 §5「报修码随机生成、防枚举」）。
  *
@@ -32,7 +31,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *   <li><b>INCR 与 EXPIRE 交给 {@link RateLimiter} 里的一段 Lua</b>，不在这里分两次调 Redis：
  *       那个把计数从 0 变成 1 的请求如果在两步之间失败，键就永久没有 TTL，这个用户会被自己的
  *       计数一直挡在门外，直到有人手工清键。</li>
- *   <li><b>Redis 不可用时放行而不是拦死</b>（即 {@code increment} 返回 null 时的处理）。</li>
+ *   <li>Redis 不可用时，普通接口保持历史放行策略；AI 是付费能力，计数不可用时 fail-closed。</li>
  * </ol>
  *
  * <p>顺序由 {@code RateLimitConfig} 显式排在 Sa-Token 之后：计数以登录用户为维度，
@@ -79,7 +78,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String key = RateLimiter.KEY_PREFIX + loginId + ":" + counted;
         Long count = rateLimiter.increment(key, rule.getWindowSeconds());
         if (count == null) {
-            // 拿不到计数就别拦人（Redis 挂了，或管道/事务模式下脚本返回空）
+            // 普通接口保持历史的 fail-open；AI 是付费能力，计数不可用时必须 fail-closed。
+            if (RateLimitRule.KEY_AI.equals(annotated.key())) {
+                throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 限流服务暂不可用");
+            }
             return true;
         }
         if (count > maxRequests) {
@@ -87,6 +89,20 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             log.warn("触发限流 key={} 档位={} 第 {} 次请求，阈值 {}/{}s",
                     key, annotated.key(), count, maxRequests, rule.getWindowSeconds());
             throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
+        }
+
+        if (RateLimitRule.KEY_AI.equals(annotated.key())) {
+            // 用户限流防单个账号滥用；全局窗口防多个账号共同耗尽供应商余额。
+            Long globalCount = rateLimiter.increment(RateLimiter.KEY_PREFIX + "global:tier:ai",
+                    rule.getWindowSeconds());
+            if (globalCount == null) {
+                throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 限流服务暂不可用");
+            }
+            if (globalCount > rule.getAiGlobalMaxRequests()) {
+                log.warn("触发 AI 全局限流 count={} threshold={}/{}s",
+                        globalCount, rule.getAiGlobalMaxRequests(), rule.getWindowSeconds());
+                throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
+            }
         }
         return true;
     }
