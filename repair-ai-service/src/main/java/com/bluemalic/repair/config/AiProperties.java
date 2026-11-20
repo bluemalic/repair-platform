@@ -1,6 +1,7 @@
 package com.bluemalic.repair.config;
 
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -14,6 +15,8 @@ import org.springframework.util.StringUtils;
  *   <li>{@code REPAIR_AI_QUERY_TIMEOUT_MS}：单条 SQL 的执行超时，默认 3000（第 4 层）</li>
  *   <li>{@code REPAIR_AI_MAX_ROWS}：返回行数上限，默认 1000（第 4 层）</li>
  *   <li>{@code REPAIR_AI_RATE_LIMIT_MAX_REQUESTS}：问数接口每分钟上限，默认 10（**它是花钱的接口**）</li>
+ *   <li>{@code REPAIR_AI_ENABLED}：显式总开关；lite profile 默认关闭，避免仅因 Key 存在就向公网提供模型调用</li>
+ *   <li>{@code REPAIR_AI_MAX_CONCURRENT_REQUESTS}：单进程模型调用并发上限，默认 4</li>
  * </ul>
  *
  * <p><b>为什么不给 Key 设默认值</b>：AI_MODEL_API_KEY 留空就是"不启用 AI"，这是合法状态
@@ -45,6 +48,12 @@ public class AiProperties {
 
     private final int rateLimitMaxRequests;
 
+    private final boolean enabledByConfig;
+
+    private final int maxConcurrentRequests;
+
+    /** Spring 使用的配置构造函数。 */
+    @Autowired
     public AiProperties(@Value("${AI_MODEL_API_KEY:}") String apiKey,
                         @Value("${AI_MODEL_BASE_URL:https://api.deepseek.com}") String baseUrl,
                         @Value("${AI_MODEL_NAME:deepseek-chat}") String modelName,
@@ -52,7 +61,9 @@ public class AiProperties {
                         @Value("${AI_DB_PASSWORD:}") String dbPassword,
                         @Value("${repair.ai.query-timeout-ms:3000}") int queryTimeoutMs,
                         @Value("${repair.ai.max-rows:1000}") int maxRows,
-                        @Value("${repair.ai.rate-limit-max-requests:10}") int rateLimitMaxRequests) {
+                        @Value("${repair.ai.rate-limit-max-requests:10}") int rateLimitMaxRequests,
+                        @Value("${repair.ai.enabled:true}") boolean enabledByConfig,
+                        @Value("${repair.ai.max-concurrent-requests:4}") int maxConcurrentRequests) {
         boolean hasUsername = StringUtils.hasText(dbUsername);
         boolean hasPassword = StringUtils.hasText(dbPassword);
         if (hasUsername != hasPassword) {
@@ -68,6 +79,15 @@ public class AiProperties {
         this.queryTimeoutMs = queryTimeoutMs;
         this.maxRows = maxRows;
         this.rateLimitMaxRequests = rateLimitMaxRequests;
+        this.enabledByConfig = enabledByConfig;
+        this.maxConcurrentRequests = Math.max(1, maxConcurrentRequests);
+    }
+
+    /** 兼容不依赖 Spring 的单元测试与工具代码：默认开启，沿用历史构造语义。 */
+    public AiProperties(String apiKey, String baseUrl, String modelName, String dbUsername, String dbPassword,
+                        int queryTimeoutMs, int maxRows, int rateLimitMaxRequests) {
+        this(apiKey, baseUrl, modelName, dbUsername, dbPassword, queryTimeoutMs, maxRows, rateLimitMaxRequests,
+                true, 4);
     }
 
     /** 模型凭据配了没（没配 = 不启用 AI，接口回 40004 而不是启动失败）。 */
@@ -82,7 +102,12 @@ public class AiProperties {
 
     /** 能不能用：模型与只读账号都配好才算。 */
     public boolean enabled() {
-        return modelConfigured() && readOnlyAccountConfigured();
+        return enabledByConfig && modelConfigured() && readOnlyAccountConfigured();
+    }
+
+    /** 模型类能力是否被显式打开；受理、分诊和知识库不要求问数只读账号。 */
+    public boolean modelEnabled() {
+        return enabledByConfig && modelConfigured();
     }
 
     /**

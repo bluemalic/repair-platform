@@ -64,6 +64,8 @@ import java.lang.annotation.Target;
         // 让问数链路能走到真正连库那一步。模型那一侧由测试作用域的 TestAiAssistant 顶替，
         // 所以 CI 既不调模型也不花钱。Key 给一个假值，是为了让 AiProperties.enabled() 为 true；
         // 真正调用的是 TestAiAssistant，不会走到真实模型。
+        // 集成测试显式打开 AI 配置；真实模型仍由 TestAiAssistant 替代，不会产生供应商调用。
+        "repair.ai.enabled=true",
         "AI_MODEL_API_KEY=test-key",
         "AI_DB_USERNAME=test_ai_ci",
         "AI_DB_PASSWORD=Test@123456",

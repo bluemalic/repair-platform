@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 既然分了两个调用方，Redis 逻辑就不能各写一份——"INCR 与 EXPIRE 必须在一个脚本里"这条教训
  * 维护两份迟早会漂。
  *
- * <p><b>降级策略（与 docs/01 §5 一致）</b>：Redis 不可用时返回 {@code null}，调用方一律放行。
+ * <p><b>降级策略</b>：Redis 不可用时返回 {@code null}；普通接口可放行，AI 付费接口由拦截器拒绝。
  * 限流防的是滥用，不是业务正确性；为了它把登录或扫码整条链路拦住，代价远大于收益。
  * 降级提示只打一次 WARN，之后转 DEBUG——Redis 挂掉时每个请求都 WARN 会把日志刷爆，真正的问题反而看不见。
  */

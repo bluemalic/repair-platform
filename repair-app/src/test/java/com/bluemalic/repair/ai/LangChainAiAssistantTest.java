@@ -20,6 +20,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LangChainAiAssistantTest {
 
     @Test
+    void explicitAiDisableFailsBeforeUsingModelKey() {
+        AiProperties disabled = new AiProperties("key", "http://localhost", "test-model",
+                "ro", "ro-password", 3000, 1000, 10, false, 1);
+        LangChainAiAssistant assistant = new LangChainAiAssistant(disabled, null, null,
+                new AiChatModelProvider(disabled, new MetricsRecorder(new SimpleMeterRegistry())));
+
+        assertThatThrownBy(() -> assistant.plan("有几栋楼"))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("未打开 AI")
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.AI_MODEL_UNAVAILABLE);
+    }
+
+    @Test
     void withoutApiKeyFailsBeforeTouchingAnythingElse() {
         AiProperties notConfigured = new AiProperties("", "http://localhost", "test-model",
                 "ro", "ro-password", 3000, 1000, 10);
