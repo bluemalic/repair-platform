@@ -36,7 +36,7 @@ public class FileController {
             description = "multipart 表单字段名 `file`；只接受 jpg / png / webp（按文件头判断真实类型），"
                     + "单张不超过 5MB；返回可直接访问的 url 与 objectKey")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RateLimit
+    @RateLimit(key = "upload")
     public Result<FileUploadVO> upload(
             @Parameter(description = "图片文件") @RequestPart("file") MultipartFile file) {
         return Result.ok(fileStorageService.upload(file));

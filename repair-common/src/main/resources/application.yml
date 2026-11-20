@@ -149,6 +149,9 @@ repair:
     enabled: ${REPAIR_AI_ENABLED:false}
     max-concurrent-requests: ${REPAIR_AI_MAX_CONCURRENT_REQUESTS:4}
     global-rate-limit-max-requests: ${REPAIR_AI_GLOBAL_MAX_REQUESTS:30}
+  upload:
+    rate-limit-max-requests: ${REPAIR_UPLOAD_RATE_LIMIT_MAX_REQUESTS:10}
+    global-rate-limit-max-requests: ${REPAIR_UPLOAD_GLOBAL_MAX_REQUESTS:120}
   rocketmq:
     enabled: ${REPAIR_ROCKETMQ_ENABLED:false}
     name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}

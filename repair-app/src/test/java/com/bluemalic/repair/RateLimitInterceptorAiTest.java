@@ -36,7 +36,8 @@ class RateLimitInterceptorAiTest {
     void enforcesSharedAiRequestWindowAcrossAccounts() throws Exception {
         RateLimiter rateLimiter = mock(RateLimiter.class);
         when(rateLimiter.increment(anyString(), anyInt())).thenReturn(1L, 1L, 1L, 2L);
-        RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter, new RateLimitRule(60, 10, 60, 10, 1));
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter,
+                new RateLimitRule(60, 10, 60, 10, 1, 10, 30));
 
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::getLoginIdDefaultNull).thenReturn("user-a", "user-b");
@@ -57,7 +58,8 @@ class RateLimitInterceptorAiTest {
     void failsClosedWhenSharedAiCounterIsUnavailable() throws Exception {
         RateLimiter rateLimiter = mock(RateLimiter.class);
         when(rateLimiter.increment(anyString(), anyInt())).thenReturn(1L, (Long) null);
-        RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter, new RateLimitRule(60, 10, 60, 10, 30));
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter,
+                new RateLimitRule(60, 10, 60, 10, 30, 10, 30));
 
         try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
             stp.when(StpUtil::getLoginIdDefaultNull).thenReturn("user-a");

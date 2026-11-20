@@ -1,10 +1,12 @@
 package com.bluemalic.repair.interceptor;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.dev33.satoken.session.SaSession;
 import com.bluemalic.repair.common.BizException;
 import com.bluemalic.repair.common.ErrorCode;
 import com.bluemalic.repair.common.RateLimiter;
 import com.bluemalic.repair.config.RateLimitRule;
+import com.bluemalic.repair.service.CurrentTenantService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +18,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * 基于 Redis 固定窗口的接口限流（配合 {@link RateLimit} 注解使用）。
  *
- * <p>目前用于"吃报修码"的接口与付费 AI 接口：报修码是 6 位数字、租户内唯一（ADR-004），
+ * <p>目前用于"吃报修码"、图片上传与付费 AI 接口：报修码是 6 位数字、租户内唯一（ADR-004），
  * 是全项目最典型的"猜一个短字符串就能拿到数据"的入口，不设限流等于把"扫完整个码空间"
  * 变成一条脚本就能完成的事（docs/01 §5「报修码随机生成、防枚举」）。
  *
@@ -41,6 +43,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
 @Component
 @RequiredArgsConstructor
 public class RateLimitInterceptor implements HandlerInterceptor {
+
+    private static final String KEY_UPLOAD = "upload";
 
     private final RateLimiter rateLimiter;
 
@@ -78,9 +82,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String key = RateLimiter.KEY_PREFIX + loginId + ":" + counted;
         Long count = rateLimiter.increment(key, rule.getWindowSeconds());
         if (count == null) {
-            // 普通接口保持历史的 fail-open；AI 是付费能力，计数不可用时必须 fail-closed。
-            if (RateLimitRule.KEY_AI.equals(annotated.key())) {
-                throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 限流服务暂不可用");
+            // 普通接口保持历史的 fail-open；AI 与上传会产生外部费用，计数不可用时必须 fail-closed。
+            if (isCostSensitive(annotated.key())) {
+                throw rateLimitUnavailable(annotated.key());
             }
             return true;
         }
@@ -91,19 +95,43 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
         }
 
-        if (RateLimitRule.KEY_AI.equals(annotated.key())) {
-            // 用户限流防单个账号滥用；全局窗口防多个账号共同耗尽供应商余额。
-            Long globalCount = rateLimiter.increment(RateLimiter.KEY_PREFIX + "global:tier:ai",
+        if (isCostSensitive(annotated.key())) {
+            // AI 用部署级总窗口；上传按租户分桶，避免一个学校耗尽其他租户的配额。
+            Long globalCount = rateLimiter.increment(globalKey(annotated.key()),
                     rule.getWindowSeconds());
             if (globalCount == null) {
-                throw new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 限流服务暂不可用");
+                throw rateLimitUnavailable(annotated.key());
             }
-            if (globalCount > rule.getAiGlobalMaxRequests()) {
-                log.warn("触发 AI 全局限流 count={} threshold={}/{}s",
-                        globalCount, rule.getAiGlobalMaxRequests(), rule.getWindowSeconds());
+            int globalMaxRequests = rule.globalMaxRequestsFor(annotated.key());
+            if (globalCount > globalMaxRequests) {
+                log.warn("触发全局限流 tier={} count={} threshold={}/{}s",
+                        annotated.key(), globalCount, globalMaxRequests, rule.getWindowSeconds());
                 throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
             }
         }
         return true;
+    }
+
+    private boolean isCostSensitive(String key) {
+        return RateLimitRule.KEY_AI.equals(key) || KEY_UPLOAD.equals(key);
+    }
+
+    private String globalKey(String key) {
+        if (RateLimitRule.KEY_AI.equals(key)) {
+            return RateLimiter.KEY_PREFIX + "global:tier:ai";
+        }
+        SaSession session = StpUtil.getSession(false);
+        Object tenantId = session == null ? null : session.get(CurrentTenantService.SESSION_TENANT_KEY);
+        if (tenantId == null) {
+            throw new BizException(ErrorCode.SYSTEM_ERROR, "无法确定租户，上传限流暂不可用");
+        }
+        return RateLimiter.KEY_PREFIX + "global:tenant:" + tenantId + ":tier:upload";
+    }
+
+    private BizException rateLimitUnavailable(String key) {
+        if (RateLimitRule.KEY_AI.equals(key)) {
+            return new BizException(ErrorCode.AI_MODEL_UNAVAILABLE, "AI 限流服务暂不可用");
+        }
+        return new BizException(ErrorCode.SYSTEM_ERROR, "上传限流服务暂不可用，请稍后重试");
     }
 }
