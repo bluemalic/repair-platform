@@ -23,13 +23,13 @@ public @interface RateLimit {
     /**
      * 阈值档位，留空表示默认档（{@code repair.rate-limit.max-requests}）。
      *
-     * <p>目前只有 {@code "ai"} 一档：问数与 Agent 请求可能产生模型费用，需要比默认档严格
+     * <p>目前有 {@code "ai"} 与 {@code "upload"} 两档：前者限制付费模型调用，后者限制会消耗
+     * 存储与带宽的上传请求。两档都比普通接口更严格
      * （{@code repair.ai.rate-limit-max-requests}）。**档位名拼错不会报错、会静默回落到默认档**，
      * 所以认不出的档位在 {@code RateLimitRule} 里只回默认值，不猜。
      *
-     * <p>档位还决定**计数维度**：写了档位的接口按档位计数（同一个档位下的所有接口共用一份计数），
-     * 所以 AI 的同步接口与流式接口合计也只有那么多次——它们花的是同一笔钱。留空则按接口计数
-     * （理由见 {@code RateLimitInterceptor} 的类注释）。
+     * <p>档位还决定**计数维度**：写了档位的接口按档位计数，同一档位共用一份账号额度；AI 另有全局
+     * 窗口，上传另有按租户隔离的全局窗口。留空则按接口计数（理由见 {@code RateLimitInterceptor} 的类注释）。
      */
     String key() default "";
 }

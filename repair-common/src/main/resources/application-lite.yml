@@ -26,6 +26,9 @@ repair:
     enabled: ${REPAIR_AI_ENABLED:false}
     max-concurrent-requests: ${REPAIR_AI_MAX_CONCURRENT_REQUESTS:2}
     global-rate-limit-max-requests: ${REPAIR_AI_GLOBAL_MAX_REQUESTS:30}
+  upload:
+    rate-limit-max-requests: ${REPAIR_UPLOAD_RATE_LIMIT_MAX_REQUESTS:10}
+    global-rate-limit-max-requests: ${REPAIR_UPLOAD_GLOBAL_MAX_REQUESTS:30}
   rocketmq:
     enabled: true
     # 通知由独立 notification-service 消费；单体不能再消费一遍。

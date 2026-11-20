@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
  *   <li>{@code REPAIR_RATE_LIMIT_MAX_REQUESTS}：按<b>登录用户</b>计数时，同一接口在窗口内的最大请求数（默认 60）</li>
  *   <li>{@code REPAIR_RATE_LIMIT_LOGIN_MAX_REQUESTS}：同一<b>账号</b>在窗口内最多发起几次登录（默认 10）</li>
  *   <li>{@code REPAIR_RATE_LIMIT_WINDOW_SECONDS}：窗口长度，秒（默认 60）</li>
+ *   <li>{@code REPAIR_UPLOAD_RATE_LIMIT_MAX_REQUESTS}：每账号每窗口的上传次数（默认 10）</li>
+ *   <li>{@code REPAIR_UPLOAD_GLOBAL_MAX_REQUESTS}：每租户每窗口的上传次数（默认 120，lite 默认 30）</li>
  * </ul>
  *
  * <p>默认值按"真实用户碰不到、枚举者撞得到"来定：扫一次码查一次位置，正常使用一分钟内不会有
@@ -42,16 +44,24 @@ public class RateLimitRule {
 
     private final int aiGlobalMaxRequests;
 
+    private final int uploadMaxRequests;
+
+    private final int uploadGlobalMaxRequests;
+
     public RateLimitRule(@Value("${repair.rate-limit.max-requests:60}") int maxRequests,
                          @Value("${repair.rate-limit.login-max-requests:10}") int loginMaxRequests,
                          @Value("${repair.rate-limit.window-seconds:60}") int windowSeconds,
                          @Value("${repair.ai.rate-limit-max-requests:10}") int aiMaxRequests,
-                         @Value("${repair.ai.global-rate-limit-max-requests:30}") int aiGlobalMaxRequests) {
+                         @Value("${repair.ai.global-rate-limit-max-requests:30}") int aiGlobalMaxRequests,
+                         @Value("${repair.upload.rate-limit-max-requests:10}") int uploadMaxRequests,
+                         @Value("${repair.upload.global-rate-limit-max-requests:120}") int uploadGlobalMaxRequests) {
         this.maxRequests = maxRequests;
         this.loginMaxRequests = loginMaxRequests;
         this.windowSeconds = windowSeconds;
         this.aiMaxRequests = aiMaxRequests;
         this.aiGlobalMaxRequests = Math.max(1, aiGlobalMaxRequests);
+        this.uploadMaxRequests = Math.max(1, uploadMaxRequests);
+        this.uploadGlobalMaxRequests = Math.max(1, uploadGlobalMaxRequests);
     }
 
     /**
@@ -59,6 +69,18 @@ public class RateLimitRule {
      * 就应该退回"普通接口"的待遇，而不是意外拿到一个更松或更严的值。
      */
     public int maxRequestsFor(String key) {
-        return KEY_AI.equals(key) ? aiMaxRequests : maxRequests;
+        return switch (key) {
+            case KEY_AI -> aiMaxRequests;
+            case "upload" -> uploadMaxRequests;
+            default -> maxRequests;
+        };
+    }
+
+    public int globalMaxRequestsFor(String key) {
+        return switch (key) {
+            case KEY_AI -> aiGlobalMaxRequests;
+            case "upload" -> uploadGlobalMaxRequests;
+            default -> Integer.MAX_VALUE;
+        };
     }
 }
