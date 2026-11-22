@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { getImageUrl } from '@/api/file'
 import type { TicketDetailVO } from '@/types'
 
 /**
@@ -12,6 +13,21 @@ import type { TicketDetailVO } from '@/types'
  * 注意只传数据、不传函数——小程序端对"函数当 props"不友好（AGENTS §3.2）。
  */
 const props = defineProps<{ detail: TicketDetailVO }>()
+const images = ref<string[]>([])
+const resultImages = ref<string[]>([])
+const imageUnavailable = ref(false)
+const resultImageUnavailable = ref(false)
+
+watch(() => [props.detail.images, props.detail.resultImages], async ([source, result]) => {
+  const [sourceResults, resultResults] = await Promise.all([
+    Promise.all((source ?? []).map((ref) => getImageUrl(ref).then((url) => ({ url, ok: true })).catch(() => ({ url: '', ok: false })))),
+    Promise.all((result ?? []).map((ref) => getImageUrl(ref).then((url) => ({ url, ok: true })).catch(() => ({ url: '', ok: false })))),
+  ])
+  images.value = sourceResults.filter((item) => item.ok).map((item) => item.url)
+  resultImages.value = resultResults.filter((item) => item.ok).map((item) => item.url)
+  imageUnavailable.value = sourceResults.some((item) => !item.ok)
+  resultImageUnavailable.value = resultResults.some((item) => !item.ok)
+}, { immediate: true })
 
 /** 协作者姓名串起来显示（最多 3 个人，不值得为它做折叠或滚动）。 */
 const collaboratorNames = computed(() =>
@@ -118,19 +134,21 @@ function statusLabel(status: number | null): string {
     <view class="card">
       <text class="label">问题描述</text>
       <text class="text">{{ detail.description || '（未填写）' }}</text>
-      <view v-if="detail.images?.length" class="images">
-        <image v-for="(url, i) in detail.images" :key="i" class="thumb" :src="url" mode="aspectFill"
-               @click="previewImages(detail.images, i)" />
+      <view v-if="images.length" class="images">
+        <image v-for="(url, i) in images" :key="i" class="thumb" :src="url" mode="aspectFill"
+               @click="previewImages(images, i)" />
       </view>
+      <text v-if="imageUnavailable" class="image-unavailable">部分图片已失效</text>
     </view>
 
     <view v-if="detail.resultDesc || detail.resultImages?.length" class="card">
       <text class="label">维修结果</text>
       <text class="text">{{ detail.resultDesc || '（未填写）' }}</text>
-      <view v-if="detail.resultImages?.length" class="images">
-        <image v-for="(url, i) in detail.resultImages" :key="i" class="thumb" :src="url" mode="aspectFill"
-               @click="previewImages(detail.resultImages, i)" />
+      <view v-if="resultImages.length" class="images">
+        <image v-for="(url, i) in resultImages" :key="i" class="thumb" :src="url" mode="aspectFill"
+               @click="previewImages(resultImages, i)" />
       </view>
+      <text v-if="resultImageUnavailable" class="image-unavailable">部分图片已失效</text>
     </view>
 
     <view v-if="detail.rejectReason" class="card">
@@ -212,6 +230,12 @@ function statusLabel(status: number | null): string {
   width: 180rpx;
   height: 180rpx;
   border-radius: 8rpx;
+}
+.image-unavailable {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #c0c4cc;
 }
 .log {
   display: flex;

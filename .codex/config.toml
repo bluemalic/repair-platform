@@ -1,0 +1,7 @@
+# 项目级 Codex 默认值：不包含密钥、服务器地址或生产连接信息。
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+# MCP 按任务临时启用；本项目不默认连接生产数据库或 SSH。

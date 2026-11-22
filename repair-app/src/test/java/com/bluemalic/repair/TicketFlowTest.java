@@ -100,7 +100,7 @@ class TicketFlowTest {
         // 5. 完工上报 → 40
         postJson(worker, "/api/worker/tickets/" + ticketId + "/finish", Map.of(
                 "resultDesc", "更换水龙头",
-                "resultImages", List.of("https://img.example.com/after.jpg")))
+                "resultImages", List.of("1/2026-01-01/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png")))
                 .andExpect(jsonPath("$.code").value(0));
         assertThat(statusOf(admin, ticketId)).isEqualTo(40);
 
@@ -135,6 +135,18 @@ class TicketFlowTest {
         assertThat(logs.get(6).get("action").asText()).isEqualTo("CLOSE");
         // 响应时长有值（到场打卡在派单之后）
         assertThat(detail.get("data").get("arriveMinutes").isNumber()).isTrue();
+    }
+
+    @Test
+    void submitRejectsExternalImageUrl() throws Exception {
+        String student = givenToken("test-image-external-url", 1, 1L, null);
+
+        postJson(student, "/api/student/tickets", Map.of(
+                        "idempotencyKey", "test-image-external-" + System.nanoTime(),
+                        "repairCode", "482913", "categoryId", 1,
+                        "description", "不允许外部图片地址",
+                        "images", List.of("https://img.example.com/after.jpg")))
+                .andExpect(jsonPath("$.code").value(10001));
     }
 
     @Test

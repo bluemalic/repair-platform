@@ -41,7 +41,7 @@ public class TicketCreateDTO {
     @Size(max = 500, message = "问题描述最长 500 字")
     private String description;
 
-    @Schema(description = "现场图片 URL 数组")
+    @Schema(description = "现场图片对象键数组（由图片上传接口返回）")
     @Size(max = 9, message = "现场图片最多 9 张")
     private List<String> images;
 

@@ -1,5 +1,6 @@
 import { getToken } from '@/store/auth'
 import type { FileUploadVO, Result } from '@/types'
+import { request } from './http'
 
 const BASE_URL = import.meta.env.VITE_API_BASE ?? '/api'
 
@@ -41,4 +42,13 @@ export function uploadImage(filePath: string): Promise<FileUploadVO> {
       },
     })
   })
+}
+
+/** 为当前可见工单中的图片对象键获取十分钟有效的图片链接。 */
+export function getImageUrl(reference: string): Promise<string> {
+  return request<{ url: string }>({
+    url: '/files/image-url',
+    method: 'POST',
+    data: { reference },
+  }).then((result) => result.url)
 }

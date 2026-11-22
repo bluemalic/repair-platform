@@ -84,7 +84,7 @@ flowchart TB
     subgraph infra["自建中间件（Docker，只在内网可达）"]
         mysql[("MySQL 8<br/>平台库 21 张表<br/>+ 每租户 19 张")]
         redis[("Redis 7<br/>会话 · 延迟队列 · 限流 · 审计去重 · 工单号序列")]
-        minio[("MinIO<br/>图片对象 · 桶匿名可读")]
+        minio[("MinIO<br/>图片对象 · 私有桶")]
         rocketmq[("RocketMQ 5.x<br/>事件通道（阶段 2）")]
         notification[("notification-service<br/>独立 consumer 进程")]
     end

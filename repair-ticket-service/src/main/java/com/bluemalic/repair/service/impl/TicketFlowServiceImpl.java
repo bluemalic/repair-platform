@@ -74,6 +74,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     public TicketVO submit(TicketCreateDTO dto) {
         long studentId = StpUtil.getLoginIdAsLong();
         SysUser student = lookup.requireUser(studentId);
+        validateImageKeys(dto.getImages(), student.getTenantId());
 
         String idempotencyKey = dto.getIdempotencyKey();
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -293,6 +294,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
     public void finish(long id, TicketFinishDTO dto) {
         long workerId = StpUtil.getLoginIdAsLong();
         Ticket ticket = lookup.requireTicket(id);
+        validateImageKeys(dto.getResultImages(), ticket.getTenantId());
         TicketStatus.checkTransition(ticket.getStatus(), TicketStatus.TO_VERIFY.getCode());
         if (participantPolicy.isNotParticipant(ticket, workerId)) {
             throw new BizException(ErrorCode.TICKET_ALREADY_ACCEPTED);
@@ -323,6 +325,20 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                     "工单 " + ticket.getTicketNo() + " 已由 " + Texts.nullToEmpty(lookup.requireUser(workerId).getRealName())
                             + " 完工，等待学生验收",
                     ticket.getId());
+        }
+    }
+
+    private void validateImageKeys(List<String> imageKeys, long tenantId) {
+        if (imageKeys == null) {
+            return;
+        }
+        for (String key : imageKeys) {
+            boolean valid = key != null
+                    && key.startsWith(tenantId + "/")
+                    && key.matches("[0-9]+/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-f0-9]{32}\\.(jpg|png|webp)");
+            if (!valid) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "图片必须先通过本系统上传接口上传");
+            }
         }
     }
 

@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -30,14 +31,18 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * 真实上传（需要 MinIO 在跑：`docker compose up -d minio`；CI 里是 service 容器）。
  *
  * <p>为什么要单独一条而不并进 {@code FileUploadTest}：**对象存储是外部依赖，事务回滚不了它**。
- * 校验层的用例不碰 MinIO（谁都能跑），而这条要真的写一个对象、并验证"返回的 URL 匿名就能打开"——
- * 后者是对"桶设为匿名可读"这个决定的实测，光看代码是验不了的。
+ * 校验层的用例不碰 MinIO（谁都能跑），而这条要真的写一个对象，并验证桶保持私有、
+ * 只有应用签发的短期地址才能读取——后者光看代码是验不了的。
  *
  * <p>对象在 {@code @AfterEach} 里删掉：不删的话每跑一次测试就往桶里堆一张图。
  */
@@ -89,7 +94,7 @@ class FileUploadStorageTest {
     }
 
     @Test
-    void uploadsImageAndUrlIsPubliclyReadable() throws Exception {
+    void uploadsImageAndOnlySignedUrlIsReadable() throws Exception {
         String token = givenToken("test-upload-real");
 
         MvcResult result = mockMvc.perform(multipart("/api/files/upload")
@@ -108,15 +113,67 @@ class FileUploadStorageTest {
         // 对象键按"租户/日期/uuid.扩展名"分目录（docs/03 §7.3）
         assertThat(objectKey).startsWith("1/" + LocalDate.now() + "/").endsWith(".png");
         assertThat(objectKey).doesNotContain("photo"); // 不使用任何用户提供的文件名
-        assertThat(url).isEqualTo(storage.getPublicBaseUrl() + "/" + storage.getBucket() + "/" + objectKey);
+        assertThat(url).startsWith("/api/files/image?")
+                .contains("tenantId=1")
+                .contains("signature=");
 
-        // 最关键的一条：这个 URL **匿名（不带 token）**就能取到图，且类型正确。
-        // 图片 URL 要长期存进工单、直接给 <img> 用，所以桶是匿名可读的；这里实测这个决定成立。
+        // 直连对象存储不带应用签名必须被拒，避免泄露工单图片。
         RestClient client = RestClient.create();
-        byte[] fetched = client.get().uri(url).retrieve().toEntity(byte[].class).getBody();
-        assertThat(fetched).isEqualTo(PNG_BYTES);
-        assertThat(client.get().uri(url).retrieve().toEntity(byte[].class)
-                .getHeaders().getContentType().toString()).isEqualTo("image/png");
+        String directUrl = storage.getEndpoint() + "/" + storage.getBucket() + "/" + objectKey;
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.get().uri(directUrl).retrieve()
+                        .toEntity(byte[].class))
+                .isInstanceOf(HttpClientErrorException.Forbidden.class);
+
+        // 应用签名地址不要求再带登录 token，但只能在有效期内读取该对象。
+        mockMvc.perform(get(URI.create(url)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("image/png"))
+                .andExpect(content().bytes(PNG_BYTES));
+
+        String tamperedQuery = URI.create(url).getRawQuery()
+                .replaceFirst("signature=[0-9a-f]+", "signature=00");
+        mockMvc.perform(get(URI.create("/api/files/image?" + tamperedQuery)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(10006));
+
+        String expiredQuery = URI.create(url).getRawQuery().replaceFirst("expires=[0-9]+", "expires=1");
+        mockMvc.perform(get(URI.create("/api/files/image?" + expiredQuery)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(10006));
+
+        String foreignTenantQuery = URI.create(url).getRawQuery().replaceFirst("tenantId=1", "tenantId=2");
+        mockMvc.perform(get(URI.create("/api/files/image?" + foreignTenantQuery)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(10006));
+
+        // 对象没有关联到当前可见工单前，不能签发访问地址。
+        mockMvc.perform(post("/api/files/image-url")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reference", objectKey))))
+                .andExpect(jsonPath("$.code").value(10006));
+
+        // 关联到工单后，提交者可以换取短期地址；同租户的另一个学生仍不能读取。
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/student/tickets")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "idempotencyKey", "image-access-" + System.nanoTime(),
+                                "repairCode", "482913", "categoryId", 1,
+                                "description", "图片权限测试", "images", List.of(objectKey)))))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/files/image-url")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reference", objectKey))))
+                .andExpect(jsonPath("$.code").value(0));
+
+        String otherStudent = givenToken("test-upload-other-student");
+        mockMvc.perform(post("/api/files/image-url")
+                        .header("Authorization", "Bearer " + otherStudent)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reference", objectKey))))
+                .andExpect(jsonPath("$.code").value(10006));
     }
 
     private String givenToken(String username) throws Exception {
