@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { closeTicket, dispatchTicket, getDispatchCandidates, getTicketDetail, mergeTicket, pageTickets, rejectTicket, resumeTicket, transferTicket } from '@/api/ticket'
+import { closeTicket, dispatchTicket, getDispatchCandidates, getTicketDetail, getTicketImageUrl, mergeTicket, pageTickets, rejectTicket, resumeTicket, transferTicket } from '@/api/ticket'
 import { addCollaborator, removeCollaborator, splitTicket } from '@/api/ticket'
 import { listCategories } from '@/api/category'
 import { pageWorkers } from '@/api/worker'
@@ -266,7 +266,7 @@ async function doRemoveCollaborator(workerId: string, workerName: string) {
   )
   await removeCollaborator(target.id, workerId)
   ElMessage.success('已移除')
-  detail.value = await getTicketDetail(target.id)
+  detail.value = await loadTicketDetail(target.id)
   await load()
 }
 
@@ -352,7 +352,7 @@ async function doMerge() {
   ElMessage.success('已合并')
   await load()
   if (detail.value?.id === target.id) {
-    detail.value = await getTicketDetail(target.id)
+    detail.value = await loadTicketDetail(target.id)
   }
 }
 
@@ -362,16 +362,33 @@ const route = useRoute()
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<TicketDetailVO | null>(null)
+const detailImagesUnavailable = ref(false)
+const detailResultImagesUnavailable = ref(false)
 
 async function openDetailById(ticketId: string) {
   detailVisible.value = true
   detailLoading.value = true
   detail.value = null
+  detailImagesUnavailable.value = false
+  detailResultImagesUnavailable.value = false
   try {
-    detail.value = await getTicketDetail(ticketId)
+    detail.value = await loadTicketDetail(ticketId)
   } finally {
     detailLoading.value = false
   }
+}
+
+async function loadTicketDetail(ticketId: string): Promise<TicketDetailVO> {
+  const result = await getTicketDetail(ticketId)
+  const [imageResults, resultImageResults] = await Promise.all([
+    Promise.all((result.images ?? []).map((reference) => getTicketImageUrl(reference).then((url) => ({ url, ok: true })).catch(() => ({ url: '', ok: false })))),
+    Promise.all((result.resultImages ?? []).map((reference) => getTicketImageUrl(reference).then((url) => ({ url, ok: true })).catch(() => ({ url: '', ok: false })))),
+  ])
+  detailImagesUnavailable.value = imageResults.some((item) => !item.ok)
+  detailResultImagesUnavailable.value = resultImageResults.some((item) => !item.ok)
+  result.images = imageResults.filter((item) => item.ok).map((item) => item.url)
+  result.resultImages = resultImageResults.filter((item) => item.ok).map((item) => item.url)
+  return result
 }
 
 onMounted(async () => {
@@ -505,6 +522,7 @@ onMounted(async () => {
             class="thumb"
           />
         </div>
+        <p v-if="detailImagesUnavailable" class="detail-text image-unavailable">部分图片已失效</p>
 
         <template v-if="detail.resultDesc || detail.resultImages?.length">
           <h4>维修结果</h4>
@@ -520,6 +538,7 @@ onMounted(async () => {
               class="thumb"
             />
           </div>
+          <p v-if="detailResultImagesUnavailable" class="detail-text image-unavailable">部分图片已失效</p>
         </template>
 
         <template v-if="detail.rejectReason">
@@ -807,6 +826,9 @@ onMounted(async () => {
   margin: 4px 0 16px;
   white-space: pre-wrap;
   line-height: 1.6;
+}
+.image-unavailable {
+  color: #909399;
 }
 .images {
   display: flex;

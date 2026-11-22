@@ -14,9 +14,12 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -26,6 +29,11 @@ import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -94,7 +102,7 @@ public class FileStorageServiceImpl implements FileStorageService {
 
         log.info("上传图片成功 objectKey={} size={} type={} tenantId={}",
                 objectKey, file.getSize(), type.extension(), tenantId);
-        return new FileUploadVO(publicUrl(objectKey), objectKey);
+        return new FileUploadVO(signedUrl(objectKey, tenantId), objectKey);
     }
 
     @Override
@@ -162,8 +170,55 @@ public class FileStorageServiceImpl implements FileStorageService {
                 + UUID.randomUUID().toString().replace("-", "") + "." + extension;
     }
 
-    private String publicUrl(String objectKey) {
-        return storage.getPublicBaseUrl() + "/" + storage.getBucket() + "/" + objectKey;
+    /** 生成十分钟有效的应用签名链接；签发前必须由调用方确认该 key 属于可见工单。 */
+    public String signedUrl(String objectKey, long tenantId) {
+        long expiresAt = java.time.Instant.now().plusSeconds(600).getEpochSecond();
+        String signature = signature(objectKey, tenantId, expiresAt);
+        return "/api/files/image?tenantId=" + tenantId
+                + "&key=" + URLEncoder.encode(objectKey, StandardCharsets.UTF_8)
+                + "&expires=" + expiresAt + "&signature=" + signature;
+    }
+
+    public boolean verifySignedUrl(String objectKey, long tenantId, long expiresAt, String providedSignature) {
+        long now = java.time.Instant.now().getEpochSecond();
+        if (!storage.configured() || expiresAt < now || expiresAt > now + 601 || providedSignature == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(signature(objectKey, tenantId, expiresAt).getBytes(StandardCharsets.US_ASCII),
+                providedSignature.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    public String objectKeyForReference(String reference, long tenantId) {
+        if (reference == null || !reference.startsWith(tenantId + "/")
+                || !reference.matches("[0-9]+/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-f0-9]{32}\\.(jpg|png|webp)")) {
+            return null;
+        }
+        return reference;
+    }
+
+    public StoredImage openImage(String objectKey) {
+        ResponseInputStream<GetObjectResponse> response = client().getObject(GetObjectRequest.builder()
+                .bucket(storage.getBucket()).key(objectKey).build());
+        return new StoredImage(response, response.response().contentType(), response.response().contentLength());
+    }
+
+    private String signature(String objectKey, long tenantId, long expiresAt) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(storage.getSecretKey().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] digest = mac.doFinal((tenantId + "\n" + objectKey + "\n" + expiresAt)
+                    .getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("无法签发图片链接", e);
+        }
+    }
+
+    public record StoredImage(InputStream stream, String contentType, Long contentLength) implements AutoCloseable {
+        @Override
+        public void close() throws IOException {
+            stream.close();
+        }
     }
 
     private void ensureBucket() {
@@ -181,23 +236,19 @@ public class FileStorageServiceImpl implements FileStorageService {
                     throw e;
                 }
                 client().createBucket(builder -> builder.bucket(storage.getBucket()));
-                // 图片 URL 要长期存进工单并直接给 <img> 用，所以桶设为允许匿名读：
-                // 预签名链接会过期（存进工单的 URL 到期就全打不开了），而对象名是 uuid、不可枚举。
-                // 代价如实记录：拿到完整 URL 的人就能看这张图（学校维修照片，不是机密材料）。
-                client().putBucketPolicy(builder -> builder
-                        .bucket(storage.getBucket())
-                        .policy(publicReadPolicy()));
-                log.info("已创建对象存储桶并设为匿名可读 bucket={}", storage.getBucket());
+                log.info("已创建私有对象存储桶 bucket={}", storage.getBucket());
+            }
+            // 也撤销旧版本设置的匿名读取策略，升级后的既有桶同样保持私有。
+            try {
+                client().deleteBucketPolicy(builder -> builder.bucket(storage.getBucket()));
+            } catch (S3Exception e) {
+                // 没有旧匿名策略时 MinIO 返回 404；这已经是目标状态。
+                if (e.statusCode() != 404) {
+                    throw e;
+                }
             }
             bucketEnsured.set(true);
         }
-    }
-
-    private String publicReadPolicy() {
-        return """
-                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},
-                "Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}
-                """.formatted(storage.getBucket());
     }
 
     private S3Client client() {

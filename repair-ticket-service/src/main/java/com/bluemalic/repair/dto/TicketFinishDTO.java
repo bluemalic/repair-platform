@@ -16,7 +16,7 @@ public class TicketFinishDTO {
     @Size(max = 500, message = "维修结果说明最长 500 字")
     private String resultDesc;
 
-    @Schema(description = "维修后照片 URL 数组")
+    @Schema(description = "维修后照片对象键数组（由图片上传接口返回）")
     @Size(max = 9, message = "维修后照片最多 9 张")
     private List<String> resultImages;
 }

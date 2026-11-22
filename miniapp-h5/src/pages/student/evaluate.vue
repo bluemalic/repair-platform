@@ -3,6 +3,7 @@ import { onLoad, onShow } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { evaluateTicket, getTicketDetail, reworkTicket } from '@/api/ticket'
 import type { TicketDetailVO } from '@/types'
+import { getImageUrl } from '@/api/file'
 
 /**
  * 验收：待验收 →（通过）已完成 50 /（不通过）处理中 30。
@@ -18,6 +19,7 @@ const detail = ref<TicketDetailVO | null>(null)
 const score = ref(0)
 const content = ref('')
 const submitting = ref(false)
+const signedResultImages = ref<string[]>([])
 
 /** 打回重做的理由区：默认收起，避免"看起来像主操作"。 */
 const reworkOpen = ref(false)
@@ -42,6 +44,9 @@ onShow(async () => {
     return
   }
   detail.value = await getTicketDetail(ticketId.value)
+  signedResultImages.value = await Promise.all((detail.value.resultImages ?? [])
+    .map((reference) => getImageUrl(reference).catch(() => '')))
+  signedResultImages.value = signedResultImages.value.filter(Boolean)
 })
 
 function previewImages(urls: string[] | null, index: number) {
@@ -106,9 +111,9 @@ async function submitRework() {
     <view class="card">
       <text class="label">维修结果</text>
       <text class="text">{{ detail?.resultDesc || '（师傅未填写）' }}</text>
-      <view v-if="detail?.resultImages?.length" class="images">
-        <image v-for="(url, i) in detail.resultImages" :key="i" class="thumb" :src="url" mode="aspectFill"
-               @click="previewImages(detail?.resultImages ?? null, i)" />
+      <view v-if="signedResultImages.length" class="images">
+        <image v-for="(url, i) in signedResultImages" :key="i" class="thumb" :src="url" mode="aspectFill"
+               @click="previewImages(signedResultImages, i)" />
       </view>
     </view>
 

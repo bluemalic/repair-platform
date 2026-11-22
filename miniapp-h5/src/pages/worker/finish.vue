@@ -11,6 +11,7 @@ import { finishTicket } from '@/api/ticket'
 const ticketId = ref('')
 const resultDesc = ref('')
 const imageUrls = ref<string[]>([])
+const imageKeys = ref<string[]>([])
 const uploading = ref(false)
 const submitting = ref(false)
 
@@ -31,6 +32,7 @@ async function chooseImages() {
     for (const path of paths) {
       const uploaded = await uploadImage(path)
       imageUrls.value.push(uploaded.url)
+      imageKeys.value.push(uploaded.objectKey)
     }
   } catch {
     // uploadImage 里已提示；已成功的那些保留
@@ -41,6 +43,7 @@ async function chooseImages() {
 
 function removeImage(index: number) {
   imageUrls.value.splice(index, 1)
+  imageKeys.value.splice(index, 1)
 }
 
 async function submit() {
@@ -57,7 +60,7 @@ async function submit() {
     await finishTicket(
       ticketId.value,
       resultDesc.value.trim(),
-      imageUrls.value.length ? imageUrls.value : undefined,
+      imageKeys.value.length ? imageKeys.value : undefined,
     )
     uni.showToast({ title: '已上报，等待验收', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 800)
