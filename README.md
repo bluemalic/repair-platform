@@ -165,6 +165,13 @@ docker compose up -d
 > 另外两条容易白折腾的：**跑打包前先停掉正在运行的应用**（`target/*.jar` 被占用时 `clean` 会失败，
 > 报"另一个程序正在使用此文件"）；`mvn clean` 会把 `target/` 整个删掉。
 
+Windows PowerShell 可直接执行 `./scripts/test-local.ps1 -MavenArgs @('-B', 'clean', 'package')`。
+脚本只读取 `.env` 中本地 MySQL / Redis / MinIO 凭据，按 Compose 的命名做映射，不加载模型 Key；
+使用独立的 `repair_codex_test` 数据库与 `repair-codex-test` 桶，连接本机依赖，结束后恢复进程环境变量。
+测试会创建测试库、执行迁移并写入测试数据，请先启动本地依赖；Redis 与本地开发共用，勿连接生产环境。
+脚本使用 Maven Wrapper 已缓存的发行版（解决本机包装脚本启动异常），仍完整执行传入的构建及测试目标；
+未缓存时先运行 `./mvnw.cmd`，也可在已安装 Maven 的终端自行导出环境变量后运行标准命令。
+
 ### 演示账号（可选，本地开发与演示用）
 
 迁移脚本只建表与基础数据，不含账号。需要时手动执行一次 `docs/dev-seed.sql`，得到三个账号，口令都是 `Repair@2026`：
