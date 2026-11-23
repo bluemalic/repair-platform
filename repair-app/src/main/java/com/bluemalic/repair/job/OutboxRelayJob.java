@@ -108,8 +108,9 @@ public class OutboxRelayJob {
                         .findFirst()
                         .orElse(null);
                 if (handler == null) {
-                    log.debug("Outbox 暂无消费者，直接标记已投递 eventId={} type={}",
-                            event.getEventId(), event.getEventType());
+                    // 未知事件类型通常表示生产者/消费者版本不匹配；标记 SENT 会把事件静默丢掉。
+                    // 走统一重试路径，等消费者上线或配置修复后仍可投递。
+                    throw new IllegalStateException("Outbox 事件没有可用消费者 type=" + event.getEventType());
                 } else {
                     handler.handle(event);
                 }
