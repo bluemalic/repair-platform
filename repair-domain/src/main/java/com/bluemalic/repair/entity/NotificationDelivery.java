@@ -8,9 +8,9 @@ import java.time.LocalDateTime;
 /**
  * 通知投递记录（阶段 4 · ADR-030）。
  *
- * <p>站内信（{@code notification} 表）是事实来源，**不经过这张表**；这里记的是"同一个事件
- * 还往哪些外部通道发过、发成没发成"。所以 {@code IN_APP} 通道正常也不写这里
- * （{@code notification_id} 列留着，是用来把将来"需要回查站内信"的场景接上的）。
+ * <p>站内信（{@code notification} 表）是事实来源；这里记录站内信落库结果与各外部通道的持久化工作项。
+ * 外部工作项与站内信在同一消费事务中创建，发送则在事务提交后执行。{@code notification_id}
+ * 用于重试时取回正文，不在本表复制第二份。
  *
  * <p>唯一键 {@code (event_id, channel, receiver_id)} 是去重的物理依据：重复消息第二次插入
  * 直接撞键，不需要先查后插（那在并发下必然漏）。
@@ -33,7 +33,7 @@ public class NotificationDelivery {
 
     private Long notificationId;
 
-    /** PENDING / SENT / FAILED / DEAD */
+    /** PENDING / SENDING / SENT / FAILED / DEAD */
     private String status;
 
     private Integer retryCount;

@@ -30,12 +30,12 @@ import java.util.stream.Collectors;
  * <ol>
  *   <li>{@link #deliverInApp} —— **在业务事务内**：写站内信（事实来源）+ 记一条 IN_APP 投递记录。
  *       失败要抛出，让 MQ 重投；这一步不能有任何外部网络调用。</li>
- *   <li>{@link #deliverExternal} —— **在事务提交之后**：逐个启用中的外部通道投递，
- *       每条写自己的 delivery 行。失败只回填 FAILED/DEAD，绝不影响已经提交的站内信。</li>
+ *   <li>{@link #deliverExternal} —— **在事务提交之后**：原子领取已持久化的到期工作项后再调用外部通道，
+ *       结果写回 FAILED/DEAD，绝不影响已经提交的站内信。</li>
  * </ol>
  *
  * <p>为什么不做成"一个循环里先站内信再外部"：外部接口超时会把业务事务拖长到秒级，
- * 而这个事务里有工单状态的条件更新——长事务是并发问题的源头。
+ * 而这个事务里有工单状态的条件更新——长事务是并发问题的源头。领取租约避免多个消费者同时发送同一工作项。
  */
 @Slf4j
 @Service
@@ -49,6 +49,9 @@ public class NotificationDeliveryServiceImpl {
     private static final Duration BASE_BACKOFF = Duration.ofSeconds(30);
 
     private static final Duration MAX_BACKOFF = Duration.ofMinutes(30);
+
+    /** Longer than the current (placeholder) adapters; reclaimed after a crashed process. */
+    static final Duration CLAIM_LEASE = Duration.ofMinutes(5);
 
     /** 失败原因列的截断长度（与 DDL 的 varchar(500) 对齐）。 */
     private static final int LAST_ERROR_LIMIT = 400;
@@ -83,6 +86,28 @@ public class NotificationDeliveryServiceImpl {
         return notificationId;
     }
 
+    /**
+     * Persist external delivery work inside the notification-consumer transaction.
+     * This closes the crash window between committing the in-app notification and
+     * creating the external delivery record.
+     */
+    public void scheduleExternal(NotificationMessage message, Long notificationId) {
+        if (notificationId == null) {
+            return;
+        }
+        for (NotificationChannel channel : channels) {
+            if (InAppChannel.TYPE.equals(channel.channelType()) || !channel.isEnabled(message.tenantId())) {
+                continue;
+            }
+            NotificationDelivery delivery = newDelivery(message, channel.channelType());
+            delivery.setNotificationId(notificationId);
+            delivery.setStatus(DeliveryStatus.PENDING.name());
+            delivery.setRetryCount(0);
+            // Duplicate event delivery is expected; the unique key keeps one durable work item.
+            insertIgnoreDuplicate(delivery);
+        }
+    }
+
     /** 事务提交后调用：外部通道逐条投递，失败进 FAILED 等重试。 */
     public void deliverExternal(NotificationMessage message) {
         if (message.eventId() == null || message.eventId().isBlank()) {
@@ -98,7 +123,20 @@ public class NotificationDeliveryServiceImpl {
             if (!channel.isEnabled(message.tenantId())) {
                 continue;
             }
-            deliverOne(channel, message);
+            LocalDateTime now = LocalDateTime.now().withNano(0);
+            NotificationDelivery delivery = deliveryMapper.selectOne(
+                    Wrappers.<NotificationDelivery>query()
+                            .eq("event_id", message.eventId())
+                            .eq("channel", channel.channelType())
+                            .eq("receiver_id", message.receiverId())
+                            .eq("tenant_id", message.tenantId())
+                            .in("status", DeliveryStatus.PENDING.name(), DeliveryStatus.SENDING.name())
+                            .le("next_retry_at", now));
+            // The row was scheduled in the same transaction as the in-app notification.
+            // Missing rows mean this channel was disabled when the event was consumed.
+            if (delivery != null) {
+                attemptIfClaimed(channel, delivery, message);
+            }
         }
     }
 
@@ -107,13 +145,15 @@ public class NotificationDeliveryServiceImpl {
      *
      * @return 本轮尝试的条数
      */
-    public int retryDue(int limit) {
+    public int retryDue(long tenantId, int limit) {
         LocalDateTime now = LocalDateTime.now().withNano(0);
         // 这里用字符串列名而不是 lambda：重试逻辑是纯编排，值得能在没有 MyBatis 上下文的
         // 单元测试里跑（lambda 查询需要实体的 TableInfo 缓存，纯单测会直接抛）。
         List<NotificationDelivery> due = deliveryMapper.selectList(
                 Wrappers.<NotificationDelivery>query()
-                        .in("status", DeliveryStatus.FAILED.name(), DeliveryStatus.PENDING.name())
+                        .in("status", DeliveryStatus.FAILED.name(), DeliveryStatus.PENDING.name(),
+                                DeliveryStatus.SENDING.name())
+                        .eq("tenant_id", tenantId)
                         .le("next_retry_at", now)
                         .orderByAsc("next_retry_at")
                         .last("LIMIT " + limit));
@@ -121,21 +161,29 @@ public class NotificationDeliveryServiceImpl {
             return 0;
         }
         Map<String, NotificationChannel> index = channelIndex();
+        int attempted = 0;
         for (NotificationDelivery delivery : due) {
+            LocalDateTime claimTime = LocalDateTime.now().withNano(0);
+            LocalDateTime leaseUntil = claimTime.plus(CLAIM_LEASE);
+            if (deliveryMapper.claimDue(delivery.getId(), tenantId, delivery.getStatus(),
+                    delivery.getNextRetryAt(), claimTime, leaseUntil) != 1) {
+                continue;
+            }
+            attempted++;
             NotificationChannel channel = index.get(delivery.getChannel());
             if (channel == null || !channel.isEnabled(delivery.getTenantId())) {
                 // 通道被关掉了（或实现被移除）：直接 DEAD，不让它永远占着重试队列
-                markDead(delivery, "通道不可用：" + delivery.getChannel());
+                markDead(delivery, leaseUntil, "通道不可用：" + delivery.getChannel());
                 continue;
             }
             NotificationMessage message = messageOf(delivery);
             if (message == null) {
-                markDead(delivery, "站内信已不存在，无法重建投递内容");
+                markDead(delivery, leaseUntil, "站内信已不存在，无法重建投递内容");
                 continue;
             }
-            attempt(channel, delivery, message);
+            attemptClaimed(channel, delivery, message, leaseUntil);
         }
-        return due.size();
+        return attempted;
     }
 
     /**
@@ -155,54 +203,65 @@ public class NotificationDeliveryServiceImpl {
                 notification.getContent(), notification.getTicketId());
     }
 
-    private void deliverOne(NotificationChannel channel, NotificationMessage message) {
-        NotificationDelivery delivery = newDelivery(message, channel.channelType());
-        delivery.setStatus(DeliveryStatus.PENDING.name());
-        delivery.setRetryCount(0);
-        if (!insertIgnoreDuplicate(delivery)) {
-            log.debug("该事件已投递过，跳过 channel={} eventId={} receiver={}",
-                    channel.channelType(), message.eventId(), message.receiverId());
+    private void attemptIfClaimed(NotificationChannel channel, NotificationDelivery delivery, NotificationMessage message) {
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        String status = delivery.getStatus();
+        if ((!DeliveryStatus.PENDING.name().equals(status) && !DeliveryStatus.SENDING.name().equals(status))
+                || delivery.getNextRetryAt() == null || delivery.getNextRetryAt().isAfter(now)) {
             return;
         }
-        attempt(channel, delivery, message);
-    }
-
-    private void attempt(NotificationChannel channel, NotificationDelivery delivery, NotificationMessage message) {
-        try {
-            channel.send(message);
-            delivery.setStatus(DeliveryStatus.SENT.name());
-            delivery.setLastError(null);
-            delivery.setNextRetryAt(LocalDateTime.now().withNano(0));
-            deliveryMapper.updateById(delivery);
-        } catch (RuntimeException e) {
-            fail(delivery, e);
+        LocalDateTime leaseUntil = now.plus(CLAIM_LEASE);
+        if (deliveryMapper.claimDue(delivery.getId(), delivery.getTenantId(), delivery.getStatus(),
+                delivery.getNextRetryAt(), now, leaseUntil) == 1) {
+            attemptClaimed(channel, delivery, message, leaseUntil);
         }
     }
 
-    private void fail(NotificationDelivery delivery, RuntimeException e) {
+    private void attemptClaimed(NotificationChannel channel, NotificationDelivery delivery,
+                                NotificationMessage message, LocalDateTime leaseUntil) {
+        try {
+            channel.send(message);
+        } catch (RuntimeException e) {
+            fail(delivery, leaseUntil, e);
+            return;
+        }
+        completeClaim(delivery, leaseUntil, DeliveryStatus.SENT.name(),
+                delivery.getRetryCount(), null, LocalDateTime.now().withNano(0));
+    }
+
+    private void fail(NotificationDelivery delivery, LocalDateTime leaseUntil, RuntimeException e) {
         int retry = delivery.getRetryCount() == null ? 0 : delivery.getRetryCount();
         int next = retry + 1;
         delivery.setRetryCount(next);
         delivery.setLastError(truncate(e.getClass().getSimpleName() + ": " + e.getMessage()));
         if (next >= MAX_RETRY) {
-            delivery.setStatus(DeliveryStatus.DEAD.name());
-            delivery.setNextRetryAt(LocalDateTime.now().withNano(0));
+            completeClaim(delivery, leaseUntil, DeliveryStatus.DEAD.name(), next,
+                    truncate(e.getClass().getSimpleName() + ": " + e.getMessage()), LocalDateTime.now().withNano(0));
             log.error("通知投递进入死信 channel={} eventId={} receiver={} retry={}",
                     delivery.getChannel(), delivery.getEventId(), delivery.getReceiverId(), next, e);
         } else {
-            delivery.setStatus(DeliveryStatus.FAILED.name());
-            delivery.setNextRetryAt(LocalDateTime.now().withNano(0).plus(backoff(next)));
+            completeClaim(delivery, leaseUntil, DeliveryStatus.FAILED.name(), next,
+                    truncate(e.getClass().getSimpleName() + ": " + e.getMessage()),
+                    LocalDateTime.now().withNano(0).plus(backoff(next)));
             log.warn("通知投递失败，{} 后重试 channel={} eventId={} receiver={} retry={}",
                     backoff(next), delivery.getChannel(), delivery.getEventId(),
                     delivery.getReceiverId(), next);
         }
-        deliveryMapper.updateById(delivery);
     }
 
-    private void markDead(NotificationDelivery delivery, String reason) {
-        delivery.setStatus(DeliveryStatus.DEAD.name());
-        delivery.setLastError(truncate(reason));
-        deliveryMapper.updateById(delivery);
+    private void markDead(NotificationDelivery delivery, LocalDateTime leaseUntil, String reason) {
+        completeClaim(delivery, leaseUntil, DeliveryStatus.DEAD.name(), delivery.getRetryCount(),
+                truncate(reason), LocalDateTime.now().withNano(0));
+    }
+
+    private void completeClaim(NotificationDelivery delivery, LocalDateTime leaseUntil, String status,
+                               Integer retryCount, String lastError, LocalDateTime nextRetryAt) {
+        int updated = deliveryMapper.completeClaim(delivery.getId(), delivery.getTenantId(), leaseUntil, status,
+                retryCount, lastError, nextRetryAt);
+        if (updated == 0) {
+            log.warn("通知投递租约已失效，忽略旧工作进程结果 channel={} eventId={} receiver={}",
+                    delivery.getChannel(), delivery.getEventId(), delivery.getReceiverId());
+        }
     }
 
     private NotificationDelivery newDelivery(NotificationMessage message, String channel) {
@@ -256,6 +315,6 @@ public class NotificationDeliveryServiceImpl {
 
     /** 投递状态。与 {@code notification_delivery.status} 的取值一一对应。 */
     enum DeliveryStatus {
-        PENDING, SENT, FAILED, DEAD
+        PENDING, SENDING, SENT, FAILED, DEAD
     }
 }

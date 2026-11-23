@@ -21,8 +21,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>失败语义：
  * <ul>
- *   <li>consumed_event 唯一键冲突 → 已经处理过，直接跳过；</li>
- *   <li>写站内信失败 → 事务回滚（consumed_event 也不落），异常抛给消费者 → MQ 重投。</li>
+ *   <li>consumed_event 唯一键冲突 → 不重复写站内信，但继续尝试处理已有的外部投递记录；</li>
+ *   <li>站内信与外部 delivery 记录同事务写入，任一写入失败就一起回滚并由 MQ 重投；</li>
+ *   <li>外部发送在事务提交后执行，崩溃后由 PENDING delivery 重试任务恢复。</li>
  * </ul>
  *
  * <p><b>外部通道在事务提交之后</b>（阶段 4 · ADR-030）：站内信是事实来源，必须先进库；
@@ -51,20 +52,15 @@ public class NotificationConsumerService {
                 command.type(), command.title(), command.content(), command.ticketId());
 
         TenantRoutingContext.run(routingKey, () -> {
-            Boolean first = new TransactionTemplate(transactionManager)
-                    .execute(status -> consumeInCurrentDatabase(tenantId, consumerGroup, eventId, message));
-            if (Boolean.TRUE.equals(first)) {
-                // 事务已提交：外部通道失败只写 delivery 行，不影响站内信与 MQ 的 ack
-                deliveryService.deliverExternal(message);
-            }
+            new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> consumeInCurrentDatabase(tenantId, consumerGroup, eventId, message));
+            // 同一事件重投时也检查 PENDING 记录：可能上次进程在事务提交后、外部发送前崩溃。
+            deliveryService.deliverExternal(message);
         });
     }
 
-    /**
-     * @return true = 这是第一次消费（已写站内信）；false = 重复事件（幂等键冲突，什么都没做）
-     */
-    private boolean consumeInCurrentDatabase(long tenantId, String consumerGroup, String eventId,
-                                             NotificationMessage message) {
+    private void consumeInCurrentDatabase(long tenantId, String consumerGroup, String eventId,
+                                          NotificationMessage message) {
         ConsumedEvent consumed = new ConsumedEvent();
         consumed.setTenantId(tenantId);
         consumed.setConsumerGroup(consumerGroup);
@@ -73,11 +69,11 @@ public class NotificationConsumerService {
             consumedEventMapper.insert(consumed);
         } catch (DuplicateKeyException e) {
             log.debug("通知事件已消费，跳过 eventId={} group={}", eventId, consumerGroup);
-            return false;
+            return;
         }
-        deliveryService.deliverInApp(message);
+        Long notificationId = deliveryService.deliverInApp(message);
+        deliveryService.scheduleExternal(message, notificationId);
         log.info("通知事件已消费 eventId={} group={} receiver={} type={}",
                 eventId, consumerGroup, message.receiverId(), message.type());
-        return true;
     }
 }

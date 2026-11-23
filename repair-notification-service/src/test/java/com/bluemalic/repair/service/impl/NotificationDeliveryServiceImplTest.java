@@ -12,7 +12,6 @@ import com.bluemalic.repair.tenancy.TenantSchemaCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
 
@@ -30,7 +29,7 @@ import static org.mockito.Mockito.when;
  * <ol>
  *   <li>站内信先写、写成功才返回 ID；外部通道关着时**一条 delivery 行都不写**；</li>
  *   <li>外部通道失败只回填 FAILED + 退避，不抛给调用方（否则 MQ 会重投、站内信被写两遍）；</li>
- *   <li>同一 eventId 重复投递时靠唯一键挡住，第二次不再发。</li>
+ *   <li>同一 eventId 重复投递时靠唯一键与数据库原子租约挡住并发重复发送。</li>
  * </ol>
  */
 class NotificationDeliveryServiceImplTest {
@@ -73,30 +72,72 @@ class NotificationDeliveryServiceImplTest {
     void 外部通道失败时回填FAILED并退避而不是抛出() {
         wecom.enabled = true;
         wecom.fail = true;
-        when(deliveryMapper.insert(any(NotificationDelivery.class))).thenReturn(1);
-        ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
+        NotificationDelivery pending = pending("evt-2", 555L);
+        when(deliveryMapper.selectOne(any())).thenReturn(pending);
+        when(deliveryMapper.claimDue(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(deliveryMapper.completeClaim(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
+        service.scheduleExternal(message("evt-2"), 555L);
         service.deliverExternal(message("evt-2"));
 
-        verify(deliveryMapper).updateById(captor.capture());
-        NotificationDelivery saved = captor.getValue();
-        assertThat(saved.getStatus()).isEqualTo("FAILED");
-        assertThat(saved.getRetryCount()).isEqualTo(1);
-        assertThat(saved.getLastError()).contains("boom");
-        assertThat(saved.getNextRetryAt()).isAfter(java.time.LocalDateTime.now().minusSeconds(1));
+        verify(deliveryMapper).completeClaim(eq(1L), eq(TENANT), any(), eq("FAILED"), eq(1),
+                org.mockito.ArgumentMatchers.contains("boom"), any());
     }
 
     @Test
-    void 重复事件靠唯一键跳过第二次投递() {
+    void 重复事件读取已有SENT记录后跳过投递() {
         wecom.enabled = true;
-        // 第二次插入撞唯一键 —— 编排层应当"什么都不做"
-        when(deliveryMapper.insert(any(NotificationDelivery.class)))
-                .thenThrow(new DuplicateKeyException("uk_event_channel_receiver"));
+        NotificationDelivery sent = pending("evt-3", 555L);
+        sent.setStatus("SENT");
+        when(deliveryMapper.selectOne(any())).thenReturn(sent);
 
         service.deliverExternal(message("evt-3"));
 
         assertThat(wecom.sent).isZero();
-        verify(deliveryMapper, never()).updateById(any(NotificationDelivery.class));
+        verify(deliveryMapper, never()).claimDue(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 外部工作项在消费事务内持久化并关联站内信() {
+        wecom.enabled = true;
+        when(deliveryMapper.insert(any(NotificationDelivery.class))).thenReturn(1);
+        ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
+
+        service.scheduleExternal(message("evt-3b"), 556L);
+
+        verify(deliveryMapper).insert(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo("PENDING");
+        assertThat(captor.getValue().getNotificationId()).isEqualTo(556L);
+    }
+
+    @Test
+    void 消费事务后从持久化PENDING工作项执行外部通道() {
+        wecom.enabled = true;
+        NotificationDelivery pending = pending("evt-3c", 557L);
+        when(deliveryMapper.selectOne(any())).thenReturn(pending);
+        when(deliveryMapper.claimDue(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(deliveryMapper.completeClaim(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        service.deliverExternal(message("evt-3c"));
+
+        assertThat(wecom.sent).isEqualTo(1);
+        verify(deliveryMapper).completeClaim(eq(1L), eq(TENANT), any(), eq("SENT"), eq(0), eq(null), any());
+        verify(deliveryMapper, never()).insert(any(NotificationDelivery.class));
+    }
+
+    @Test
+    void 数据库租约只允许一个并发工作进程发送() {
+        wecom.enabled = true;
+        NotificationDelivery pending = pending("evt-race", 558L);
+        when(deliveryMapper.selectOne(any())).thenReturn(pending);
+        when(deliveryMapper.claimDue(any(), any(), any(), any(), any(), any())).thenReturn(1, 0);
+        when(deliveryMapper.completeClaim(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        service.deliverExternal(message("evt-race"));
+        service.deliverExternal(message("evt-race"));
+
+        assertThat(wecom.sent).isEqualTo(1);
+        verify(deliveryMapper, org.mockito.Mockito.times(2)).claimDue(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -111,33 +152,66 @@ class NotificationDeliveryServiceImplTest {
     }
 
     @Test
-    void 重试时按站内信重建正文() {
+    void 重试遇到不可用通道时标记DEAD() {
         NotificationDelivery delivery = new NotificationDelivery();
         delivery.setId(1L);
         delivery.setTenantId(TENANT);
         delivery.setEventId("evt-5");
-        delivery.setChannel("IN_APP");
+        delivery.setChannel("REMOVED");
         delivery.setReceiverId(7L);
         delivery.setNotificationId(555L);
         delivery.setStatus("FAILED");
         delivery.setRetryCount(1);
         delivery.setNextRetryAt(java.time.LocalDateTime.now().minusMinutes(1));
         when(deliveryMapper.selectList(any())).thenReturn(List.of(delivery));
+        when(deliveryMapper.claimDue(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(deliveryMapper.completeClaim(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+        int done = service.retryDue(TENANT, 10);
+
+        assertThat(done).isEqualTo(1);
+        verify(deliveryMapper).completeClaim(eq(1L), eq(TENANT), any(), eq("DEAD"), eq(1), any(), any());
+    }
+
+    @Test
+    void 重试时按站内信重建正文() {
+        wecom.enabled = true;
+        NotificationDelivery delivery = pending("evt-retry-body", 559L);
+        delivery.setStatus("FAILED");
+        delivery.setRetryCount(1);
+        delivery.setNextRetryAt(java.time.LocalDateTime.now().minusMinutes(1).withNano(0));
+        when(deliveryMapper.selectList(any())).thenReturn(List.of(delivery));
+        when(deliveryMapper.claimDue(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(deliveryMapper.completeClaim(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         Notification notification = new Notification();
         notification.setType("TICKET_ASSIGNED");
         notification.setTitle("有新的工单");
         notification.setContent("请尽快接单");
-        when(notificationMapper.selectById(555L)).thenReturn(notification);
+        notification.setTicketId(99L);
+        when(notificationMapper.selectById(559L)).thenReturn(notification);
 
-        int done = service.retryDue(10);
+        int attempted = service.retryDue(TENANT, 10);
 
-        assertThat(done).isEqualTo(1);
-        // IN_APP 在重试里被"通道不可用"处理会直接 DEAD；这里断言它至少被处理过（不抛异常）
-        verify(deliveryMapper).updateById(any(NotificationDelivery.class));
+        assertThat(attempted).isEqualTo(1);
+        assertThat(wecom.lastMessage.content()).isEqualTo("请尽快接单");
+        verify(deliveryMapper).completeClaim(eq(1L), eq(TENANT), any(), eq("SENT"), eq(1), eq(null), any());
     }
 
     private static NotificationMessage message(String eventId) {
         return new NotificationMessage(TENANT, eventId, 7L, "TICKET_ASSIGNED", "有新的工单", "请尽快接单", 9L);
+    }
+
+    private static NotificationDelivery pending(String eventId, long notificationId) {
+        NotificationDelivery delivery = new NotificationDelivery();
+        delivery.setId(1L);
+        delivery.setTenantId(TENANT);
+        delivery.setEventId(eventId);
+        delivery.setChannel("WECOM");
+        delivery.setReceiverId(7L);
+        delivery.setNotificationId(notificationId);
+        delivery.setStatus("PENDING");
+        delivery.setRetryCount(0);
+        delivery.setNextRetryAt(java.time.LocalDateTime.now().withNano(0));
+        return delivery;
     }
 
     /** 测试用通道：不连外网，按开关决定是否"发送"。 */
@@ -150,6 +224,8 @@ class NotificationDeliveryServiceImplTest {
         private boolean fail;
 
         private int sent;
+
+        private NotificationMessage lastMessage;
 
         private FakeChannel(String type, boolean enabled) {
             this.type = type;
@@ -168,6 +244,7 @@ class NotificationDeliveryServiceImplTest {
 
         @Override
         public void send(NotificationMessage message) {
+            lastMessage = message;
             if (fail) {
                 throw new IllegalStateException("boom");
             }

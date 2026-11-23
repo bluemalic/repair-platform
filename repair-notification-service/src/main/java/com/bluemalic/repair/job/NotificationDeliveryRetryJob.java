@@ -8,8 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 通知投递重试（阶段 4 · ADR-030 决定 5）。
@@ -34,12 +34,14 @@ public class NotificationDeliveryRetryJob {
     @Scheduled(fixedDelayString = "${repair.notification.delivery-retry-ms:60000}",
             initialDelayString = "${repair.notification.delivery-retry-initial-ms:30000}")
     public void retryDueDeliveries() {
-        Set<String> keys = new LinkedHashSet<>(schemaCatalog.provisionedSchemas().values());
-        keys.add(TenantRoutingContext.CONTROL);
+        Map<Long, String> targets = new LinkedHashMap<>(schemaCatalog.provisionedSchemas());
+        targets.put(0L, TenantRoutingContext.CONTROL);
         int total = 0;
-        for (String key : keys) {
+        for (Map.Entry<Long, String> target : targets.entrySet()) {
+            long tenantId = target.getKey();
+            String key = target.getValue();
             try {
-                Integer done = TenantRoutingContext.call(key, () -> deliveryService.retryDue(BATCH));
+                Integer done = TenantRoutingContext.call(key, () -> deliveryService.retryDue(tenantId, BATCH));
                 total += done == null ? 0 : done;
             } catch (Exception e) {
                 // 一个库坏了不影响其它学校（与 TenantSchemaBootstrap 同一个取舍）
