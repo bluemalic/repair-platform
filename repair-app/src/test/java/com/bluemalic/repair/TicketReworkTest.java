@@ -177,8 +177,7 @@ class TicketReworkTest {
         String admin = givenToken("test-rw-dup-admin", 3, ROLE_ADMIN, null);
         String ticketId = toVerify(student, admin, worker, "test-rw-dup-worker");
 
-        // 模拟历史上一次“评价插入成功、状态更新失败”留下的孤儿评价：
-        // 工单还在 40，评价表已有这一单。再次评价必须返回 20005，而不是写第二条。
+        // 已有评价行时，唯一键拦截，工单仍停在 40。
         TicketEvaluation orphan = new TicketEvaluation();
         orphan.setTenantId(1L);
         orphan.setTicketId(Long.parseLong(ticketId));
