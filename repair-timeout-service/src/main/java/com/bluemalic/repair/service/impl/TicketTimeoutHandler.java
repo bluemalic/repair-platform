@@ -103,14 +103,14 @@ public class TicketTimeoutHandler {
         timeoutRegistrar.cancel(id, ticket.getTenantId());
     }
     private void remindAcceptTimeoutInCurrentDatabase(long id) {
-        Ticket ticket = lookup.requireTicket(id);
+        Ticket ticket = lookup.requireTicketForUpdate(id);
         notifyTimeoutOnce(ticket, Set.of(TicketStatus.TO_ACCEPT.getCode()), TicketAction.ACCEPT_TIMEOUT,
                 NOTICE_ACCEPT_TIMEOUT, TITLE_ACCEPT_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.acceptThresholdText()
                         + " 无人接单，请及时调度");
     }
     private void escalateProcessTimeoutInCurrentDatabase(long id) {
-        Ticket ticket = lookup.requireTicket(id);
+        Ticket ticket = lookup.requireTicketForUpdate(id);
         // 35 待料也算"未完工"：待料不暂停 SLA，卡住一样升级给后勤（docs/01 §4.7）
         notifyTimeoutOnce(ticket, Set.of(TicketStatus.PROCESSING.getCode(),
                         TicketStatus.WAITING_MATERIAL.getCode()), TicketAction.PROCESS_TIMEOUT,
@@ -120,7 +120,7 @@ public class TicketTimeoutHandler {
     }
 
     private void remindVerifyTimeoutInCurrentDatabase(long id) {
-        Ticket ticket = lookup.requireTicket(id);
+        Ticket ticket = lookup.requireTicketForUpdate(id);
         if (ticket.getStatus() != TicketStatus.TO_VERIFY.getCode()
                 || transitions.notifiedBefore(ticket.getTenantId(), ticket.getId(), TicketAction.VERIFY_TIMEOUT)) {
             return;
