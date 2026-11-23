@@ -15,6 +15,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+
 /**
  * 基于 Redis 固定窗口的接口限流（配合 {@link RateLimit} 注解使用）。
  *
@@ -108,8 +113,34 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                         annotated.key(), globalCount, globalMaxRequests, rule.getWindowSeconds());
                 throw new BizException(ErrorCode.TOO_MANY_REQUESTS);
             }
+
+            if (RateLimitRule.KEY_AI.equals(annotated.key())) {
+                String dailyKey = aiDailyKey();
+                Long dailyCount = rateLimiter.increment(dailyKey, secondsUntilUtcDayEnds());
+                if (dailyCount == null) {
+                    throw rateLimitUnavailable(annotated.key());
+                }
+                if (dailyCount > rule.getAiDailyMaxRequests()) {
+                    log.warn("触发 AI 日配额 count={} threshold={} key={}",
+                            dailyCount, rule.getAiDailyMaxRequests(), dailyKey);
+                    throw new BizException(ErrorCode.TOO_MANY_REQUESTS,
+                            "AI 今日（UTC）请求额度已用尽，请联系管理员");
+                }
+            }
         }
         return true;
+    }
+
+    private String aiDailyKey() {
+        return RateLimiter.KEY_PREFIX + "global:tier:ai:day:"
+                + Instant.now().atZone(ZoneOffset.UTC).toLocalDate();
+    }
+
+    private int secondsUntilUtcDayEnds() {
+        ZonedDateTime now = Instant.now().atZone(ZoneOffset.UTC);
+        ZonedDateTime tomorrow = now.toLocalDate().plusDays(1).atStartOfDay(ZoneOffset.UTC);
+        return Math.max(1, (int) Math.min(Integer.MAX_VALUE,
+                Duration.between(now, tomorrow).getSeconds()));
     }
 
     private boolean isCostSensitive(String key) {
