@@ -17,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 超时到期消息的消费者（阶段 2 · ADR-024）：按节点调用 {@link TicketTimeoutHandler} 的三个动作。
+ * 超时到期消息的消费者（阶段 2 · ADR-024）：按节点调用 {@link TicketTimeoutHandler} 的四个动作。
  *
  * <p>幂等在处理器里：{@code notifyTimeoutOnce} 按状态 + ticket_log 判重，自动关闭是状态 CAS。
  * 因此**重复投递/迟到投递不会重复提醒或重复关闭**——这也是 MQ 模式下取消只能是"逻辑取消"的底气。
@@ -70,6 +70,7 @@ public class TimeoutMqConsumer {
             case TimeoutCommand.NODE_ACCEPT -> handler.remindAcceptTimeout(due);
             case TimeoutCommand.NODE_PROCESS -> handler.escalateProcessTimeout(due);
             case TimeoutCommand.NODE_EVAL -> handler.autoClose(due);
+            case TimeoutCommand.NODE_VERIFY -> handler.remindVerifyTimeout(due);
             default -> throw new IllegalStateException("未知超时节点: " + node);
         }
     }
@@ -77,6 +78,7 @@ public class TimeoutMqConsumer {
     private boolean isKnownNode(String node) {
         return TimeoutCommand.NODE_ACCEPT.equals(node)
                 || TimeoutCommand.NODE_PROCESS.equals(node)
-                || TimeoutCommand.NODE_EVAL.equals(node);
+                || TimeoutCommand.NODE_EVAL.equals(node)
+                || TimeoutCommand.NODE_VERIFY.equals(node);
     }
 }

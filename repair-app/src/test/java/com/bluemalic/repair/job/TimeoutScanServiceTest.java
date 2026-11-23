@@ -55,4 +55,12 @@ class TimeoutScanServiceTest {
 
         verify(timeoutScanner).backstopScanEval(0, 1);
     }
+
+    @Test
+    void 待验收超时提醒不改变工单状态() {
+        DueTicket due = new DueTicket(4L, 40L);
+        scanService.remindVerifyDue(List.of(due));
+
+        verify(handler).remindVerifyTimeout(due);
+    }
 }

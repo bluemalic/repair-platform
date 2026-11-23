@@ -75,6 +75,11 @@ public class TimeoutScannerImpl implements TimeoutScanner {
     }
 
     @Override
+    public List<DueTicket> handleDueVerify() {
+        return takeDue(TimeoutKeys.NODE_VERIFY);
+    }
+
+    @Override
     public List<DueTicket> backstopScanAccept(int shardIndex, int shardTotal) {
         LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.acceptDuration());
         return scanOverdueTickets(List.of(TicketStatus.TO_ACCEPT.getCode()), cutoff, shardIndex, shardTotal);
@@ -97,6 +102,25 @@ public class TimeoutScannerImpl implements TimeoutScanner {
             List<String> members = TenantRoutingContext.call(routingKey,
                     () -> ticketEvaluationMapper.selectOverdueOpenTicketMembers(cutoff, SCAN_LIMIT));
             members.forEach(member -> result.add(parseMember(member)));
+        }
+        return result;
+    }
+
+    @Override
+    public List<DueTicket> backstopScanVerify(int shardIndex, int shardTotal) {
+        LocalDateTime cutoff = LocalDateTime.now().minus(timeoutRule.verifyDuration());
+        List<DueTicket> result = new ArrayList<>();
+        for (String routingKey : scanTargets(shardIndex, shardTotal)) {
+            result.addAll(TenantRoutingContext.call(routingKey, () ->
+                    ticketMapper.selectPage(new Page<>(1, SCAN_LIMIT, false),
+                                    Wrappers.<Ticket>lambdaQuery()
+                                            .eq(Ticket::getStatus, TicketStatus.TO_VERIFY.getCode())
+                                            .lt(Ticket::getFinishTime, cutoff)
+                                            .orderByAsc(Ticket::getFinishTime)
+                                            .select(Ticket::getId, Ticket::getTenantId))
+                            .getRecords().stream()
+                            .map(ticket -> new DueTicket(ticket.getTenantId(), ticket.getId()))
+                            .toList()));
         }
         return result;
     }

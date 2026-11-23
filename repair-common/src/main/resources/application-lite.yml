@@ -36,6 +36,7 @@ repair:
     consumer-enabled: false
   notification:
     delivery: mq
+    verify-minutes: ${REPAIR_TIMEOUT_VERIFY_MINUTES:1440}
   timeout:
     delivery: mq
     # 到期消息由 timeout-service 消费；单体只保留 DB 兜底扫描。

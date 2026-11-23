@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * timeout-service 的 {@code TimeoutMqConsumer} 执行）；兜底扫描仍按 {@code backstop-enabled}
  * 留在单体——它是消息丢失的最后一道防线。
  *
- * <p>这里只做"编排"：到期工单该做什么由 {@code TimeoutScanService} 里的三个动作决定。
+ * <p>这里只做"编排"：到期工单该做什么由 {@code TimeoutScanService} 里的四个动作决定。
  *
  * <p><b>测试里必须关掉</b>（{@code repair.timeout.scheduler-enabled=false}，见测试注解
  * {@code @IntegrationTest}）：集成测试用 @Transactional 造数据，后台线程既看不到未提交数据，
@@ -67,6 +67,15 @@ public class TimeoutScheduler {
         runQuietly("消费到期任务[验收]", () -> scanService.closeDue(timeoutScanner.handleDueEval()));
     }
 
+    /** 待验收提醒节点：40 待验收超阈值后提醒学生与后勤，不自动关闭。 */
+    @Scheduled(fixedDelay = 1000)
+    public void consumeDueVerify() {
+        if (!timeoutProperties.isZsetDelivery()) {
+            return;
+        }
+        runQuietly("消费到期任务[待验收]", () -> scanService.remindVerifyDue(timeoutScanner.handleDueVerify()));
+    }
+
     /** 未接单提醒节点：到期仍无人接单 → 提醒调度方（docs/01 §超时）。 */
     @Scheduled(fixedDelay = 1000)
     public void consumeDueAccept() {
@@ -85,7 +94,7 @@ public class TimeoutScheduler {
         runQuietly("消费到期任务[处理]", () -> scanService.escalateDue(timeoutScanner.handleDueProcess()));
     }
 
-    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet/MQ 路径（三个节点都扫）。 */
+    /** docs/01 §超时：每分钟兜底扫描一次数据库，独立于 ZSet/MQ 路径（四个节点都扫）。 */
     @Scheduled(cron = "0 * * * * *")
     public void backstop() {
         if (!timeoutProperties.isBackstopEnabled()) {

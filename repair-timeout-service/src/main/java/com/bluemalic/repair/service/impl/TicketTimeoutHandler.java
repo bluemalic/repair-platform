@@ -39,6 +39,8 @@ public class TicketTimeoutHandler {
     private static final String TITLE_ACCEPT_TIMEOUT = "工单超时未接单";
     private static final String NOTICE_PROCESS_TIMEOUT = "TICKET_PROCESS_TIMEOUT";
     private static final String TITLE_PROCESS_TIMEOUT = "工单处理超时升级";
+    private static final String NOTICE_VERIFY_TIMEOUT = "TICKET_VERIFY_TIMEOUT";
+    private static final String TITLE_VERIFY_TIMEOUT = "工单待验收提醒";
 
     private final TicketTransitionSupport transitions;
     private final TicketLookup lookup;
@@ -65,6 +67,10 @@ public class TicketTimeoutHandler {
 
     public void escalateProcessTimeout(DueTicket due) {
         runPinned(due, () -> escalateProcessTimeoutInCurrentDatabase(due.ticketId()));
+    }
+
+    public void remindVerifyTimeout(DueTicket due) {
+        runPinned(due, () -> remindVerifyTimeoutInCurrentDatabase(due.ticketId()));
     }
 
     /**
@@ -111,6 +117,23 @@ public class TicketTimeoutHandler {
                 NOTICE_PROCESS_TIMEOUT, TITLE_PROCESS_TIMEOUT,
                 "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.processThresholdText()
                         + " 仍未完工，请及时跟进");
+    }
+
+    private void remindVerifyTimeoutInCurrentDatabase(long id) {
+        Ticket ticket = lookup.requireTicket(id);
+        if (ticket.getStatus() != TicketStatus.TO_VERIFY.getCode()
+                || transitions.notifiedBefore(ticket.getTenantId(), ticket.getId(), TicketAction.VERIFY_TIMEOUT)) {
+            return;
+        }
+        transitions.writeLog(ticket.getTenantId(), ticket.getId(), ticket.getStatus(), ticket.getStatus(),
+                TicketAction.VERIFY_TIMEOUT, SYSTEM_OPERATOR, null);
+        String content = "工单 " + ticket.getTicketNo() + " 已超过 " + timeoutRule.verifyThresholdText()
+                + " 待学生验收，请人工跟进；系统不会代替学生评分或自动关闭";
+        notificationService.send(ticket.getTenantId(), ticket.getStudentId(), NOTICE_VERIFY_TIMEOUT,
+                TITLE_VERIFY_TIMEOUT, content, ticket.getId());
+        notificationService.sendToTenantAdmins(ticket.getTenantId(), NOTICE_VERIFY_TIMEOUT,
+                TITLE_VERIFY_TIMEOUT, content, ticket.getId());
+        log.info("待验收超时提醒 ticketId={} studentId={}", ticket.getId(), ticket.getStudentId());
     }
     private void notifyTimeoutOnce(Ticket ticket, Set<Integer> expectedStatuses, TicketAction action,
                                    String noticeType, String noticeTitle, String content) {

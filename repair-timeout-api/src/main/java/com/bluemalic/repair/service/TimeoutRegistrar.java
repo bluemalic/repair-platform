@@ -39,6 +39,12 @@ public interface TimeoutRegistrar {
     /** 显式指定到期时间登记验收超时（测试与兜底补录用）。 */
     void registerEvalDeadline(long ticketId, long tenantId, Instant deadline);
 
+    /** 工单进入 40 待验收时登记提醒：到期提醒学生与后勤，不自动关闭。 */
+    void registerVerify(long ticketId, long tenantId);
+
+    /** 显式指定到期时间登记待验收提醒（测试与兜底补录用）。 */
+    void registerVerifyDeadline(long ticketId, long tenantId, Instant deadline);
+
     /**
      * 取消该工单的**全部**超时登记（节点已完成或到达终态时调用）。
      *

@@ -228,6 +228,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
                 entity -> { });
         noticePublisher.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
+        timeoutRegistrar.cancel(ticket.getId(), ticket.getTenantId());
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
         timeoutRegistrar.registerEval(ticket.getId(), ticket.getTenantId());
     }
@@ -317,6 +318,7 @@ public class TicketFlowServiceImpl implements TicketFlowService {
                 });
         // 完工：处理节点完成，撤掉未处理升级登记（后续由验收超时节点接管）
         timeoutRegistrar.cancel(id, ticket.getTenantId());
+        timeoutRegistrar.registerVerify(id, ticket.getTenantId());
         noticePublisher.notifyTransition(ticket, TicketAction.FINISH, null, null);
         // 协作者完成的：主责得知道自己的单被完成了（他不会收到学生那条通知）
         if (ticket.getWorkerId() != null && ticket.getWorkerId() != workerId) {
