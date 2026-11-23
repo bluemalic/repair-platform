@@ -136,6 +136,7 @@ public class GatewayHeaderFilter extends OncePerRequestFilter {
     private static boolean isWhiteListed(String path) {
         return "/api/auth/login".equals(path)
                 || path.startsWith("/api/auth/sso/")
+                || "/api/files/image".equals(path)
                 || path.startsWith("/api/mock-idp/");
     }
 

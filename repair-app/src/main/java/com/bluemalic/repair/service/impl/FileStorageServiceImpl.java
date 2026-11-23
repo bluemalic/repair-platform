@@ -29,7 +29,6 @@ import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import javax.crypto.Mac;
@@ -150,7 +149,8 @@ public class FileStorageServiceImpl implements FileStorageService {
         return deleted;
     }
 
-    private ImageTypeDetector.ImageType detectType(MultipartFile file) {        byte[] head;
+    private ImageTypeDetector.ImageType detectType(MultipartFile file) {
+        byte[] head;
         try (InputStream in = file.getInputStream()) {
             head = in.readNBytes(ImageTypeDetector.HEAD_BYTES);
         } catch (IOException e) {
@@ -170,15 +170,16 @@ public class FileStorageServiceImpl implements FileStorageService {
                 + UUID.randomUUID().toString().replace("-", "") + "." + extension;
     }
 
-    /** 生成十分钟有效的应用签名链接；签发前必须由调用方确认该 key 属于可见工单。 */
+    @Override
     public String signedUrl(String objectKey, long tenantId) {
         long expiresAt = java.time.Instant.now().plusSeconds(600).getEpochSecond();
         String signature = signature(objectKey, tenantId, expiresAt);
         return "/api/files/image?tenantId=" + tenantId
-                + "&key=" + URLEncoder.encode(objectKey, StandardCharsets.UTF_8)
+                + "&key=" + objectKey
                 + "&expires=" + expiresAt + "&signature=" + signature;
     }
 
+    @Override
     public boolean verifySignedUrl(String objectKey, long tenantId, long expiresAt, String providedSignature) {
         long now = java.time.Instant.now().getEpochSecond();
         if (!storage.configured() || expiresAt < now || expiresAt > now + 601 || providedSignature == null) {
@@ -188,6 +189,7 @@ public class FileStorageServiceImpl implements FileStorageService {
                 providedSignature.getBytes(StandardCharsets.US_ASCII));
     }
 
+    @Override
     public String objectKeyForReference(String reference, long tenantId) {
         if (reference == null || !reference.startsWith(tenantId + "/")
                 || !reference.matches("[0-9]+/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-f0-9]{32}\\.(jpg|png|webp)")) {
@@ -196,6 +198,7 @@ public class FileStorageServiceImpl implements FileStorageService {
         return reference;
     }
 
+    @Override
     public StoredImage openImage(String objectKey) {
         ResponseInputStream<GetObjectResponse> response = client().getObject(GetObjectRequest.builder()
                 .bucket(storage.getBucket()).key(objectKey).build());
@@ -211,13 +214,6 @@ public class FileStorageServiceImpl implements FileStorageService {
             return java.util.HexFormat.of().formatHex(digest);
         } catch (java.security.GeneralSecurityException e) {
             throw new IllegalStateException("无法签发图片链接", e);
-        }
-    }
-
-    public record StoredImage(InputStream stream, String contentType, Long contentLength) implements AutoCloseable {
-        @Override
-        public void close() throws IOException {
-            stream.close();
         }
     }
 

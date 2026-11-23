@@ -3,10 +3,30 @@ package com.bluemalic.repair.service;
 import com.bluemalic.repair.vo.FileUploadVO;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.InputStream;
+
 /** 图片上传（工单现场图与维修后图）。存储用 MinIO，走 S3 协议，不绑厂商。 */
 public interface FileStorageService {
 
     FileUploadVO upload(MultipartFile file);
+
+    /** 签发前由调用方校验工单可见范围；上传预览由上传者直接取得链接。 */
+    String signedUrl(String objectKey, long tenantId);
+
+    boolean verifySignedUrl(String objectKey, long tenantId, long expiresAt, String signature);
+
+    /** 只接受当前租户的规范对象键，无效或外部 URL 返回 null。 */
+    String objectKeyForReference(String reference, long tenantId);
+
+    StoredImage openImage(String objectKey);
+
+    record StoredImage(InputStream stream, String contentType, Long contentLength) implements AutoCloseable {
+        @Override
+        public void close() throws IOException {
+            stream.close();
+        }
+    }
 
     /**
      * 清空某个租户在对象存储里的**全部**图片，返回删掉的对象数。

@@ -47,6 +47,14 @@ class GatewayAuthTest {
     }
 
     @Test
+    void signedImageEndpointIsNotBlockedByGatewayLoginAuth() {
+        webTestClient.get().uri("/api/files/image?tenantId=1&key=1%2F2026-01-01%2F" + "a".repeat(32)
+                        + ".png&expires=1&signature=invalid")
+                .exchange()
+                .expectStatus().value(status -> assertThat(status).isNotEqualTo(401));
+    }
+
+    @Test
     void nonApiPathIsNotGuarded() {
         webTestClient.get().uri("/actuator/health")
                 .exchange()

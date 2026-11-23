@@ -63,6 +63,17 @@ class GatewayHeaderFilterTest {
     }
 
     @Test
+    void verify模式签名图片端点不要求网关身份头() throws Exception {
+        GatewayHeaderFilter filter = filter("verify", "s3cret");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/files/image");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+    }
+
+    @Test
     void 配了secret时签名错误会被拒绝() throws Exception {
         GatewayHeaderFilter filter = filter("verify", "s3cret");
         MockHttpServletRequest request = signedRequest("s3cret", Instant.now().getEpochSecond(), "wrong-sign");
