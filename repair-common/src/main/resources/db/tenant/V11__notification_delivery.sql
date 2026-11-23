@@ -1,4 +1,4 @@
--- 通知投递记录（阶段 4 · ADR-030）：与平台库 V25 逐列逐索引一致，TenantSchemaParityTest 会比对
+-- 通知投递记录（阶段 4 · ADR-030）：初始表结构与平台库 V25 一致，后续变更由 V12 同步
 CREATE TABLE `notification_delivery` (
     `id`              bigint       NOT NULL COMMENT '主键（雪花）',
     `tenant_id`       bigint       NOT NULL COMMENT '租户ID',
