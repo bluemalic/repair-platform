@@ -102,6 +102,30 @@ class OutboxRelayJobTest {
         });
     }
 
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void unknownEventTypeIsRetriedInsteadOfMarkedSent() {
+        long aggregateId = System.nanoTime();
+        TenantRoutingContext.run(TenantRoutingContext.CONTROL, () -> {
+            OutboxEvent event = insertEvent(OutboxStatus.NEW, LocalDateTime.now().minusSeconds(1));
+            event.setAggregateId(aggregateId);
+            event.setEventType("UNKNOWN_TEST_EVENT");
+            event.setEventId("test-unknown-" + aggregateId);
+            outboxEventMapper.updateById(event);
+            try {
+                relayJob.relayOnce();
+
+                OutboxEvent retried = outboxEventMapper.selectById(event.getId());
+                assertThat(retried.getStatus()).isEqualTo(OutboxStatus.NEW.name());
+                assertThat(retried.getAttempts()).isEqualTo(1);
+                assertThat(retried.getNextAttemptAt()).isAfter(LocalDateTime.now());
+                assertThat(retried.getSentAt()).isNull();
+            } finally {
+                outboxEventMapper.deleteById(event.getId());
+            }
+        });
+    }
+
     private OutboxEvent insertEvent(OutboxStatus status, LocalDateTime nextAttemptAt) {
         long aggregateId = System.nanoTime();
         OutboxEvent event = new OutboxEvent();
