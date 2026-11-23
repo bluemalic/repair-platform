@@ -19,6 +19,9 @@ public interface TimeoutScanner {
     /** 消费到期的验收超时：同上。 */
     List<DueTicket> handleDueEval();
 
+    /** 消费到期的待验收提醒：同上。 */
+    List<DueTicket> handleDueVerify();
+
     /**
      * 兜底：直接扫库找"该提醒接单、却没在 ZSet 里"的工单（Redis 重启丢任务场景）。
      *
@@ -36,6 +39,9 @@ public interface TimeoutScanner {
     /** 兜底：直接扫库找"该到期却没在 ZSet 里"的已完成工单。 */
     List<DueTicket> backstopScanEval(int shardIndex, int shardTotal);
 
+    /** 兜底：直接扫库找"待验收超期却没有提醒记录"的工单。 */
+    List<DueTicket> backstopScanVerify(int shardIndex, int shardTotal);
+
     /**
      * 单实例版本（不分片）：scheduled 模式与测试用它。
      *
@@ -52,5 +58,9 @@ public interface TimeoutScanner {
 
     default List<DueTicket> backstopScanEval() {
         return backstopScanEval(0, 1);
+    }
+
+    default List<DueTicket> backstopScanVerify() {
+        return backstopScanVerify(0, 1);
     }
 }

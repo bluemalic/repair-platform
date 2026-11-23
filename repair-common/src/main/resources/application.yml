@@ -170,6 +170,7 @@ repair:
     accept-minutes: ${REPAIR_TIMEOUT_ACCEPT_MINUTES:1440}
     process-minutes: ${REPAIR_TIMEOUT_PROCESS_MINUTES:2880}
     eval-minutes: ${REPAIR_TIMEOUT_EVAL_MINUTES:1440}
+    verify-minutes: ${REPAIR_TIMEOUT_VERIFY_MINUTES:1440}
     # 测试里总开关关掉（@IntegrationTest 已设 false），两种投递模式都受它控制
     scheduler-enabled: ${REPAIR_TIMEOUT_SCHEDULER_ENABLED:true}
     # zset（默认，单体每秒轮询 Redis）| mq（RocketMQ 定时消息，由 timeout-service 执行）

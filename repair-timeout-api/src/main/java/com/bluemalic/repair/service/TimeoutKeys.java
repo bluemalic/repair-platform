@@ -24,6 +24,9 @@ public final class TimeoutKeys {
 
     public static final String NODE_EVAL = "EVAL";
 
+    /** 40 待验收超时：提醒学生验收并进入后勤人工待办，不自动关闭。 */
+    public static final String NODE_VERIFY = "VERIFY";
+
     private TimeoutKeys() {
     }
 

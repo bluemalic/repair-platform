@@ -1,6 +1,7 @@
 package com.bluemalic.repair.config;
 
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import java.time.Duration;
  *   <li>{@code REPAIR_TIMEOUT_ACCEPT_MINUTES}：未接单提醒阈值（默认 24h）</li>
  *   <li>{@code REPAIR_TIMEOUT_PROCESS_MINUTES}：未处理升级阈值（默认 48h）</li>
  *   <li>{@code REPAIR_TIMEOUT_EVAL_MINUTES}：验收超时自动关闭阈值（默认 24h）</li>
+ *   <li>{@code REPAIR_TIMEOUT_VERIFY_MINUTES}：待验收提醒阈值（默认 24h）</li>
  * </ul>
  */
 @Getter
@@ -29,12 +31,22 @@ public class TimeoutRule {
     /** 验收超时：50 已完成 超过该时长未关闭 → 自动流转 60（docs/02 状态机 "50→60 超时自动关"）。 */
     private final long evalMinutes;
 
+    private final long verifyMinutes;
+
+    @Autowired
     public TimeoutRule(@Value("${repair.timeout.accept-minutes:1440}") long acceptMinutes,
                        @Value("${repair.timeout.process-minutes:2880}") long processMinutes,
-                       @Value("${repair.timeout.eval-minutes:1440}") long evalMinutes) {
+                       @Value("${repair.timeout.eval-minutes:1440}") long evalMinutes,
+                       @Value("${repair.timeout.verify-minutes:1440}") long verifyMinutes) {
         this.acceptMinutes = acceptMinutes;
         this.processMinutes = processMinutes;
         this.evalMinutes = evalMinutes;
+        this.verifyMinutes = verifyMinutes;
+    }
+
+    /** Compatibility constructor for tests and tools that predate the 40-state reminder. */
+    public TimeoutRule(long acceptMinutes, long processMinutes, long evalMinutes) {
+        this(acceptMinutes, processMinutes, evalMinutes, 1440);
     }
 
     public Duration acceptDuration() {
@@ -47,6 +59,14 @@ public class TimeoutRule {
 
     public Duration evalDuration() {
         return Duration.ofMinutes(evalMinutes);
+    }
+
+    public Duration verifyDuration() {
+        return Duration.ofMinutes(verifyMinutes);
+    }
+
+    public String verifyThresholdText() {
+        return humanText(verifyMinutes);
     }
 
     /**

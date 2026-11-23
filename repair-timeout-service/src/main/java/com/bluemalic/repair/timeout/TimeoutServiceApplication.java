@@ -42,7 +42,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <ul>
  *   <li>{@code zset}（默认）：秒级消费 Redis ZSet（ADR-001）。与单体并行也安全（ZREM 去重、
  *       动作幂等），但兜底会双跑一轮；本进程通常只在 mq 模式下启动。</li>
- *   <li>{@code mq}：单体在登记点发 RocketMQ 定时消息，本进程消费到期消息执行三个动作；
+ *   <li>{@code mq}：单体在登记点发 RocketMQ 定时消息，本进程消费到期消息执行四个动作；
  *       ZSet 秒级消费关闭，兜底扫库按 ADR-024 留在单体（本进程设 backstop-enabled=false）。</li>
  * </ul>
  *

@@ -13,7 +13,7 @@ import java.util.Locale;
  *   <li>{@code repair.timeout.delivery=zset}（默认）：单体每秒轮询 Redis ZSet（ADR-001），
  *       生产当前口径，行为不变；</li>
  *   <li>{@code repair.timeout.delivery=mq}：登记点直接发 RocketMQ 定时消息
- *       （{@code setDeliverTimeMs}），由 timeout-service 消费到期消息执行三个动作；
+ *       （{@code setDeliverTimeMs}），由 timeout-service 消费到期消息执行四个动作；
  *       ZSet 秒级消费关闭，兜底扫库仍留在单体（ADR-001 防线）。</li>
  * </ul>
  *

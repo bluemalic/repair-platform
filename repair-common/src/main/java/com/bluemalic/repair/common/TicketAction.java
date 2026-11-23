@@ -25,7 +25,8 @@ public enum TicketAction {
     REJECT("驳回"),
     AUTO_CLOSE("超时自动关闭"),
     ACCEPT_TIMEOUT("接单超时提醒"),
-    PROCESS_TIMEOUT("处理超时升级");
+    PROCESS_TIMEOUT("处理超时升级"),
+    VERIFY_TIMEOUT("待验收超时提醒");
 
     private final String desc;
 

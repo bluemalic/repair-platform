@@ -81,6 +81,16 @@ public class TimeoutRegistrarImpl implements TimeoutRegistrar {
     }
 
     @Override
+    public void registerVerify(long ticketId, long tenantId) {
+        registerVerifyDeadline(ticketId, tenantId, Instant.now().plus(timeoutRule.verifyDuration()));
+    }
+
+    @Override
+    public void registerVerifyDeadline(long ticketId, long tenantId, Instant deadline) {
+        add(TimeoutKeys.NODE_VERIFY, tenantId, ticketId, deadline);
+    }
+
+    @Override
     public void cancel(long ticketId, long tenantId) {
         if (timeoutProperties.isMqDelivery()) {
             // RocketMQ 定时消息无法撤回：到期消息执行前会按状态 CAS + ticket_log 判重跳过，
@@ -88,7 +98,8 @@ public class TimeoutRegistrarImpl implements TimeoutRegistrar {
             log.debug("MQ 模式下超时为逻辑取消 ticketId={} tenantId={}", ticketId, tenantId);
             return;
         }
-        for (String node : List.of(TimeoutKeys.NODE_ACCEPT, TimeoutKeys.NODE_PROCESS, TimeoutKeys.NODE_EVAL)) {
+        for (String node : List.of(TimeoutKeys.NODE_ACCEPT, TimeoutKeys.NODE_PROCESS,
+                TimeoutKeys.NODE_EVAL, TimeoutKeys.NODE_VERIFY)) {
             String key = TimeoutKeys.key(node);
             stringRedisTemplate.opsForZSet().remove(key, TimeoutKeys.member(tenantId, ticketId));
             // 过渡期老格式（成员只有工单 ID）也清一下：它们消费时会被状态判定跳过，

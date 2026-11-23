@@ -75,10 +75,13 @@ class TimeoutRegistrarImplTest {
 
         // 成员必须是「租户|工单」：扫描侧按这个格式解析，格式错了就是永远不触发
         verify(zSet).add(eq("ticket:timeout:ACCEPT"), eq("3|7"), anyDouble());
+
+        service.registerVerify(7L, 3L);
+        verify(zSet).add(eq("ticket:timeout:VERIFY"), eq("3|7"), anyDouble());
     }
 
     @Test
-    void cancelInZsetModeClearsAllThreeNodes() {
+    void cancelInZsetModeClearsAllTimeoutNodes() {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         @SuppressWarnings("unchecked")
         ZSetOperations<String, String> zSet = mock(ZSetOperations.class);
@@ -92,6 +95,7 @@ class TimeoutRegistrarImplTest {
         verify(zSet).remove("ticket:timeout:ACCEPT", "3|7");
         verify(zSet).remove("ticket:timeout:PROCESS", "3|7");
         verify(zSet).remove("ticket:timeout:EVAL", "3|7");
+        verify(zSet).remove("ticket:timeout:VERIFY", "3|7");
     }
 
     private TimeoutRegistrarImpl newService(StringRedisTemplate redis,

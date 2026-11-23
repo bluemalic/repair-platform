@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 超时的**兜底扫描**（阶段 4 · ADR-029）。
  *
- * <p>它回答两个问题：扫哪些库（分片）、扫到之后做什么（三个动作）。
+ * <p>它回答两个问题：扫哪些库（分片）、扫到之后做什么（四个动作）。
  * 秒级/定时消息的消费路径不在这里——那条路只处理"Redis ZSet 或 RocketMQ 还记着"的任务；
  * 这里是**最后一道防线**：Redis 重启丢了任务、消息投递失败、或者进程在登记前就挂了，
  * 靠扫库把"该提醒/该关闭却还停在那一步"的工单捞回来。
@@ -21,7 +21,7 @@ import java.util.List;
  * {@code tenantId % shardTotal == shardIndex} 的库（平台库按 tenantId=0 参与）。
  * 单实例用 {@code scan(0, 1)}——传 (0, n) 会让每所学校每分钟只被扫 n 分之一，等于降级。
  *
- * <p><b>幂等</b>：三个动作内部都按"状态 + ticket_log 是否已记过"判定，重复扫到只会空转，
+ * <p><b>幂等</b>：四个动作内部都按"状态 + ticket_log 是否已记过"判定，重复扫到只会空转，
  * 不会重复提醒/重复关闭（见 {@link TicketTimeoutHandler}）。
  */
 @Slf4j
@@ -34,7 +34,7 @@ public class TimeoutScanService {
     private final TicketTimeoutHandler timeoutHandler;
 
     /**
-     * 按分片扫一轮（三个节点都扫）。
+     * 按分片扫一轮（四个节点都扫）。
      *
      * @param shardIndex 本执行器负责的分片序号（0 基）
      * @param shardTotal 分片总数（单实例传 1）
@@ -42,6 +42,7 @@ public class TimeoutScanService {
      */
     public int scan(int shardIndex, int shardTotal) {
         int handled = closeDue(timeoutScanner.backstopScanEval(shardIndex, shardTotal));
+        handled += remindVerifyDue(timeoutScanner.backstopScanVerify(shardIndex, shardTotal));
         handled += remindDue(timeoutScanner.backstopScanAccept(shardIndex, shardTotal));
         handled += escalateDue(timeoutScanner.backstopScanProcess(shardIndex, shardTotal));
         if (handled > 0) {
@@ -65,6 +66,20 @@ public class TimeoutScanService {
             } catch (Exception e) {
                 // 单工单失败不影响本轮其余任务
                 log.warn("超时自动关闭失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
+            }
+        }
+        return handled;
+    }
+
+    /** 待验收超时 -> 提醒学生与后勤，不改变工单状态。 */
+    public int remindVerifyDue(List<DueTicket> due) {
+        int handled = 0;
+        for (DueTicket task : due) {
+            try {
+                timeoutHandler.remindVerifyTimeout(task);
+                handled++;
+            } catch (Exception e) {
+                log.warn("待验收提醒失败 tenantId={} ticketId={}", task.tenantId(), task.ticketId(), e);
             }
         }
         return handled;

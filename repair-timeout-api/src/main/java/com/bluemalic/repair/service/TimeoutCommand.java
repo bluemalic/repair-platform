@@ -3,7 +3,7 @@ package com.bluemalic.repair.service;
 /**
  * 超时任务的 MQ 载荷（阶段 2 · ADR-024）。
  *
- * <p>三个节点与 {@code TimeoutScheduler} 的动作一一对应：
+ * <p>四个节点与 {@code TimeoutScheduler} 的动作一一对应：
  * {@link #NODE_ACCEPT} → 未接单提醒、{@link #NODE_PROCESS} → 处理超时升级、
  * {@link #NODE_EVAL} → 验收超时自动关闭。
  *
@@ -16,4 +16,6 @@ public record TimeoutCommand(long tenantId, long ticketId, String node) {
     public static final String NODE_ACCEPT = "ACCEPT";
     public static final String NODE_PROCESS = "PROCESS";
     public static final String NODE_EVAL = "EVAL";
+
+    public static final String NODE_VERIFY = "VERIFY";
 }
