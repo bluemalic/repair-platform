@@ -1,6 +1,7 @@
 package com.bluemalic.repair.config;
 
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
  *   <li>{@code REPAIR_RATE_LIMIT_WINDOW_SECONDS}：窗口长度，秒（默认 60）</li>
  *   <li>{@code REPAIR_UPLOAD_RATE_LIMIT_MAX_REQUESTS}：每账号每窗口的上传次数（默认 10）</li>
  *   <li>{@code REPAIR_UPLOAD_GLOBAL_MAX_REQUESTS}：每租户每窗口的上传次数（默认 120，lite 默认 30）</li>
+ *   <li>{@code REPAIR_AI_DAILY_MAX_REQUESTS}：所有账号共享的 AI UTC 日请求上限（默认 100）</li>
  * </ul>
  *
  * <p>默认值按"真实用户碰不到、枚举者撞得到"来定：扫一次码查一次位置，正常使用一分钟内不会有
@@ -44,15 +46,19 @@ public class RateLimitRule {
 
     private final int aiGlobalMaxRequests;
 
+    private final int aiDailyMaxRequests;
+
     private final int uploadMaxRequests;
 
     private final int uploadGlobalMaxRequests;
 
+    @Autowired
     public RateLimitRule(@Value("${repair.rate-limit.max-requests:60}") int maxRequests,
                          @Value("${repair.rate-limit.login-max-requests:10}") int loginMaxRequests,
                          @Value("${repair.rate-limit.window-seconds:60}") int windowSeconds,
                          @Value("${repair.ai.rate-limit-max-requests:10}") int aiMaxRequests,
                          @Value("${repair.ai.global-rate-limit-max-requests:30}") int aiGlobalMaxRequests,
+                         @Value("${repair.ai.daily-max-requests:100}") int aiDailyMaxRequests,
                          @Value("${repair.upload.rate-limit-max-requests:10}") int uploadMaxRequests,
                          @Value("${repair.upload.global-rate-limit-max-requests:120}") int uploadGlobalMaxRequests) {
         this.maxRequests = maxRequests;
@@ -60,8 +66,17 @@ public class RateLimitRule {
         this.windowSeconds = windowSeconds;
         this.aiMaxRequests = aiMaxRequests;
         this.aiGlobalMaxRequests = Math.max(1, aiGlobalMaxRequests);
+        this.aiDailyMaxRequests = Math.max(1, aiDailyMaxRequests);
         this.uploadMaxRequests = Math.max(1, uploadMaxRequests);
         this.uploadGlobalMaxRequests = Math.max(1, uploadGlobalMaxRequests);
+    }
+
+    /** Compatibility constructor for callers that use the pre-daily-quota argument list. */
+    public RateLimitRule(int maxRequests, int loginMaxRequests, int windowSeconds,
+                         int aiMaxRequests, int aiGlobalMaxRequests,
+                         int uploadMaxRequests, int uploadGlobalMaxRequests) {
+        this(maxRequests, loginMaxRequests, windowSeconds, aiMaxRequests, aiGlobalMaxRequests,
+                100, uploadMaxRequests, uploadGlobalMaxRequests);
     }
 
     /**

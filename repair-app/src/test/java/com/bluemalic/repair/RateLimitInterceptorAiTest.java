@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,7 +36,7 @@ class RateLimitInterceptorAiTest {
     @Test
     void enforcesSharedAiRequestWindowAcrossAccounts() throws Exception {
         RateLimiter rateLimiter = mock(RateLimiter.class);
-        when(rateLimiter.increment(anyString(), anyInt())).thenReturn(1L, 1L, 1L, 2L);
+        when(rateLimiter.increment(anyString(), anyInt())).thenReturn(1L, 1L, 1L, 1L, 2L);
         RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter,
                 new RateLimitRule(60, 10, 60, 10, 1, 10, 30));
 
@@ -50,8 +51,10 @@ class RateLimitInterceptorAiTest {
 
         verify(rateLimiter).increment("rate:user-a:tier:ai", 60);
         verify(rateLimiter).increment("rate:user-b:tier:ai", 60);
-        org.mockito.Mockito.verify(rateLimiter, org.mockito.Mockito.times(2))
+        verify(rateLimiter, times(2))
                 .increment("rate:global:tier:ai", 60);
+        verify(rateLimiter, times(1)).increment(
+                org.mockito.ArgumentMatchers.startsWith("rate:global:tier:ai:day:"), anyInt());
     }
 
     @Test
@@ -67,6 +70,24 @@ class RateLimitInterceptorAiTest {
                     .isInstanceOf(BizException.class)
                     .extracting(e -> ((BizException) e).getErrorCode())
                     .isEqualTo(ErrorCode.AI_MODEL_UNAVAILABLE);
+        }
+    }
+
+    @Test
+    void rejectsWhenSharedDailyAiQuotaIsExhausted() throws Exception {
+        RateLimiter rateLimiter = mock(RateLimiter.class);
+        when(rateLimiter.increment(anyString(), anyInt()))
+                .thenReturn(1L, 1L, 1L, 1L, 1L, 2L);
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(rateLimiter,
+                new RateLimitRule(60, 10, 60, 10, 30, 1, 10, 30));
+
+        try (MockedStatic<StpUtil> stp = mockStatic(StpUtil.class)) {
+            stp.when(StpUtil::getLoginIdDefaultNull).thenReturn("user-a", "user-b");
+            assertThat(interceptor.preHandle(request, response, aiHandler)).isTrue();
+            assertThatThrownBy(() -> interceptor.preHandle(request, response, aiHandler))
+                    .isInstanceOf(BizException.class)
+                    .extracting(e -> ((BizException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.TOO_MANY_REQUESTS);
         }
     }
 
