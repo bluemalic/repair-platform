@@ -97,7 +97,7 @@ class TimeoutReminderConcurrencyTest {
     private long createAdmin() {
         SysUser admin = new SysUser();
         admin.setTenantId(TENANT_ID);
-        admin.setUsername("test-timeout-concurrent-" + System.nanoTime());
+        admin.setUsername("test-tmo-" + System.nanoTime());
         admin.setPassword("$2a$10$7EqJtq98hPqEX7fNZaFWoOe5fLqM0Vf3k8Yq7fY4H8H2y2a3G8H5K");
         admin.setRealName("并发提醒管理员");
         admin.setUserType(3);
