@@ -6,8 +6,11 @@ import com.bluemalic.repair.entity.SysUser;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.mapper.SysUserMapper;
 import com.bluemalic.repair.mapper.TicketMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * 工单域最基础的读取：按 ID 取工单 / 取用户，并把“不存在”统一成业务错误。
@@ -29,6 +32,21 @@ public class TicketLookup {
             throw new BizException(ErrorCode.TICKET_NOT_FOUND);
         }
         return ticket;
+    }
+
+    /**
+     * Read a ticket while holding its row lock for the current transaction.
+     * Timeout reminders use this before checking and writing their idempotency log;
+     * otherwise two scheduler instances can both pass the check and send twice.
+     */
+    Ticket requireTicketForUpdate(long id) {
+        List<Ticket> tickets = ticketMapper.selectList(Wrappers.<Ticket>lambdaQuery()
+                .eq(Ticket::getId, id)
+                .last("FOR UPDATE"));
+        if (tickets.isEmpty()) {
+            throw new BizException(ErrorCode.TICKET_NOT_FOUND);
+        }
+        return tickets.get(0);
     }
 
     SysUser requireUser(long id) {
