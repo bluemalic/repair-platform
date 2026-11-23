@@ -22,4 +22,5 @@ public interface TicketEvaluationMapper extends BaseMapper<TicketEvaluation> {
      */
     List<String> selectOverdueOpenTicketMembers(@Param("cutoff") LocalDateTime cutoff,
                                                 @Param("limit") int limit);
+
 }
