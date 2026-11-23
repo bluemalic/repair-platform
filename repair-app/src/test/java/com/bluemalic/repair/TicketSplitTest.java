@@ -101,7 +101,8 @@ class TicketSplitTest {
     void splitCreatesPendingTicketInheritingLocationStudentAndImages() throws Exception {
         String admin = givenToken("test-sp-admin", 3, ROLE_ADMIN, null);
         String student = givenToken("test-sp-student", 1, ROLE_STUDENT, null);
-        String sourceId = submittedTicket(student, List.of("http://example.test/on-site.jpg"));
+        String imageKey = "1/2026-01-01/" + "a".repeat(32) + ".jpg";
+        String sourceId = submittedTicket(student, List.of(imageKey));
         Ticket source = ticketOf(sourceId);
 
         MvcResult result = postJson(admin, "/api/admin/tickets/" + sourceId + "/split", Map.of(
@@ -120,7 +121,7 @@ class TicketSplitTest {
         assertThat(split.getStudentId()).isEqualTo(source.getStudentId());
         assertThat(split.getBuildingId()).isEqualTo(source.getBuildingId());
         assertThat(split.getRoom()).isEqualTo(source.getRoom());
-        assertThat(split.getImages()).containsExactly("http://example.test/on-site.jpg");
+        assertThat(split.getImages()).containsExactly(imageKey);
         assertThat(split.getDescription()).isEqualTo("还有一个水龙头在漏水");
         assertThat(split.getCategoryId()).isEqualTo(2L);
         assertThat(split.getUrgency()).isEqualTo(3);

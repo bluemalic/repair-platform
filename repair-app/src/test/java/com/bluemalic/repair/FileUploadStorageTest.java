@@ -33,9 +33,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 
 /**
  * 真实上传（需要 MinIO 在跑：`docker compose up -d minio`；CI 里是 service 容器）。
@@ -113,7 +115,9 @@ class FileUploadStorageTest {
         // 对象键按"租户/日期/uuid.扩展名"分目录（docs/03 §7.3）
         assertThat(objectKey).startsWith("1/" + LocalDate.now() + "/").endsWith(".png");
         assertThat(objectKey).doesNotContain("photo"); // 不使用任何用户提供的文件名
-        assertThat(url).startsWith("/api/files/image?")
+        URI signedUri = URI.create(url);
+        assertThat(signedUri.getPath()).as("上传返回应用签名图片地址").isEqualTo("/api/files/image");
+        assertThat(signedUri.getRawQuery())
                 .contains("tenantId=1")
                 .contains("signature=");
 
@@ -125,7 +129,10 @@ class FileUploadStorageTest {
                 .isInstanceOf(HttpClientErrorException.Forbidden.class);
 
         // 应用签名地址不要求再带登录 token，但只能在有效期内读取该对象。
-        mockMvc.perform(get(URI.create(url)))
+        MvcResult imageResult = mockMvc.perform(get(signedUri))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(imageResult))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith("image/png"))
                 .andExpect(content().bytes(PNG_BYTES));
@@ -144,6 +151,17 @@ class FileUploadStorageTest {
         String foreignTenantQuery = URI.create(url).getRawQuery().replaceFirst("tenantId=1", "tenantId=2");
         mockMvc.perform(get(URI.create("/api/files/image?" + foreignTenantQuery)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(10006));
+
+        String changedKeyQuery = signedUri.getRawQuery().replace(".png", ".jpg");
+        mockMvc.perform(get(URI.create("/api/files/image?" + changedKeyQuery)))
+                .andExpect(jsonPath("$.code").value(10006));
+
+        // 签发接口不能把别家对象键换成当前租户的链接。
+        mockMvc.perform(post("/api/files/image-url")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reference", objectKey.replaceFirst("^1/", "2/")))))
                 .andExpect(jsonPath("$.code").value(10006));
 
         // 对象没有关联到当前可见工单前，不能签发访问地址。

@@ -40,6 +40,8 @@ public class SaTokenConfigure implements WebMvcConfigurer {
                         // （SSO 的可用性查询、发起授权、IdP 回调；换 token 那一步也是一次登录）
                         .notMatch("/api/auth/login")
                         .notMatch("/api/auth/sso/**")
+                        // 图片端点由 HMAC + 租户 + 对象键 + 过期时间授权，不依赖浏览器登录态。
+                        .notMatch("/api/files/image")
                         // 演示用的 Mock IdP（ADR-022）：默认关闭，关闭时这些端点全部 404。
                         // 它不参与登录态（浏览器从学校 IdP 跳回来时还没有 token）
                         .notMatch("/api/mock-idp/**")

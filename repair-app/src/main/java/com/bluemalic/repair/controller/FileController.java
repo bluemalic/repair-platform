@@ -4,7 +4,6 @@ import com.bluemalic.repair.common.Result;
 import com.bluemalic.repair.interceptor.RateLimit;
 import com.bluemalic.repair.service.FileStorageService;
 import com.bluemalic.repair.service.CurrentTenantService;
-import com.bluemalic.repair.service.impl.FileStorageServiceImpl;
 import com.bluemalic.repair.mapper.TicketMapper;
 import com.bluemalic.repair.entity.Ticket;
 import com.bluemalic.repair.vo.FileUploadVO;
@@ -44,7 +43,6 @@ import jakarta.validation.Valid;
 public class FileController {
 
     private final FileStorageService fileStorageService;
-    private final FileStorageServiceImpl privateImageStorage;
     private final CurrentTenantService currentTenantService;
     private final TicketMapper ticketMapper;
 
@@ -69,11 +67,11 @@ public class FileController {
     @PostMapping("/image-url")
     public Result<ImageUrlVO> imageUrl(@Valid @RequestBody ImageUrlRequest body) {
         long tenantId = currentTenantService.requireTenantId();
-        String objectKey = privateImageStorage.objectKeyForReference(body.reference(), tenantId);
+        String objectKey = fileStorageService.objectKeyForReference(body.reference(), tenantId);
         if (objectKey == null || !isLinkedToVisibleTicket(objectKey)) {
             throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, "图片不存在或无权访问");
         }
-        String relative = privateImageStorage.signedUrl(objectKey, tenantId);
+        String relative = fileStorageService.signedUrl(objectKey, tenantId);
         String url = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString() + relative;
         return Result.ok(new ImageUrlVO(url));
     }
@@ -85,13 +83,13 @@ public class FileController {
             @RequestParam String key,
             @RequestParam long expires,
             @RequestParam String signature) {
-        String objectKey = privateImageStorage.objectKeyForReference(key, tenantId);
-        if (objectKey == null || !privateImageStorage.verifySignedUrl(objectKey, tenantId, expires, signature)) {
+        String objectKey = fileStorageService.objectKeyForReference(key, tenantId);
+        if (objectKey == null || !fileStorageService.verifySignedUrl(objectKey, tenantId, expires, signature)) {
             throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, "图片链接无效或已过期");
         }
-        FileStorageServiceImpl.StoredImage stored;
+        FileStorageService.StoredImage stored;
         try {
-            stored = privateImageStorage.openImage(objectKey);
+            stored = fileStorageService.openImage(objectKey);
         } catch (S3Exception e) {
             if (e.statusCode() == 404) {
                 throw new BizException(ErrorCode.RESOURCE_NOT_FOUND, "图片不存在或已失效");
