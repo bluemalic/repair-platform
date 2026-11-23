@@ -219,14 +219,19 @@ public class TicketFlowServiceImpl implements TicketFlowService {
         try {
             ticketEvaluationMapper.insert(evaluation);
         } catch (DuplicateKeyException e) {
-            // uk_ticket 唯一索引兜底：并发下的重复评价到这里变成明确的业务错误
+            // 唯一索引兜底：并发下重复评价返回明确业务错误。
             throw new BizException(ErrorCode.TICKET_ALREADY_EVALUATED);
         }
-
-        transitions.conditionalUpdate(id, TicketStatus.FINISHED.getCode(), TicketAction.EVALUATE, studentId,
-                ticket.getTenantId(), ticket.getStatus(),
-                wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
-                entity -> { });
+        try {
+            transitions.conditionalUpdate(id, TicketStatus.FINISHED.getCode(), TicketAction.EVALUATE, studentId,
+                    ticket.getTenantId(), ticket.getStatus(),
+                    wrapper -> wrapper.eq(Ticket::getStatus, ticket.getStatus()),
+                    entity -> { });
+        } catch (BizException e) {
+            // 条件更新被并发流转抢先时，撤销本次刚写入的评价，避免孤儿行。
+            ticketEvaluationMapper.deleteById(evaluation.getId());
+            throw e;
+        }
         noticePublisher.notifyTransition(ticket, TicketAction.EVALUATE, null, "已被评价 " + dto.getScore() + " 分");
         timeoutRegistrar.cancel(ticket.getId(), ticket.getTenantId());
         // 进入 50 已完成：登记验收超时（默认 24h，到期仍未人工关闭则自动流转 60）
